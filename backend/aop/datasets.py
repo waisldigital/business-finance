@@ -101,7 +101,10 @@ SPECS: Dict[str, DatasetSpec] = {s.key: s for s in [
                 versions=["B26", "F26", "B27", "B27A", "B27T", "B28"]),
     # ---------- Capex ----------
     DatasetSpec("capex_lines", "Capex lines", "aop_capex", "Capex", auto_prefix="CPX",
-                description="Budgeted capex by department, location and sub-system (quarterly phasing)."),
+                description="Budgeted capex by department, location and sub-system (quarterly phasing) and next year's ask."),
+    DatasetSpec("capex_history", "Capex history by location", "aop_capex", "Capex",
+                key_fields=["location"],
+                description="Initial budget, capex to date, prior-year budget and actuals per location (Capex_Summary)."),
     # ---------- Inputs ----------
     DatasetSpec("assumptions", "Assumptions", "aop_inputs", "Inputs",
                 key_fields=["fy", "name"],

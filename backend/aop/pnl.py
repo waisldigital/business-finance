@@ -102,7 +102,11 @@ def ssum(items: Iterable[Series]) -> Series:
 
 class PnLEngine:
     def __init__(self, data: Dict[str, List[Dict[str, Any]]], actuals: List[Dict[str, Any]],
-                 base_fy: str, plan_fy: str, cutoffs: Dict[str, str], tax_rate: float = 0.25):
+                 base_fy: str, plan_fy: str, cutoffs: Dict[str, str], tax_rate: float = 0.25,
+                 approved_fy: Optional[str] = None):
+        # approved_fy = the plan year of the imported, approved AOP. Year-specific sources (project
+        # master TP budget, the frozen B<base> snapshot) only apply to that cycle.
+        self.approved_fy = approved_fy or plan_fy
         self.data = data
         self.base_fy, self.plan_fy = base_fy, plan_fy
         self.base_m, self.plan_m = fy_months(base_fy), fy_months(plan_fy)
@@ -146,7 +150,8 @@ class PnLEngine:
     def line_series(self, dataset: str, domain: Optional[str], pred_row: Callable[[Dict[str, Any]], bool],
                     pred_act: Optional[Callable[[Dict[str, Any]], bool]] = None, plan_ver: Optional[str] = None,
                     plan_fn: Optional[Callable[[Dict[str, Any], str], float]] = None,
-                    b_base_fn: Optional[Callable[[Dict[str, Any]], float]] = None) -> Series:
+                    b_base_fn: Optional[Callable[[Dict[str, Any]], float]] = None,
+                    fcst_fn: Optional[Callable[[Dict[str, Any], str], float]] = None) -> Series:
         rows = [r for r in self.data.get(dataset, []) if pred_row(r)]
         s = Series()
         cut = self.cutoff(domain or dataset)
@@ -156,8 +161,10 @@ class PnLEngine:
                 if a["period"] <= cut and pa(a.get("dims") or {}):
                     s[a["period"]] = s.get(a["period"], 0.0) + a["amount"]
         for p in self.base_m:
-            if p > cut:
-                s[p] = s.get(p, 0.0) + sum(_n(r.get(vkey(self.F, p))) for r in rows)
+            if p > cut:  # forecast; a line without a forecast for the month falls back to that year's budget
+                s[p] = s.get(p, 0.0) + (sum(fcst_fn(r, p) for r in rows) if fcst_fn else
+                                        sum(_n(r[vkey(self.F, p)]) if vkey(self.F, p) in r else _n(r.get(vkey(self.BB, p)))
+                                            for r in rows))
         ver = plan_ver or self.B
         for p in self.plan_m:
             s[p] = s.get(p, 0.0) + (sum(plan_fn(r, p) for r in rows) if plan_fn else sum(_n(r.get(vkey(ver, p))) for r in rows))
@@ -200,10 +207,22 @@ class PnLEngine:
             if shared is False and t == SHARED:
                 return False
             return f.tag_ok(r.get("tag"))
-        s = self.line_series("payroll_lines", "payroll", ok, plan_ver=ver or self.B,
+        ver = ver or self.B
+        fcst_fn = None
+        if ver.endswith("A"):    # active headcount; plans without the split treat the whole budget as active
+            plan_fn = lambda r, p: _n(r.get(vkey(ver, p), r.get(vkey(self.B, p))))
+            fcst_fn = lambda r, p: _n(r[vkey(self.BB + "A", p)]) if vkey(self.BB + "A", p) in r else \
+                _n(r[vkey(self.F, p)]) if vkey(self.F, p) in r else _n(r.get(vkey(self.BB, p)))
+        elif ver.endswith("T"):  # to be hired: only exists where the year's budget has the split
+            plan_fn = lambda r, p: _n(r.get(vkey(ver, p)))
+            fcst_fn = lambda r, p: _n(r.get(vkey(self.BB + "T", p)))
+        else:
+            plan_fn = None
+        s = self.line_series("payroll_lines", "payroll", ok, plan_ver=ver, plan_fn=plan_fn, fcst_fn=fcst_fn,
                              b_base_fn=lambda r: _n(r.get(vkey(self.BB, "total"))))
-        if zero_base:
-            s = Series({k: (0.0 if (k in self.base_m or k == "b_base") else v) for k, v in s.items()})
+        if zero_base:  # nothing "to be hired" in actual months or the prior-year budget column
+            cut = self.cutoff("payroll")
+            s = Series({k: (0.0 if ((k in self.base_m and k <= cut) or k == "b_base") else v) for k, v in s.items()})
         if shared:
             s = s.scale(self.alloc_factor(f))
         return s
@@ -222,9 +241,17 @@ class PnLEngine:
         if projects_budget:  # the plan uses project master TP cost / 12 instead of PO lines
             pm = [r for r in self.data.get("project_master", [])
                   if norm(r.get("category")) == norm(category) and f.geo_ok(r.get("geo")) and f.tag_ok(r.get("tag"))]
-            annual = sum(_n(r.get("tp_cost_b_plan")) for r in pm)
-            for p in self.plan_m:
-                s[p] = annual / 12
+            fld = "tp_cost_b_plan" if self.plan_fy == self.approved_fy else f"tp_cost_b{self.plan_fy[2:]}"
+            if any(fld in r for r in pm):
+                annual = sum(_n(r.get(fld)) for r in pm)
+                for p in self.plan_m:
+                    s[p] = annual / 12
+            if self.base_fy == self.approved_fy:  # current-year forecast falls back to the approved master budget
+                annual = sum(_n(r.get("tp_cost_b_plan")) for r in pm)
+                cut = self.cutoff("opex")
+                for p in self.base_m:
+                    if p > cut:
+                        s[p] = annual / 12
         if shared:
             s = s.scale(self.alloc_factor(f))
         return s
@@ -235,8 +262,18 @@ class PnLEngine:
         def act_ok(d):
             line = self.oh_by_head.get(d.get("aop_head"))
             return bool(line) and ok(line)
-        return self.line_series("overhead_lines", "overhead", ok, pred_act=act_ok,
-                                b_base_fn=lambda r: _n(r.get("b_fy" + self.base_fy[2:])))
+        s = self.line_series("overhead_lines", "overhead", ok, pred_act=act_ok,
+                             b_base_fn=lambda r: _n(r.get("b_fy" + self.base_fy[2:])))
+        # next-year overheads are planned on Cost centre + GL (overhead_plan); add them to the plan months
+        plan_rows = [r for r in self.data.get("overhead_plan", [])
+                     if (dept is None or norm(r.get("department")) == norm(dept)) and f.geo_ok(r.get("geo") or "India")]
+        for p in self.plan_m:
+            add = 0.0
+            for r in plan_rows:
+                add += _n(r[vkey(self.B, p)]) if vkey(self.B, p) in r else _n(r.get("annual_" + self.B.lower())) / 12
+            if add:
+                s[p] = s.get(p, 0.0) + add
+        return s
 
     def pl_other(self, line: str) -> Series:
         s = self.line_series("pl_other", "pl_other", lambda r: r.get("line") == line,
@@ -407,7 +444,7 @@ class PnLEngine:
                 if f.unfiltered and r["id"] in self.overrides:
                     vals["b_plan"] = self.overrides[r["id"]]
                 # B <base> is a frozen historical budget — use the approved snapshot when unfiltered
-                if f.unfiltered and r["snap"] and r["snap"] in self.snapshot:
+                if f.unfiltered and self.plan_fy == self.approved_fy and r["snap"] and r["snap"] in self.snapshot:
                     vals["b_base"] = self.snapshot[r["snap"]]
             row = {k: r[k] for k in ("id", "label", "level", "kind", "sensitive", "pct")} | {"values": vals}
             out.append(row)
@@ -426,7 +463,7 @@ class PnLEngine:
             n = by_id[num_s][0]["values"] if isinstance(num_s, str) else self._values(num_s, f)
             d = by_id[den_s][0]["values"] if isinstance(den_s, str) else self._values(den_s, f)
             vals = {k: (n[k] / d[k] if d.get(k) else 0.0) for k in n if k != "growth"}
-            if f.unfiltered and src["snap"] in self.snapshot:
+            if f.unfiltered and self.plan_fy == self.approved_fy and src["snap"] in self.snapshot:
                 vals["b_base"] = self.snapshot[src["snap"]] / 1e7  # snapshot stores ratios ×1e7 like amounts
             vals["growth"] = None
             row["values"] = vals

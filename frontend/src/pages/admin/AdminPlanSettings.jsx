@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import Header from "@/aop/Header";
-import { SlidersHorizontal, FloppyDisk, CheckCircle, PencilSimpleLine, ShieldCheck } from "@phosphor-icons/react";
+import { SlidersHorizontal, FloppyDisk, CheckCircle, PencilSimpleLine, ShieldCheck, MagicWand } from "@phosphor-icons/react";
+
+const DRIVERS = [
+  ["cute_growth", "CUTE revenue growth (PAX × rate)"], ["noncute_growth", "Non-CUTE revenue growth"],
+  ["cr_growth", "Change Request revenue growth"], ["projects_growth", "Projects revenue & TP cost growth"],
+  ["opex_escalation", "Recurring opex escalation (one-time → 0)"], ["payroll_increment", "Payroll increment"],
+  ["payroll_loading", "Payroll CTC loading"], ["overhead_escalation", "Overhead escalation on CC+GL run-rate"],
+];
 
 const SECTIONS = [
   ["aop_inputs", "AOP inputs"], ["aop_revenue", "Revenue"], ["aop_opex", "Opex & POs"], ["aop_overheads", "Overheads"],
@@ -74,7 +81,60 @@ export default function AdminPlanSettings() {
           </table>
           <div className="text-[10.5px] text-[var(--muted)] mt-2">Which columns users may edit is set per dataset in Data manager → Columns. Section access comes from Roles.</div>
         </div>
+        <DraftPanel />
       </div>
+    </div>
+  );
+}
+
+
+function DraftPanel() {
+  const [info, setInfo] = useState(null);
+  const [drivers, setDrivers] = useState({});
+  const [overwrite, setOverwrite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.get("/aop/plan/drivers").then((r) => { setInfo(r.data); setDrivers(r.data.drivers); }); }, []);
+  if (!info) return null;
+  const run = async () => {
+    if (overwrite && !window.confirm(`Overwrite existing B ${info.target_fy} values, including user edits?`)) return;
+    setBusy(true); setErr(""); setRes(null);
+    try {
+      const payload = { overwrite, drivers: Object.fromEntries(Object.entries(drivers).map(([k, v]) => [k, Number(v)])) };
+      const { data } = await api.post("/aop/plan/generate", payload);
+      setRes(data);
+    } catch (e) { setErr(e.response?.data?.detail || e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="border border-[var(--border)] bg-[var(--surface)] p-3 lg:col-span-2" data-testid="draft-panel">
+      <div className="flex items-center gap-2 mb-2">
+        <MagicWand size={16} className="text-[var(--gold)]" />
+        <div className="font-semibold text-sm flex-1">Next-year draft · B {info.target_fy} from {info.source_fy} actual / forecast</div>
+        <label className="flex items-center gap-1.5 text-[11px]">
+          <input type="checkbox" className="accent-[var(--danger)]" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
+          Overwrite existing values
+        </label>
+        <button className="icon-btn primary" onClick={run} disabled={busy} data-testid="draft-generate"><MagicWand size={14} />{busy ? "Generating…" : "Generate"}</button>
+      </div>
+      <div className="grid md:grid-cols-4 gap-2">
+        {DRIVERS.map(([k, label]) => (
+          <label key={k} className="block">
+            <span className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">{label}</span>
+            <div className="flex items-center gap-1">
+              <input className="input-sm w-full" type="number" step="0.005" value={drivers[k] ?? ""} onChange={(e) => setDrivers({ ...drivers, [k]: e.target.value })} />
+              <span className="text-[10.5px] text-[var(--muted)] w-12 text-right tabular-nums">{((Number(drivers[k]) || 0) * 100).toFixed(1)}%</span>
+            </div>
+          </label>
+        ))}
+      </div>
+      <div className="text-[10.5px] text-[var(--muted)] mt-2">
+        Defaults come from Assumptions. Existing B {info.target_fy} values are kept unless “Overwrite” is ticked, so user edits survive a re-run.
+        Overheads are seeded on Cost centre + GL from the ledger run-rate; capex asks are entered per line.
+      </div>
+      {err && <div className="text-xs text-[var(--danger)] mt-1">{String(err)}</div>}
+      {res && <div className="text-xs text-[var(--success)] mt-1 flex items-center gap-1"><CheckCircle size={12} />
+        {Object.entries(res.counts).map(([k, v]) => `${k}: ${v}`).join(" · ")}</div>}
     </div>
   );
 }

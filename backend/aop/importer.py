@@ -703,9 +703,66 @@ def _import_capex(book, res):
             continue
         f = generic_fields(h, r, gen)
         out.append(f)
-    cols = [column("line_id", "Line ID")] + [column(k, lbl, "number" if lbl in ("Qty", "Per Item cost", "Total", "Q1", "Q2", "Q3", "Q4") else "text",
-                                                   editable=lbl not in ("Department",)) for _, k, lbl in gen]
+    for f in out:  # location key used for the capex summary (the sheet's Reporting Tag is often blank)
+        f["tag"] = f.get("reporting_tag") or f.get("location") or _capex_location(f.get("l2"), f.get("department"))
+    cols = [column("line_id", "Line ID"), column("tag", "Location (summary)")] + \
+        [column(k, lbl, "number" if lbl in ("Qty", "Per Item cost", "Total", "Q1", "Q2", "Q3", "Q4") else "text",
+                editable=lbl not in ("Department",)) for _, k, lbl in gen] + \
+        [column("b_next_total", "Next-year ask (INR)", "number", editable=True, group="Next year"),
+         column("b_next_remarks", "Next-year remarks", editable=True, group="Next year")]
     res.add("capex_lines", out, cols)
+    _import_capex_history(book, res)
+
+
+AIRPORTS = {"dial", "ghial", "ggial", "gvial"}
+
+
+def _capex_location(l2, department) -> str:
+    """Location for a budget line without a Reporting Tag, following the Capex_Summary grouping:
+    DIAL programmes (Phase 3A/3B, Tech Refresh) roll up to DIAL, Digital and Corporate to their buckets."""
+    t = str(l2 or "").strip()
+    n = t.lower()
+    if n in AIRPORTS:
+        return t.upper()
+    if n.startswith("phase 3") or n.startswith("tech refresh"):
+        return "DIAL"
+    if "digital" in n or "digital" in str(department or "").lower():
+        return "Digital"
+    if n == "corporate" or str(department or "").lower() == "corporate":
+        return "Ebabling Capex"
+    return "Unmapped"
+
+
+def _import_capex_history(book, res):
+    sheet = book.find("Capex_Summary", required=False)
+    if not sheet:
+        return
+    rows = book.rows(sheet, max_col=9, max_row=40)
+    clean = lambda v: str(v).replace("\u200b", "").strip() if v is not None else None
+    hdr = [clean(c) for c in rows[0]]
+    keys = ["location", "initial_budget", "capex_till_fy24", "fy25_actuals", "actuals_till_fy25", "fy26_budget",
+            "fy26_actuals", "fy27_budget_summary"]
+    tops = AIRPORTS | {"shared services", "digital", "ebabling capex", "enabling capex", "product", "others"}
+    tops |= {str(f.get("tag") or "").lower() for f in res.datasets.get("capex_lines", {}).get("rows", [])} - {"unmapped", "remove"}
+    out, parent = [], None
+    for r in rows[2:]:
+        name = clean(r[0])
+        if not name or name.lower().startswith("grand total"):
+            if name and name.lower().startswith("grand total"):
+                break
+            continue
+        vals = [num(v) * 1e7 for v in r[1:8]]  # sheet is INR Cr.
+        f = dict(zip(keys, [name] + vals))
+        if name.lower() in tops:
+            parent = name
+        elif parent:
+            f["parent"] = parent  # programme under a location (e.g. DIAL → Tech Refresh, Phase 3A)
+        out.append(f)
+    labels = ["Location", "Initial budget", "Capex till FY24", "FY25 actuals", "Actuals till FY25", "FY26 budget",
+              "FY26 actuals", "FY27 budget (summary)"]
+    res.add("capex_history", out, [column(k, l, "text" if k == "location" else "number", editable=k != "location")
+                                   for k, l in zip(keys, labels)] + [column("parent", "Parent")])
+    res.meta["capex_history_header"] = hdr[:8]
 
 
 # ---------------- P&L sheet: below-EBITDA lines and B FY26 snapshot ----------------
@@ -850,6 +907,16 @@ def import_opex_workbook(path_or_file, plan: str = "FY27") -> Result:
                 if f.get(k) is not None:
                     f[k] = to_iso_date(f[k]) or f[k]
             zout.append(f)
+            # capex GRNs are the actual source for capex spend
+            if str(f.get("nature_opex_capex_oh") or "").lower() == "capex" and num(f.get("gr_amount_in_lc")):
+                per = to_period(f.get("grn_posting_date"))
+                if per:
+                    ref = f"{f.get('purchase_order')}|{f.get('purchase_order_item')}|{f.get('migo_no') or ''}|{f.get('migo_line_item_no') or ''}"
+                    res.actual("capex", ref, per, num(f["gr_amount_in_lc"]),
+                               {"tag": f.get("location"), "po": f.get("purchase_order"), "wbs": f.get("wbs_element"),
+                                "vendor": f.get("supplier_name"), "department": f.get("department")},
+                               entry_type="grn", date=f.get("grn_posting_date"),
+                               uid=f"capex|{ref}|{len(res.actuals)}")
         res.add("po_register", zout, [column(k, lbl) for _, k, lbl in zgen])
     res.meta.update(tracker_rows=len(out), plan_fy=plan)
     return res

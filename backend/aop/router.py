@@ -25,6 +25,8 @@ import openpyxl
 from .datasets import ACTUALS, AOP_SECTIONS, SPECS, build_key, coerce, column, norm, slug
 from .importer import Result, import_aop_workbook, import_opex_workbook
 from .periods import shift_fy
+from .periods import fy_months
+from .plan import build_draft, default_drivers
 from .pnl import Filters, PnLEngine
 
 ACTUAL_COLUMNS = [
@@ -104,7 +106,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             return cache["data"], cache["actuals"], cfg
         data: Dict[str, List[Dict[str, Any]]] = {}
         needed = ["rev_cute", "rev_noncute", "rev_projects", "project_master", "opex_lines", "payroll_lines",
-                  "overhead_lines", "assumptions", "pl_other", "pl_snapshot"]
+                  "overhead_lines", "overhead_plan", "assumptions", "pl_other", "pl_snapshot"]
         async for d in db.aop_rows.find({"dataset": {"$in": needed}}, {"_id": 0, "dataset": 1, "fields": 1}):
             data.setdefault(d["dataset"], []).append(d.get("fields") or {})
         actuals = [a async for a in db.aop_actuals.find({}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
@@ -132,7 +134,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     @r.put("/config")
     async def update_config(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
         require_admin(user)
-        allowed = {"base_fy", "plan_fy", "draft_fy", "cutoffs", "tax_rate", "edit_modes"}
+        allowed = {"base_fy", "plan_fy", "draft_fy", "cutoffs", "tax_rate", "edit_modes", "drivers"}
         upd = {k: v for k, v in payload.items() if k in allowed}
         if "edit_modes" in upd:
             upd["edit_modes"] = {k: ("approval" if v == "approval" else "direct") for k, v in upd["edit_modes"].items() if k in AOP_SECTIONS}
@@ -555,7 +557,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             raise HTTPException(400, f"Could not read the Opex workbook: {e}")
         finally:
             os.unlink(path)
-        await write_result(res, user)
+        await write_result(res, user, replace_actual_domains=["capex"])
         await bump_version()
         await db.aop_imports.insert_one({"id": gen_id(), "kind": "opex", "file": file.filename, "at": now_iso(), "by": user.get("email"),
                                          "meta": res.meta, "warnings": res.warnings,
@@ -588,8 +590,19 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         return {"geo": ["All", "India", "International"], "tags": (["All"] if not p["tags"] else []) + tags,
                 "base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"]}
 
+    PNL_BLOCKS = [  # (key, engine, part, label template, kind)
+        ("b_base", 0, "b_base", "B {base}", "budget"),
+        ("a_base", 0, "base", "A {base}", "actual"),
+        ("b_plan", 0, "plan", "B {plan}", "budget"),
+        ("af_plan", 1, "base", "{plan} A/F", "actual"),
+        ("b_draft", 1, "plan", "B {draft}", "budget"),
+    ]
+
     @r.get("/pnl")
     async def pnl(geo: str = "All", tag: str = "All", exclude: Optional[str] = None, user: dict = Depends(get_current_user)):
+        """P&L in column blocks: B base · A base · B plan · plan A/F · B draft, plus variances.
+        Two engine runs: (base → plan) reproduces the approved workbook, (plan → draft) gives the current
+        year's actual/forecast and next year's budget."""
         p = await perms_for(user)
         if not (p["admin"] or p["sections"]["aop_pnl"]["can_view"]):
             raise HTTPException(403, "You don't have access to the P&L")
@@ -599,17 +612,174 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             else:
                 raise HTTPException(403, "Select one of your permitted airports / entities")
         data, actuals, cfg = await load_all()
-        eng = PnLEngine(data, actuals, cfg["base_fy"], cfg["plan_fy"], cfg["cutoffs"], cfg.get("tax_rate", 0.25))
-        out = eng.compute(Filters(geo, tag, [x for x in (exclude or "").split(",") if x]))
+        base, plan = cfg["base_fy"], cfg["plan_fy"]
+        draft = cfg.get("draft_fy") or shift_fy(plan, 1)
+        flt = Filters(geo, tag, [x for x in (exclude or "").split(",") if x])
+        runs = [PnLEngine(data, actuals, base, plan, cfg["cutoffs"], cfg.get("tax_rate", 0.25), approved_fy=plan).compute(flt),
+                PnLEngine(data, actuals, plan, draft, cfg["cutoffs"], cfg.get("tax_rate", 0.25), approved_fy=plan).compute(flt)]
+        names = {"base": base, "plan": plan, "draft": draft}
+        blocks = []
+        for key, eng, part, label, kind in PNL_BLOCKS:
+            cols_src = runs[eng]["columns"]
+            if part == "b_base":
+                cols = [{"key": f"{key}:total", "label": label.format(**names), "kind": "total", "src": (eng, "b_base")}]
+            else:
+                fy = runs[eng]["meta"]["base_fy" if part == "base" else "plan_fy"]
+                cols = [{"key": f"{key}:{c['key']}", "label": c["label"], "kind": c["kind"], "month": True, "src": (eng, c["key"])}
+                        for c in cols_src if c.get("fy") == fy]
+                cols.append({"key": f"{key}:total", "label": label.format(**names), "kind": "total",
+                             "src": (eng, "af_base" if part == "base" else "b_plan")})
+            blocks.append({"key": key, "label": label.format(**names), "kind": kind, "columns": cols})
+        blocks.append({"key": "var", "label": "Variance", "kind": "variance", "columns": [
+            {"key": "var:af_vs_b", "label": f"{plan} A/F vs B", "kind": "variance"},
+            {"key": "var:af_vs_b_pct", "label": f"{plan} A/F vs B %", "kind": "pct"},
+            {"key": "var:growth", "label": f"B {draft} vs {plan} A/F %", "kind": "pct"}]})
+        rows = []
+        second = {r["id"]: r for r in runs[1]["rows"]}
+        for r0 in runs[0]["rows"]:
+            r1 = second.get(r0["id"], {"values": {}})
+            v0, v1 = r0["values"] or {}, r1["values"] or {}
+            vals = {}
+            for b in blocks[:-1]:
+                for c in b["columns"]:
+                    eng, k = c["src"]
+                    vals[c["key"]] = (v0 if eng == 0 else v1).get(k)
+            if not r0["pct"]:
+                af, bp, dr = v1.get("af_base") or 0.0, v0.get("b_plan") or 0.0, v1.get("b_plan") or 0.0
+                vals["var:af_vs_b"] = af - bp
+                vals["var:af_vs_b_pct"] = (af - bp) / abs(bp) if bp else None
+                vals["var:growth"] = (dr - af) / abs(af) if af else None
+            rows.append({k: r0[k] for k in ("id", "label", "level", "kind", "sensitive", "pct")} | {"values": vals})
+        for b in blocks:
+            for c in b["columns"]:
+                c.pop("src", None)
         payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
         if not payroll_ok:
-            for row in out["rows"]:
+            for row in rows:
                 if row["sensitive"]:
                     row["values"] = None
                     row["masked"] = True
-        out["meta"]["payroll_visible"] = payroll_ok
-        out["meta"]["filters"] = {"geo": geo, "tag": tag, "exclude": exclude}
-        return out
+        draft_ready = any(k.startswith("B" + draft[2:] + "__") for f in data.get("opex_lines", [])[:50] for k in f)
+        return {"blocks": blocks, "rows": rows,
+                "meta": {"base_fy": base, "plan_fy": plan, "draft_fy": draft, "cutoffs": cfg["cutoffs"],
+                         "payroll_visible": payroll_ok, "draft_ready": draft_ready,
+                         "filters": {"geo": geo, "tag": tag, "exclude": exclude}}}
+
+    # ------------------------------------------------------------------ next-year draft
+    @r.get("/plan/drivers")
+    async def plan_drivers(user: dict = Depends(get_current_user)):
+        data, _, cfg = await load_all()
+        base = default_drivers(data.get("assumptions", []))
+        return {"defaults": base, "drivers": {**base, **(cfg.get("drivers") or {})},
+                "source_fy": cfg["plan_fy"], "target_fy": cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1)}
+
+    @r.post("/plan/generate")
+    async def plan_generate(payload: Dict[str, Any] = Body(default={}), user: dict = Depends(get_current_user)):
+        """Seed the next-year (draft) budget from the current year's A/F and the drivers."""
+        require_admin(user)
+        data, actuals_light, cfg = await load_all()
+        src, tgt = cfg["plan_fy"], cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1)
+        drivers = {**default_drivers(data.get("assumptions", [])), **(cfg.get("drivers") or {}), **(payload.get("drivers") or {})}
+        overwrite = bool(payload.get("overwrite"))
+        dsets = ["rev_cute", "rev_noncute", "rev_projects", "project_master", "opex_lines", "payroll_lines", "pl_other",
+                 "overhead_lines", "overhead_plan"]
+        rows: Dict[str, List] = {}
+        async for d in db.aop_rows.find({"dataset": {"$in": dsets}}, {"_id": 0, "dataset": 1, "key": 1, "fields": 1}).sort("seq", 1):
+            rows.setdefault(d["dataset"], []).append((d["key"], d.get("fields") or {}))
+        ledger = [a async for a in db.aop_actuals.find({"domain": "overhead", "entry_type": "ledger"},
+                                                       {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "entry_type": 1, "expense_head": 1})]
+        draft = build_draft(rows, ledger, src, tgt, drivers, overwrite)
+        T = "B" + tgt[2:]
+        for ds, upd in draft.updates.items():
+            for key, fields in upd.items():
+                await db.aop_rows.update_one({"dataset": ds, "key": key},
+                                             {"$set": {**{f"fields.{k}": v for k, v in fields.items()}, "updated_at": now_iso(),
+                                                       "updated_by": user.get("email")}})
+        for ds, new in draft.new_rows.items():
+            if ds == "overhead_plan" and overwrite:
+                await db.aop_rows.delete_many({"dataset": ds})
+            spec = SPECS[ds]
+            seq = await db.aop_rows.count_documents({"dataset": ds})
+            docs = []
+            for i, f in enumerate(new, start=1):
+                if spec.auto_prefix:
+                    f["line_id"] = f"{spec.auto_prefix}-{tgt}-{i:05d}"
+                docs.append({"dataset": ds, "key": build_key(spec, f), "seq": seq + i, "fields": f,
+                             "updated_at": now_iso(), "updated_by": user.get("email")})
+            if docs:
+                await db.aop_rows.insert_many(docs)
+        # make the new budget columns visible (and user-editable) in every touched dataset
+        for ds in set(draft.updates) | set(draft.new_rows):
+            cols = await columns_for(ds)
+            have = {c["key"] for c in cols}
+            add = [column(f"{T}__{q}", f"{T} {q}", "number", editable=True, group=T) for q in fy_months(tgt) if f"{T}__{q}" not in have]
+            if ds == "project_master" and f"tp_cost_b{tgt[2:]}" not in have:
+                add = [column(f"tp_cost_b{tgt[2:]}", f"TP cost B {tgt}", "number", editable=True, group=T)]
+            if ds == "overhead_plan" and not cols:
+                add = [column("line_id", "Line ID"), column("cost_centre", "Cost centre"), column("gl", "GL"),
+                       column("department", "Department (P&L)", editable=True), column("geo", "Geo", editable=True),
+                       column("aop_head", "AOP head", editable=True), column("description", "Description", editable=True),
+                       column("basis", "Basis"), column(f"annual_{T.lower()}", f"{T} annual", "number", editable=True)] + add
+            if add:
+                await db.aop_dataset_meta.update_one({"dataset": ds}, {"$set": {"columns": cols + add, "updated_at": now_iso()}}, upsert=True)
+        await db.aop_config.update_one({"id": "aop"}, {"$set": {"drivers": drivers, "draft_generated_at": now_iso()}}, upsert=True)
+        await bump_version()
+        await write_audit(db, entity_type="aop_plan", entity_id=tgt, action="generate", user=user,
+                          field_changes={"drivers": drivers, "overwrite": overwrite, "counts": dict(draft.counts)})
+        return {"source_fy": src, "target_fy": tgt, "drivers": drivers, "counts": dict(draft.counts)}
+
+    # ------------------------------------------------------------------ capex summary
+    @r.get("/capex/summary")
+    async def capex_summary(user: dict = Depends(get_current_user)):
+        """Per location: A base · B plan · spend till date (plan FY, capex GRNs) · plan A/F · B draft ask."""
+        p = await perms_for(user)
+        if not (p["admin"] or p["sections"]["aop_capex"]["can_view"]):
+            raise HTTPException(403, "Not allowed")
+        cfg = await get_config()
+        base, plan = cfg["base_fy"], cfg["plan_fy"]
+        draft = cfg.get("draft_fy") or shift_fy(plan, 1)
+        hist = {norm(d["fields"].get("location")): d["fields"] async for d in db.aop_rows.find({"dataset": "capex_history"}, {"_id": 0, "fields": 1})}
+        lines = [d["fields"] async for d in db.aop_rows.find({"dataset": "capex_lines"}, {"_id": 0, "fields": 1})]
+        plan_months = set(fy_months(plan))
+        spend: Dict[str, float] = {}
+        last = None
+        async for a in db.aop_actuals.find({"domain": "capex"}, {"_id": 0, "period": 1, "amount": 1, "dims": 1}):
+            if a["period"] in plan_months:
+                t = norm((a.get("dims") or {}).get("tag")) or "unmapped"
+                spend[t] = spend.get(t, 0.0) + float(a["amount"] or 0)
+                last = max(last or a["period"], a["period"])
+        agg: Dict[str, Dict[str, Any]] = {}
+        for f in lines:
+            t = str(f.get("tag") or "Unmapped")
+            if norm(t) == "remove":
+                continue
+            e = agg.setdefault(norm(t), {"location": t, "b_plan": 0.0, "b_draft": 0.0, "lines": 0})
+            e["b_plan"] += float(f.get("total") or 0)
+            e["b_draft"] += float(f.get("b_next_total") or 0)
+            e["lines"] += 1
+        for k, h in hist.items():
+            if not h.get("parent"):
+                agg.setdefault(k, {"location": h.get("location"), "b_plan": 0.0, "b_draft": 0.0, "lines": 0})
+        for k in spend:
+            agg.setdefault(k, {"location": k.upper() if k in ("dial", "ghial", "ggial", "gvial") else k, "b_plan": 0.0, "b_draft": 0.0, "lines": 0})
+        out = []
+        for k, e in agg.items():
+            h = hist.get(k, {})
+            sp = spend.get(k, 0.0)
+            fc_override = h.get("fy_forecast_override")
+            e.update({
+                "a_base": h.get("fy26_actuals") if base == "FY26" else h.get(f"{base.lower()}_actuals"),
+                "b_base": h.get("fy26_budget") if base == "FY26" else None,
+                "spend_td": sp,
+                "af_plan": float(fc_override) if isinstance(fc_override, (int, float)) else max(sp, e["b_plan"]),
+                "balance": e["b_plan"] - sp,
+                "utilisation": (sp / e["b_plan"]) if e["b_plan"] else None,
+                "children": [c.get("location") for c in hist.values() if norm(c.get("parent")) == k],
+            })
+            out.append(e)
+        out.sort(key=lambda x: -(x["b_plan"] or 0))
+        return {"rows": out, "meta": {"base_fy": base, "plan_fy": plan, "draft_fy": draft, "spend_till": last,
+                                      "af_rule": "spend till date + remaining budget (override per location in Capex history)"}}
 
     # ------------------------------------------------------------------ PO drill-down
     @r.get("/po/{po}")
