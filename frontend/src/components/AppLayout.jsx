@@ -8,7 +8,7 @@ import {
   ChartLineUp, FolderSimple, Database, UploadSimple, GavelIcon,
   ShieldCheck, ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
   Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, IdentificationBadge,
-  Table, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
+  Table, ChartBar, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
 } from "@phosphor-icons/react";
 import NotificationBell from "./NotificationBell";
 
@@ -30,6 +30,7 @@ const USER_NAV = [
     { to: "/app/aop/overheads", label: "Overheads",  icon: Buildings,      testid: "sidebar-aop-overheads", section: "aop_overheads" },
     { to: "/app/aop/payroll",   label: "Payroll",    icon: LockKey,        testid: "sidebar-aop-payroll",   section: "aop_payroll" },
     { to: "/app/aop/capex",     label: "Capex",      icon: HardDrives,     testid: "sidebar-aop-capex",     section: "aop_capex" },
+    { to: "/app/aop/reports",   label: "Reports",    icon: ChartBar,       testid: "sidebar-aop-reports",   section: "aop_reports" },
     { to: "/app/aop/changes",   label: "My changes", icon: ClockCounterClockwise, testid: "sidebar-aop-changes", anyAop: true },
   ]},
 ];
@@ -41,6 +42,7 @@ const ADMIN_NAV = [
     { to: "/admin/aop/imports",   label: "Imports",       icon: FileArrowUp,     testid: "sidebar-admin-imports" },
     { to: "/admin/aop/approvals", label: "AOP approvals", icon: CheckSquareOffset, testid: "sidebar-admin-aop-approvals" },
     { to: "/admin/aop/pnl",       label: "P&L check",     icon: Table,           testid: "sidebar-admin-pnl" },
+    { to: "/admin/aop/reports",   label: "Reports",       icon: ChartBar,        testid: "sidebar-admin-reports" },
     { to: "/admin/aop/settings",  label: "Plan settings", icon: SlidersHorizontal, testid: "sidebar-admin-plan" },
   ]},
   { title: "Administration", items: [

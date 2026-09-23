@@ -23,6 +23,7 @@ import EmployeesPage from "@/pages/EmployeesPage";
 import PnLPage from "@/pages/aop/PnLPage";
 import AopSectionPage from "@/pages/aop/AopSectionPage";
 import MyChangesPage from "@/pages/aop/MyChangesPage";
+import ReportsPage from "@/pages/aop/ReportsPage";
 import AdminHome from "@/pages/admin/AdminHome";
 import AdminDataPage from "@/pages/admin/AdminDataPage";
 import AdminImportsPage from "@/pages/admin/AdminImportsPage";
@@ -39,7 +40,7 @@ const Loading = () => (
 const USER_HOMES = [
   ["/app/dashboard", "dashboard"], ["/app/aop/pnl", "aop_pnl"], ["/app/aop/inputs", "aop_inputs"],
   ["/app/aop/revenue", "aop_revenue"], ["/app/aop/opex", "aop_opex"], ["/app/aop/overheads", "aop_overheads"],
-  ["/app/aop/payroll", "aop_payroll"], ["/app/aop/capex", "aop_capex"], ["/app/pipeline", "pipeline"],
+  ["/app/aop/payroll", "aop_payroll"], ["/app/aop/capex", "aop_capex"], ["/app/aop/reports", "aop_reports"], ["/app/pipeline", "pipeline"],
   ["/app/projects", "projects"], ["/app/change-requests", "change_requests"], ["/app/customers", "customer_profile"],
   ["/app/wbs-budget", "wbs_budget"],
 ];
@@ -130,6 +131,7 @@ function App() {
                   <Route path="/app/aop/overheads" element={U("aop_overheads", <AopSectionPage section="aop_overheads" />)} />
                   <Route path="/app/aop/payroll" element={U("aop_payroll", <AopSectionPage section="aop_payroll" />)} />
                   <Route path="/app/aop/capex" element={U("aop_capex", <AopSectionPage section="aop_capex" />)} />
+                  <Route path="/app/aop/reports" element={U("aop_reports", <ReportsPage />)} />
                   <Route path="/app/aop/changes" element={<UserRoute anyAop><MyChangesPage /></UserRoute>} />
 
                   {/* ---------- admin portal ---------- */}
@@ -138,6 +140,7 @@ function App() {
                   <Route path="/admin/aop/imports" element={A(<AdminImportsPage />)} />
                   <Route path="/admin/aop/approvals" element={A(<AdminAopApprovals />)} />
                   <Route path="/admin/aop/pnl" element={A(<PnLPage admin />)} />
+                  <Route path="/admin/aop/reports" element={A(<ReportsPage />)} />
                   <Route path="/admin/aop/settings" element={A(<AdminPlanSettings />)} />
                   <Route path="/admin/approvals" element={A(<ApprovalsPage />)} />
                   <Route path="/admin/employees" element={A(<EmployeesPage />)} />

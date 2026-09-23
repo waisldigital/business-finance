@@ -170,6 +170,18 @@ class Result:
         self.actuals.append(doc)
 
 
+def alias_column(key: str, *, editable: bool = False):
+    """Column definition for a canonical field, typed from its name (amounts → number, dates → date)."""
+    k = key.lower()
+    if re.search(r"(amount|net_po|budget|grn|pending|value|target|cost|rate|qty|increment_pct)", k):
+        t = "number"
+    elif re.search(r"(_start|_end|_date|^po_date)$", k):
+        t = "date"
+    else:
+        t = "text"
+    return column(key, key.replace("_", " ").title(), t, editable=editable)
+
+
 def plan_columns(versions_periods: Dict[str, List[str]]) -> List[Dict[str, Any]]:
     cols = []
     for ver, periods in versions_periods.items():
@@ -443,7 +455,7 @@ def _import_rev_projects(book, res, base, plan, cutoff, F, B, BB):
             f[vkey(BB, p)] = num(r[i])
         for i, p in plan_m:
             f[vkey(B, p)] = num(r[i])
-    alias_cols = [column(k, k.replace("_", " ").title()) for k in PROJ_ALIASES]
+    alias_cols = [alias_column(k) for k in PROJ_ALIASES]
     res.datasets["rev_projects"]["columns"] = [column("line_id", "Line ID")] + alias_cols + \
         [c for c in cols if c["key"] not in PROJ_ALIASES] + \
         plan_columns({BB: [p for _, p in bud_base], F: [p for _, p in af_base if p > cutoff], B: [p for _, p in plan_m]})
@@ -467,7 +479,7 @@ def _import_project_master(book, res, base, plan):
         f["tp_cost_b_plan"] = num(r[h.idx(f"TP Cost B FY'{plan[2:]}")]) if h.idx(f"TP Cost B FY'{plan[2:]}") is not None else None
         f["revenue_b_base"] = num(r[h.idx(f"Revenue B FY'{base[2:]}")]) if h.idx(f"Revenue B FY'{base[2:]}") is not None else None
         out.append(f)
-    cols = [column(k, k.replace("_", " ").title()) for k in PROJ_ALIASES] + \
+    cols = [alias_column(k) for k in PROJ_ALIASES] + \
         [column("tp_cost_b_plan", f"TP cost B {plan}", "number"), column("revenue_b_base", f"Revenue B {base}", "number")] + \
         [column(k, lbl) for _, k, lbl in gen if k not in PROJ_ALIASES]
     res.add("project_master", out, cols)
@@ -527,7 +539,7 @@ def _import_opex(book, res, base, plan, cutoff, F, B):
             f[vkey(B, p)] = annual / 12
         if final_i is not None:
             f[vkey(B, "final")] = num(r[final_i])
-    alias_cols = [column(k, k.replace("_", " ").title()) for k in OPEX_ALIASES]
+    alias_cols = [alias_column(k) for k in OPEX_ALIASES]
     res.datasets["opex_lines"]["columns"] = [column("line_id", "Line ID")] + alias_cols + \
         [column(vkey(B, "annual"), f"{B} annual", "number"), column(vkey(B, "final"), f"{B} final", "number")] + \
         [c for c in (column(k, lbl) for _, k, lbl in gen) if c["key"] not in OPEX_ALIASES] + \
@@ -632,7 +644,7 @@ def _import_overheads(book, res, base, plan, cutoff, F, B):
         f[vkey(B, "annual")] = annual
         for p in fy_months(plan):
             f[vkey(B, p)] = annual / 12
-    alias_cols = [column(k, k.replace("_", " ").title()) for k in OH_ALIASES]
+    alias_cols = [alias_column(k) for k in OH_ALIASES]
     res.datasets["overhead_lines"]["columns"] = alias_cols + [column(vkey(B, "annual"), f"{B} annual", "number")] + \
         [c for c in (column(k, lbl) for _, k, lbl in gen) if c["key"] not in OH_ALIASES] + \
         plan_columns({F: [p for _, p in base_m if p > oh_cutoff], B: fy_months(plan)})
@@ -881,7 +893,7 @@ def import_opex_workbook(path_or_file, plan: str = "FY27") -> Result:
             if f.get(k) is not None:
                 f[k] = txt(f[k])
         out.append(f)
-    alias_cols = [column(k, k.replace("_", " ").title(), editable=k.startswith("override") or k in ("new_po", "mapped_new_pos", "recurring", "responsibility"))
+    alias_cols = [alias_column(k, editable=k.startswith("override") or k in ("new_po", "mapped_new_pos", "recurring", "responsibility"))
                   for k in TRK_ALIASES]
     cols = [column("line_id", "Line ID")] + alias_cols + \
         [c for c in (column(k, lbl) for _, k, lbl in gen) if c["key"] not in TRK_ALIASES] + \

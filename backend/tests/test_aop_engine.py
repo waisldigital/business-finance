@@ -82,3 +82,18 @@ def test_exclusion_and_geo():
     eng = PnLEngine(_data(), _actuals(), BASE, PLAN, {"default": CUT})
     assert _row(eng.compute(Filters(exclude=["GHIAL"])), "cute")["2025-04"] == 10.0
     assert _row(eng.compute(Filters(geo="International")), "cute")["af_base"] == 0
+
+
+def test_opex_forecast_priority():
+    from aop.opex import forecast_line
+    row = {"po_start": "2026-04-01", "po_end": "2026-09-30", "net_po": 183 * 1000,  # old PO: 1,000/day Apr–Sep
+           "new_po_amount": 90 * 2000, "new_po_start": "2026-08-01", "new_po_end": "2026-10-29",  # new PO: 2,000/day
+           "override_amount": 31 * 5000, "override_start": "2026-10-01", "override_end": "2026-10-31",  # override: 5,000/day
+           "budget_plan": 365 * 100, "recurring": "Recurring"}
+    f = forecast_line(row, "FY27")
+    assert f["F27__2026-04"] == 30 * 1000                  # old PO only
+    assert f["F27__2026-08"] == 31 * 2000                  # new PO wins over old PO
+    assert f["F27__2026-10"] == 31 * 5000                  # override wins over new PO
+    assert f["F27__2026-11"] == 30 * 100                   # recurring gap at budget daily rate
+    row["recurring"] = "One-Time"
+    assert forecast_line(row, "FY27")["F27__2026-11"] == 0

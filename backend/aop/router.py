@@ -26,7 +26,9 @@ from .datasets import ACTUALS, AOP_SECTIONS, SPECS, build_key, coerce, column, n
 from .importer import Result, import_aop_workbook, import_opex_workbook
 from .periods import shift_fy
 from .periods import fy_months
+from .opex import INPUT_FIELDS as TRACKER_INPUTS, forecast_line
 from .plan import build_draft, default_drivers
+from . import reports as rep
 from .pnl import Filters, PnLEngine
 
 ACTUAL_COLUMNS = [
@@ -123,6 +125,48 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     def ensure_ds(dataset: str):
         if dataset != ACTUALS and dataset not in SPECS:
             raise HTTPException(404, f"Unknown dataset {dataset}")
+
+    async def fill_new_po(key: str):
+        """Tracker line mapped to new PO number(s): pull supplier, value, period and GRN status from the PO register."""
+        doc = await db.aop_rows.find_one({"dataset": "opex_tracker", "key": key}, {"_id": 0, "fields": 1})
+        f = (doc or {}).get("fields") or {}
+        import re as _re
+        pos = [x for x in _re.split(r"[,;/\s]+", str(f.get("mapped_new_pos") or f.get("new_po") or "")) if x.isdigit()]
+        if not pos:
+            return
+        items = [d["fields"] async for d in db.aop_rows.find({"dataset": "po_register", "fields.purchase_order": {"$in": pos}},
+                                                             {"_id": 0, "fields": 1})]
+        if not items:
+            return
+        starts = [str(i.get("start_date_for_period_of_performance"))[:10] for i in items if i.get("start_date_for_period_of_performance")]
+        ends = [str(i.get("end_date_for_period_of_performance"))[:10] for i in items if i.get("end_date_for_period_of_performance")]
+        upd = {"new_po_supplier": items[0].get("supplier_name"), "new_po_date": str(items[0].get("created_on") or "")[:10] or None,
+               "new_po_amount": round(sum(float(i.get("final_value") or 0) for i in items), 2),
+               "new_po_grn": round(sum(float(i.get("gr_amount_in_lc") or 0) for i in items), 2),
+               "new_po_pending": round(sum(float(i.get("pending_gr_amount_in_lc") or 0) for i in items), 2),
+               "new_po_start": min(starts) if starts else None, "new_po_end": max(ends) if ends else None}
+        upd = {k: v for k, v in upd.items() if v not in (None, "")}  # never blank out what the register doesn't have
+        await db.aop_rows.update_one({"dataset": "opex_tracker", "key": key}, {"$set": {f"fields.{k}": v for k, v in upd.items()}})
+
+    async def recalc_tracker(keys: Optional[List[str]] = None):
+        """Recompute the forecast months of tracker lines (all lines when keys is None)."""
+        cfg = await get_config()
+        q: Dict[str, Any] = {"dataset": "opex_tracker"}
+        if keys is not None:
+            q["key"] = {"$in": list(keys)}
+        async for d in db.aop_rows.find(q, {"_id": 0, "key": 1, "fields": 1}):
+            fc = forecast_line(d.get("fields") or {}, cfg["plan_fy"])
+            await db.aop_rows.update_one({"dataset": "opex_tracker", "key": d["key"]}, {"$set": {f"fields.{k}": v for k, v in fc.items()}})
+
+    async def after_edit(dataset: str, changed: List[tuple]):
+        if dataset != "opex_tracker" or not changed:
+            return
+        po_keys = {k for k, fld in changed if fld in ("new_po", "mapped_new_pos")}
+        for k in po_keys:
+            await fill_new_po(k)
+        keys = {k for k, fld in changed if fld in TRACKER_INPUTS} | po_keys
+        if keys:
+            await recalc_tracker(list(keys))
 
     # ------------------------------------------------------------------ config & catalogue
     @r.get("/config")
@@ -259,6 +303,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         spec = SPECS.get(dataset)
         mode = "direct" if p["admin"] else cfg["edit_modes"].get(spec.section if spec else "", "approval")
         applied, queued, rejected = 0, 0, []
+        changed: List[tuple] = []
         for e in edits[:5000]:
             key, fld = str(e.get("key") or ""), str(e.get("field") or "")
             col = cols.get(fld)
@@ -291,8 +336,10 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                                              {"$set": {f"fields.{fld}": val, "updated_at": now_iso(), "updated_by": user.get("email")}})
                 await db.aop_history.insert_one({"dataset": dataset, "key": key, "field": fld, "old": old, "new": val,
                                                  "by": user.get("email"), "at": now_iso()})
+                changed.append((key, fld))
                 applied += 1
         if applied:
+            await after_edit(dataset, changed)
             await bump_version()
             await write_audit(db, entity_type="aop_rows", entity_id=dataset, action="edit", user=user,
                               field_changes={"cells": applied})
@@ -415,7 +462,10 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         incoming = read_table(content, file.filename or "upload.csv", cols)
         if dataset == ACTUALS:
             return await upsert_actuals(incoming, mode, user)
-        return await upsert_rows(dataset, incoming, mode, user)
+        res = await upsert_rows(dataset, incoming, mode, user)
+        if dataset == "opex_tracker":
+            await recalc_tracker()
+        return res
 
     async def upsert_actuals(incoming: List[Dict[str, Any]], mode: str, user: dict):
         if mode == "replace":
@@ -781,6 +831,54 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         return {"rows": out, "meta": {"base_fy": base, "plan_fy": plan, "draft_fy": draft, "spend_till": last,
                                       "af_rule": "spend till date + remaining budget (override per location in Capex history)"}}
 
+    # ------------------------------------------------------------------ reports
+    async def reports_guard(user):
+        p = await perms_for(user)
+        if not (p["admin"] or p["sections"]["aop_reports"]["can_view"]):
+            raise HTTPException(403, "You don't have access to AOP reports")
+        return p
+
+    @r.get("/reports/margin")
+    async def report_margin(block: str = Query("af_plan", pattern="^(a_base|b_plan|af_plan|b_draft)$"),
+                            user: dict = Depends(get_current_user)):
+        p = await reports_guard(user)
+        data, actuals, cfg = await load_all()
+        tags = rep.tags_for_margin(data)
+        if p["tags"]:
+            tags = [t for t in tags if norm(t) in {norm(x) for x in p["tags"]}]
+        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        return rep.margin_profile(data, actuals, cfg, block, tags, payroll_ok)
+
+    @r.get("/reports/opex")
+    async def report_opex(group_by: str = Query("aop_code", pattern="^(aop_code|vendor|category|tag|recurring|package_l1)$"),
+                          user: dict = Depends(get_current_user)):
+        await reports_guard(user)
+        cfg = await get_config()
+        tracker = [d["fields"] async for d in db.aop_rows.find({"dataset": "opex_tracker"}, {"_id": 0, "fields": 1})]
+        out = rep.opex_forecast(tracker, cfg["plan_fy"], group_by)
+        out["plan_fy"] = cfg["plan_fy"]
+        return out
+
+    @r.get("/reports/overheads")
+    async def report_overheads(user: dict = Depends(get_current_user)):
+        await reports_guard(user)
+        data, _, cfg = await load_all()
+        actuals = [a async for a in db.aop_actuals.find({"domain": "overhead"}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
+        out = rep.overheads_by_department(data, actuals, cfg)
+        out.update(base_fy=cfg["base_fy"], plan_fy=cfg["plan_fy"], draft_fy=cfg.get("draft_fy"))
+        return out
+
+    @r.get("/reports/wbs")
+    async def report_wbs(user: dict = Depends(get_current_user)):
+        await reports_guard(user)
+        data, _, cfg = await load_all()
+        actuals = [a async for a in db.aop_actuals.find({"domain": {"$in": ["opex", "overhead", "capex"]}},
+                                                         {"_id": 0, "domain": 1, "amount": 1, "dims.wbs": 1})]
+        master = await db.wbs_elements.find({}, {"_id": 0}).to_list(50000)
+        out = rep.wbs_report(data, actuals, cfg, master)
+        out.update(base_fy=cfg["base_fy"], plan_fy=cfg["plan_fy"], draft_fy=cfg.get("draft_fy"))
+        return out
+
     # ------------------------------------------------------------------ PO drill-down
     @r.get("/po/{po}")
     async def po_detail(po: str, user: dict = Depends(get_current_user)):
@@ -824,6 +922,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         approve = bool(payload.get("approve"))
         comment = payload.get("comment") or ""
         done = 0
+        changed: Dict[str, List[tuple]] = {}
         async for c in db.aop_changes.find({"id": {"$in": ids}, "status": "pending"}, {"_id": 0}):
             if approve:
                 await db.aop_rows.update_one({"dataset": c["dataset"], "key": c["key"]},
@@ -831,10 +930,13 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                                                        "updated_by": c.get("requested_by")}})
                 await db.aop_history.insert_one({"dataset": c["dataset"], "key": c["key"], "field": c["field"], "old": c.get("old"),
                                                  "new": c["new"], "by": c.get("requested_by"), "approved_by": user.get("email"), "at": now_iso()})
+                changed.setdefault(c["dataset"], []).append((c["key"], c["field"]))
             await db.aop_changes.update_one({"id": c["id"]}, {"$set": {"status": "approved" if approve else "rejected",
                                                                        "decided_by": user.get("email"), "decided_at": now_iso(),
                                                                        "comment": comment}})
             done += 1
+        for ds, ch in changed.items():
+            await after_edit(ds, ch)
         if approve and done:
             await bump_version()
         await write_audit(db, entity_type="aop_changes", entity_id="batch", action="approve" if approve else "reject", user=user,
