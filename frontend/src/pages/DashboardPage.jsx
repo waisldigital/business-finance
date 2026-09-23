@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
@@ -62,18 +62,21 @@ export default function DashboardPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const fetchData = () => {
+  const customerKey = customerIds.join(",");
+  const projectKey = projectIds.join(",");
+
+  const fetchData = useCallback(() => {
     const params = {};
     if (section) params.section = section;
-    if (customerIds.length) params.customer_ids = customerIds.join(",");
-    if (projectIds.length) params.project_ids = projectIds.join(",");
+    if (customerKey) params.customer_ids = customerKey;
+    if (projectKey) params.project_ids = projectKey;
     if (businessCategory) params.business_category = businessCategory;
     if (dateFrom) params.date_from = dateFrom;
     if (dateTo) params.date_to = dateTo;
     api.get("/dashboard/summary", { params }).then((r) => setData(r.data)).catch(() => {});
-  };
+  }, [section, customerKey, projectKey, businessCategory, dateFrom, dateTo]);
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [section, customerIds.join(","), projectIds.join(","), businessCategory, dateFrom, dateTo]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const filterOptions = data?.filter_options || { customers: [], projects: [] };
 

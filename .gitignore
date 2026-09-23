@@ -137,3 +137,6 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Env templates are safe to commit
+!.env.example

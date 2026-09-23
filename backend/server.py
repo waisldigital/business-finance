@@ -13,6 +13,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Respons
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+import certifi
 import io
 
 from auth import (
@@ -45,9 +46,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("crackerpro")
 
 # ---------- DB ----------
+# MONGO_URL is a MongoDB Atlas connection string (mongodb+srv://...) in hosted
+# environments, or mongodb://localhost:27017 for local development.
 mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
+_mongo_kwargs: Dict[str, Any] = {
+    "appname": "crackerpro-backend",
+    "serverSelectionTimeoutMS": int(os.environ.get("MONGO_TIMEOUT_MS", "10000")),
+}
+if mongo_url.startswith("mongodb+srv://") or "tls=true" in mongo_url.lower():
+    # Atlas requires TLS; use certifi's CA bundle so slim hosting images verify it.
+    _mongo_kwargs["tlsCAFile"] = certifi.where()
+client = AsyncIOMotorClient(mongo_url, **_mongo_kwargs)
+db = client[os.environ.get("DB_NAME", "crackerpro")]
 
 app = FastAPI(title="CRacker Pro API")
 api = APIRouter(prefix="/api")
@@ -2552,7 +2562,7 @@ async def notifications_test(payload: dict = None, user: dict = Depends(require_
 # ============================================================
 # CHANGE REQUESTS (Iter 10 — dedicated entity)
 # ============================================================
-CR_UPLOAD_ROOT = Path(os.environ.get("CR_UPLOAD_ROOT", "/app/backend/uploads/cr"))
+CR_UPLOAD_ROOT = Path(os.environ.get("CR_UPLOAD_ROOT", str(ROOT_DIR / "uploads" / "cr")))
 CR_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
@@ -3050,12 +3060,24 @@ async def mark_all_in_app_notifications_read(user: dict = Depends(get_current_us
     return {"updated": r.modified_count}
 
 
+@api.get("/health")
+async def health():
+    """Liveness + DB connectivity probe (used by Render's health check)."""
+    try:
+        await client.admin.command("ping")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"database unreachable: {type(e).__name__}")
+    return {"status": "ok", "db": db.name}
+
+
 # Register router & CORS
 app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=[o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()],
+    # e.g. https://.*\.vercel\.app to also allow Vercel preview deployments
+    allow_origin_regex=os.environ.get("CORS_ORIGIN_REGEX") or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
