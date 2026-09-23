@@ -175,7 +175,7 @@ export default function ProjectsPage() {
             </thead>
             <tbody>
               {filteredProjects.map((p) => (
-                <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/projects/${p.id}`)} data-testid={`project-row-${p.id}`}>
+                <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/app/projects/${p.id}`)} data-testid={`project-row-${p.id}`}>
                   <td>
                     <div className="font-medium text-[var(--text)]">{p.project_name}</div>
                     <div className="text-[11px] text-[var(--muted)]">{p.business_category} · {p.location}</div>

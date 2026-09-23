@@ -1,25 +1,25 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
+import { useAuth, homeFor } from "@/lib/auth";
 import { AirplaneTilt, Lock, EnvelopeSimple } from "@phosphor-icons/react";
 import AirplaneButton from "@/components/AirplaneButton";
 
 export default function LoginPage() {
   const { login, error, user } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@crackerpro.com");
-  const [password, setPassword] = useState("Admin@123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
-    if (user && user.id) navigate("/dashboard", { replace: true });
+    if (user && user.id) navigate(homeFor(user), { replace: true });
   }, [user, navigate]);
 
   const doLogin = async () => {
     setBusy(true);
     const ok = await login(email, password);
     setBusy(false);
-    if (ok) navigate("/dashboard", { replace: true });
+    if (ok) navigate(homeFor(ok), { replace: true });
   };
 
   const onSubmit = (e) => {

@@ -10,6 +10,14 @@ const SECTIONS = [
   { key: "change_requests",  label: "Change Requests" },
   { key: "customer_profile", label: "Customer Profile" },
   { key: "wbs_budget",       label: "WBS and Budget" },
+  { key: "aop_pnl",          label: "AOP · P&L" },
+  { key: "aop_inputs",       label: "AOP · Inputs" },
+  { key: "aop_revenue",      label: "AOP · Revenue" },
+  { key: "aop_opex",         label: "AOP · Opex & POs" },
+  { key: "aop_overheads",    label: "AOP · Overheads" },
+  { key: "aop_payroll",      label: "AOP · Payroll (confidential)" },
+  { key: "aop_capex",        label: "AOP · Capex" },
+  { key: "aop_reports",      label: "AOP · Reports" },
 ];
 
 const EMPTY_PERMS = SECTIONS.reduce((acc, s) => {
@@ -149,6 +157,7 @@ function RoleModal({ role, onClose, onSaved }) {
   const isEdit = !!role?.id;
   const [name, setName] = useState(role?.name || "");
   const [description, setDescription] = useState(role?.description || "");
+  const [aopTags, setAopTags] = useState((role?.aop_tags || []).join(", "));
   const [perms, setPerms] = useState(() => {
     const base = { ...EMPTY_PERMS };
     if (role?.permissions) {
@@ -179,7 +188,8 @@ function RoleModal({ role, onClose, onSaved }) {
     if (!name.trim()) { setErr("Role name is required"); return; }
     setBusy(true); setErr("");
     try {
-      const payload = { name: name.trim(), description, permissions: perms };
+      const aop_tags = aopTags.split(",").map((t) => t.trim()).filter(Boolean);
+      const payload = { name: name.trim(), description, permissions: perms, aop_tags };
       if (isEdit) {
         await api.put(`/roles/${role.id}`, payload);
       } else {
@@ -212,6 +222,13 @@ function RoleModal({ role, onClose, onSaved }) {
               <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Description</label>
               <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short description" data-testid="role-description" />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">AOP data scope (reporting tags / airports)</label>
+            <input className="input" value={aopTags} onChange={(e) => setAopTags(e.target.value)}
+                   placeholder="Leave empty for all — e.g. DIAL, GHIAL" data-testid="role-aop-tags" />
+            <div className="text-[10px] text-[var(--muted)] mt-1">Limits the P&L and AOP lines this role can see to these airports / entities.</div>
           </div>
 
           <div>

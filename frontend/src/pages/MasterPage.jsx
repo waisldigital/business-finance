@@ -148,7 +148,7 @@ export default function MasterPage({ entityKey }) {
                     key={r.id}
                     data-testid={`${entityKey}-row-${r.id}`}
                     className={isClickable ? "cursor-pointer" : ""}
-                    onClick={() => isClickable && navigate(`/customers/${r.id}`)}
+                    onClick={() => isClickable && navigate(`/app/customers/${r.id}`)}
                   >
                     {meta.columns.map((c) => (
                       <td key={c.key} className={c.type === "currency" ? "num" : ""}>

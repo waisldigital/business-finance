@@ -67,6 +67,15 @@ WORKSPACE_SECTIONS = [
     "change_requests",
     "customer_profile",
     "wbs_budget",
+    # AOP (Annual Operating Plan) sections
+    "aop_pnl",
+    "aop_inputs",
+    "aop_revenue",
+    "aop_opex",
+    "aop_overheads",
+    "aop_payroll",  # confidential — gates resource-cost lines everywhere, P&L included
+    "aop_capex",
+    "aop_reports",
 ]
 
 
@@ -79,6 +88,8 @@ class RoleIn(BaseModel):
     name: str
     description: Optional[str] = ""
     permissions: Dict[str, SectionPermission] = {}
+    # AOP data scope: reporting tags (airports / entities) this role may see. Empty = all.
+    aop_tags: List[str] = []
 
 
 class RoleOut(RoleIn):

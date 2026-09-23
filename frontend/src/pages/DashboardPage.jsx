@@ -189,7 +189,7 @@ export default function DashboardPage() {
             value={formatNumber(totals.total_projects)}
             sub={`Across ${stage_summary.length} stages`}
             icon={Buildings}
-            onClick={() => navigate("/projects")}
+            onClick={() => navigate("/app/projects")}
             testid="kpi-total-projects"
           />
           <KpiTile
@@ -197,7 +197,7 @@ export default function DashboardPage() {
             value={formatCurrency(totals.total_po_value, mode, inrPerUsd)}
             sub={`Revenue ${formatCurrency(totals.total_revenue, mode, inrPerUsd)}`}
             icon={TrendUp}
-            onClick={() => navigate("/projects")}
+            onClick={() => navigate("/app/projects")}
             testid="kpi-total-po"
           />
           <KpiTile
@@ -213,7 +213,7 @@ export default function DashboardPage() {
             value={formatNumber(approvals_pending)}
             sub="Click to action"
             icon={Warning}
-            onClick={() => navigate("/approvals")}
+            onClick={() => navigate("/admin/approvals")}
             testid="kpi-approvals"
           />
         </div>
@@ -375,7 +375,7 @@ export default function DashboardPage() {
               <thead><tr><th>Milestone</th><th>Project</th><th>Flag</th><th>Due</th><th className="num">Value</th><th className="num">Days</th></tr></thead>
               <tbody>
                 {delayed_milestones.slice(0, 8).map((m, i) => (
-                  <tr key={i} className="cursor-pointer" onClick={() => navigate(`/projects/${m.project_id}`)} data-testid={`delayed-milestone-${i}`}>
+                  <tr key={i} className="cursor-pointer" onClick={() => navigate(`/app/projects/${m.project_id}`)} data-testid={`delayed-milestone-${i}`}>
                     <td className="font-medium">{m.milestone_name || "—"}</td>
                     <td>
                       <div className="text-[var(--text)]">{m.project_name}</div>
@@ -405,7 +405,7 @@ export default function DashboardPage() {
               <thead><tr><th>Project</th><th>Flag</th><th className="num">Margin %</th><th className="num">PO</th></tr></thead>
               <tbody>
                 {low_margin_projects.slice(0, 8).map((p) => (
-                  <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/projects/${p.id}`)}>
+                  <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/app/projects/${p.id}`)}>
                     <td>
                       <div>{p.project_name}</div>
                       <div className="text-[11px] text-[var(--muted)]">{p.current_stage}</div>

@@ -14,6 +14,14 @@ const EMPTY = {
     change_requests: { can_view: false, can_edit: false, can_delete: false },
     customer_profile: { can_view: false, can_edit: false, can_delete: false },
     wbs_budget: { can_view: false, can_edit: false, can_delete: false },
+    aop_pnl: { can_view: false, can_edit: false, can_delete: false },
+    aop_inputs: { can_view: false, can_edit: false, can_delete: false },
+    aop_revenue: { can_view: false, can_edit: false, can_delete: false },
+    aop_opex: { can_view: false, can_edit: false, can_delete: false },
+    aop_overheads: { can_view: false, can_edit: false, can_delete: false },
+    aop_payroll: { can_view: false, can_edit: false, can_delete: false },
+    aop_capex: { can_view: false, can_edit: false, can_delete: false },
+    aop_reports: { can_view: false, can_edit: false, can_delete: false },
   },
 };
 
@@ -23,7 +31,9 @@ export function PermissionsProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (user === null) return; // auth still resolving — stay in loading state
     if (!user) { setData(EMPTY); setLoading(false); return; }
+    setLoading(true); // never let route guards judge a signed-in user against empty permissions
     try {
       const { data } = await api.get("/me/permissions");
       setData(data);

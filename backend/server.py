@@ -94,6 +94,15 @@ async def on_startup():
     await db.login_attempts.create_index("identifier")
     await db.pipelines.create_index("id", unique=True)
     await db.roles.create_index("id", unique=True)
+    # AOP module
+    await db.aop_rows.create_index([("dataset", 1), ("key", 1)], unique=True)
+    await db.aop_rows.create_index([("dataset", 1), ("seq", 1)])
+    await db.aop_rows.create_index([("dataset", 1), ("fields.purchase_order", 1)])
+    await db.aop_actuals.create_index("uid", unique=True)
+    await db.aop_actuals.create_index([("domain", 1), ("period", 1)])
+    await db.aop_changes.create_index("id", unique=True)
+    await db.aop_changes.create_index([("dataset", 1), ("status", 1)])
+    await db.aop_history.create_index([("dataset", 1), ("key", 1)])
     await db.roles.create_index("name", unique=True)
     await db.employees.create_index("employee_no", unique=False)
 
@@ -3069,6 +3078,10 @@ async def health():
         raise HTTPException(status_code=503, detail=f"database unreachable: {type(e).__name__}")
     return {"status": "ok", "db": db.name}
 
+
+# AOP module (Annual Operating Plan: datasets, imports, P&L engine)
+from aop.router import build_router as build_aop_router  # noqa: E402
+api.include_router(build_aop_router(db, get_current_user, write_audit, gen_id))
 
 # Register router & CORS
 app.include_router(api)

@@ -69,7 +69,7 @@ export default function ProjectDetailPage() {
     setBusy(true); setError("");
     try {
       await api.delete(`/projects/${project.id}`);
-      navigate("/projects");
+      navigate("/app/projects");
     } catch (e) {
       setError(formatApiErrorDetail(e.response?.data?.detail) || e.message);
     } finally { setBusy(false); }
@@ -80,7 +80,7 @@ export default function ProjectDetailPage() {
       <PageHeader
         title={project.project_name}
         subtitle={`${project.wbs_element || ""}  ·  ${project.customer_name || ""}`}
-        breadcrumb={<><button onClick={() => navigate("/projects")} className="hover:text-[var(--gold)] inline-flex items-center gap-1"><ArrowLeft size={11} /> ALL PROJECTS</button> · {project.current_stage.toUpperCase()}</>}
+        breadcrumb={<><button onClick={() => navigate("/app/projects")} className="hover:text-[var(--gold)] inline-flex items-center gap-1"><ArrowLeft size={11} /> ALL PROJECTS</button> · {project.current_stage.toUpperCase()}</>}
         watermark
         actions={
           <div className="flex items-center gap-2">
@@ -236,7 +236,7 @@ function Overview({ project }) {
             <Info k="Won Against" v={pipeline.won_against_competitor} />
             <Info k="Customer PO" v={pipeline.customer_po_number} />
           </div>
-          <a href="/pipeline" className="text-[11px] text-[var(--gold)] underline mt-3 inline-block">View pipeline →</a>
+          <a href="/app/pipeline" className="text-[11px] text-[var(--gold)] underline mt-3 inline-block">View pipeline →</a>
         </div>
       )}
 

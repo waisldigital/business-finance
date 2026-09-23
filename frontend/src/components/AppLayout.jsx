@@ -8,35 +8,58 @@ import {
   ChartLineUp, FolderSimple, Database, UploadSimple, GavelIcon,
   ShieldCheck, ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
   Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, IdentificationBadge,
+  Table, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
 } from "@phosphor-icons/react";
 import NotificationBell from "./NotificationBell";
 
-// Workspace nav — each item is gated by per-section `can_view` permission
-const NAV = [
-  { to: "/dashboard",        label: "Dashboard",        icon: ChartLineUp,    testid: "sidebar-dashboard",        section: "dashboard" },
-  { to: "/pipeline",         label: "Pipeline",         icon: FunnelSimple,   testid: "sidebar-pipeline",         section: "pipeline" },
-  { to: "/projects",         label: "Projects",         icon: FolderSimple,   testid: "sidebar-projects",         section: "projects" },
-  { to: "/change-requests",  label: "Change Requests",  icon: ArrowsClockwise,testid: "sidebar-change-requests",  section: "change_requests" },
-  { to: "/customers",        label: "Customer Profile", icon: UsersThree,     testid: "sidebar-customers",        section: "customer_profile" },
-  { to: "/wbs-budget",       label: "WBS and Budget",   icon: Stack,          testid: "sidebar-wbs-budget",       section: "wbs_budget" },
+// Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
+const USER_NAV = [
+  { title: "Workspace", items: [
+    { to: "/app/dashboard",       label: "Dashboard",        icon: ChartLineUp,     testid: "sidebar-dashboard",       section: "dashboard" },
+    { to: "/app/pipeline",        label: "Pipeline",         icon: FunnelSimple,    testid: "sidebar-pipeline",        section: "pipeline" },
+    { to: "/app/projects",        label: "Projects",         icon: FolderSimple,    testid: "sidebar-projects",        section: "projects" },
+    { to: "/app/change-requests", label: "Change Requests",  icon: ArrowsClockwise, testid: "sidebar-change-requests", section: "change_requests" },
+    { to: "/app/customers",       label: "Customer Profile", icon: UsersThree,      testid: "sidebar-customers",       section: "customer_profile" },
+    { to: "/app/wbs-budget",      label: "WBS and Budget",   icon: Stack,           testid: "sidebar-wbs-budget",      section: "wbs_budget" },
+  ]},
+  { title: "Annual Operating Plan", items: [
+    { to: "/app/aop/pnl",       label: "P&L",        icon: Table,          testid: "sidebar-aop-pnl",       section: "aop_pnl" },
+    { to: "/app/aop/inputs",    label: "AOP Inputs", icon: SlidersHorizontal, testid: "sidebar-aop-inputs", section: "aop_inputs" },
+    { to: "/app/aop/revenue",   label: "Revenue",    icon: TrendUp,        testid: "sidebar-aop-revenue",   section: "aop_revenue" },
+    { to: "/app/aop/opex",      label: "Opex & POs", icon: Receipt,        testid: "sidebar-aop-opex",      section: "aop_opex" },
+    { to: "/app/aop/overheads", label: "Overheads",  icon: Buildings,      testid: "sidebar-aop-overheads", section: "aop_overheads" },
+    { to: "/app/aop/payroll",   label: "Payroll",    icon: LockKey,        testid: "sidebar-aop-payroll",   section: "aop_payroll" },
+    { to: "/app/aop/capex",     label: "Capex",      icon: HardDrives,     testid: "sidebar-aop-capex",     section: "aop_capex" },
+    { to: "/app/aop/changes",   label: "My changes", icon: ClockCounterClockwise, testid: "sidebar-aop-changes", anyAop: true },
+  ]},
 ];
 
-// Administration nav — visible to admin role ONLY
-// (Roles and Approval Matrix moved under Settings; User Management merged into Employees)
 const ADMIN_NAV = [
-  { to: "/approvals",              label: "Approvals",        icon: GavelIcon,             testid: "sidebar-approvals" },
-  { to: "/suppliers",              label: "Suppliers",        icon: Truck,                 testid: "sidebar-suppliers" },
-  { to: "/employees",              label: "Employees",        icon: UserCircle,            testid: "sidebar-employees" },
-  { to: "/uploads",                label: "Excel Upload",     icon: UploadSimple,          testid: "sidebar-uploads" },
-  { to: "/audit",                  label: "Audit Trail",      icon: ClockCounterClockwise, testid: "sidebar-audit" },
-  { to: "/admin/settings",         label: "Settings",         icon: Gear,                  testid: "sidebar-settings" },
+  { title: "AOP administration", items: [
+    { to: "/admin",               label: "Overview",      icon: Gauge,           testid: "sidebar-admin-home", end: true },
+    { to: "/admin/aop/data",      label: "Data manager",  icon: Database,        testid: "sidebar-admin-data" },
+    { to: "/admin/aop/imports",   label: "Imports",       icon: FileArrowUp,     testid: "sidebar-admin-imports" },
+    { to: "/admin/aop/approvals", label: "AOP approvals", icon: CheckSquareOffset, testid: "sidebar-admin-aop-approvals" },
+    { to: "/admin/aop/pnl",       label: "P&L check",     icon: Table,           testid: "sidebar-admin-pnl" },
+    { to: "/admin/aop/settings",  label: "Plan settings", icon: SlidersHorizontal, testid: "sidebar-admin-plan" },
+  ]},
+  { title: "Administration", items: [
+    { to: "/admin/approvals", label: "Project approvals", icon: GavelIcon,             testid: "sidebar-approvals" },
+    { to: "/admin/employees", label: "Users & employees", icon: UserCircle,            testid: "sidebar-employees" },
+    { to: "/admin/suppliers", label: "Suppliers",         icon: Truck,                 testid: "sidebar-suppliers" },
+    { to: "/admin/uploads",   label: "Excel upload",      icon: UploadSimple,          testid: "sidebar-uploads" },
+    { to: "/admin/audit",     label: "Audit trail",       icon: ClockCounterClockwise, testid: "sidebar-audit" },
+    { to: "/admin/settings",  label: "Roles & settings",  icon: Gear,                  testid: "sidebar-settings" },
+  ]},
 ];
 
-export default function AppLayout({ children }) {
+const AOP_SECTIONS = ["aop_pnl", "aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex", "aop_reports"];
+
+export default function AppLayout({ children, portal = "app" }) {
   const { user, logout } = useAuth();
   const { mode, setMode } = useCurrency();
   const { theme, setTheme, themes } = useTheme();
-  const { is_admin, permissions } = usePermissions();
+  const { permissions } = usePermissions();
   const navigate = useNavigate();
   const [showThemes, setShowThemes] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("cp_sidebar_collapsed") === "1");
@@ -46,11 +69,13 @@ export default function AppLayout({ children }) {
   }, [collapsed]);
 
   const asideWidth = collapsed ? "w-16" : "w-64";
-  const isAdminUser = is_admin || user?.role === "admin";
-  // Admin sees everything in workspace nav. Non-admin sees only sections where can_view is true.
-  const navVisible = NAV.filter((n) => isAdminUser || !!permissions?.[n.section]?.can_view);
-  const adminVisible = isAdminUser ? ADMIN_NAV : [];
-
+  const canSee = (n) => {
+    if (n.anyAop) return AOP_SECTIONS.some((sec) => permissions?.[sec]?.can_view);
+    return !!permissions?.[n.section]?.can_view;
+  };
+  const groups = portal === "admin"
+    ? ADMIN_NAV
+    : USER_NAV.map((g) => ({ ...g, items: g.items.filter(canSee) })).filter((g) => g.items.length);
   return (
     <div className="flex min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <aside
@@ -83,24 +108,17 @@ export default function AppLayout({ children }) {
         </div>
 
         <nav className="flex-1 py-3 overflow-y-auto">
-          <div className="nav-section-label px-4 py-2 text-[10px] tracking-overline" style={{ color: "rgba(255,255,255,0.4)" }}>Workspace</div>
-          {navVisible.map((n) => (
-            <NavLink key={n.to} to={n.to} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} data-testid={n.testid}>
-              <n.icon size={18} weight="duotone" />
-              <span className="nav-label">{n.label}</span>
-            </NavLink>
-          ))}
-          {adminVisible.length > 0 && (
-            <>
-              <div className="nav-section-label px-4 py-2 mt-4 text-[10px] tracking-overline" style={{ color: "rgba(255,255,255,0.4)" }}>Administration</div>
-              {adminVisible.map((n) => (
-                <NavLink key={n.to} to={n.to} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} data-testid={n.testid}>
-                  <n.icon size={18} weight="duotone" />
+          {groups.map((g, gi) => (
+            <React.Fragment key={g.title}>
+              <div className={`nav-section-label px-4 py-1.5 ${gi ? "mt-3" : ""} text-[10px] tracking-overline`} style={{ color: "rgba(255,255,255,0.4)" }}>{g.title}</div>
+              {g.items.map((n) => (
+                <NavLink key={n.to} to={n.to} end={!!n.end} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} data-testid={n.testid} title={collapsed ? n.label : undefined}>
+                  <n.icon size={17} weight="duotone" />
                   <span className="nav-label">{n.label}</span>
                 </NavLink>
               ))}
-            </>
-          )}
+            </React.Fragment>
+          ))}
         </nav>
 
         <div className={`${collapsed ? "px-2 py-3" : "px-4 py-4"} border-t shrink-0`} style={{ borderColor: "rgba(255,255,255,0.1)" }}>
@@ -129,8 +147,13 @@ export default function AppLayout({ children }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-16 px-8 border-b border-[var(--border)] bg-[var(--surface)] flex items-center justify-between" data-testid="app-topbar">
-          <div className="text-xs text-[var(--muted)] tracking-overline">WAISL · Customer Order Lifecycle Management</div>
+        <div className="h-12 px-5 border-b border-[var(--border)] bg-[var(--surface)] flex items-center justify-between" data-testid="app-topbar">
+          <div className="flex items-center gap-2 text-xs text-[var(--muted)] tracking-overline">
+            <span className={`px-1.5 py-0.5 text-[10px] font-semibold border ${portal === "admin" ? "border-[var(--danger)] text-[var(--danger)]" : "border-[var(--gold)] text-[var(--gold)]"}`} data-testid="portal-badge">
+              {portal === "admin" ? "ADMIN PORTAL" : "WORKSPACE"}
+            </span>
+            WAISL · Customer Order Lifecycle Management
+          </div>
 
           <div className="flex items-center gap-3">
             {/* In-app notifications */}

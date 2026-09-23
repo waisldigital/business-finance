@@ -26,7 +26,7 @@ export function AuthProvider({ children }) {
       const { data } = await api.post("/auth/login", { email, password });
       if (data.access_token) localStorage.setItem("cp_token", data.access_token);
       setUser(data.user);
-      return true;
+      return data.user || true;
     } catch (e) {
       setError(formatApiErrorDetail(e.response?.data?.detail) || e.message);
       return false;
@@ -47,3 +47,6 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => useContext(AuthContext);
+
+// Admins land in the admin portal, everyone else in the user workspace
+export const homeFor = (user) => (user && user.role === "admin" ? "/admin" : "/app");

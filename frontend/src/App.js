@@ -1,7 +1,7 @@
 import React from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/lib/auth";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { AuthProvider, useAuth, homeFor } from "@/lib/auth";
 import { CurrencyProvider } from "@/lib/currency";
 import { ThemeProvider } from "@/lib/theme";
 import { PermissionsProvider, usePermissions } from "@/lib/permissions";
@@ -20,37 +20,86 @@ import PipelinePage from "@/pages/PipelinePage";
 import ChangeRequestsPage from "@/pages/ChangeRequestsPage";
 import WBSBudgetPage from "@/pages/WBSBudgetPage";
 import EmployeesPage from "@/pages/EmployeesPage";
+import PnLPage from "@/pages/aop/PnLPage";
+import AopSectionPage from "@/pages/aop/AopSectionPage";
+import MyChangesPage from "@/pages/aop/MyChangesPage";
+import AdminHome from "@/pages/admin/AdminHome";
+import AdminDataPage from "@/pages/admin/AdminDataPage";
+import AdminImportsPage from "@/pages/admin/AdminImportsPage";
+import AdminAopApprovals from "@/pages/admin/AdminAopApprovals";
+import AdminPlanSettings from "@/pages/admin/AdminPlanSettings";
 
-function Protected({ children, adminOnly }) {
+const Loading = () => (
+  <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
+    <div className="text-[var(--muted)] tracking-overline text-xs">Loading…</div>
+  </div>
+);
+
+// User workspace sections in landing order: (path, section)
+const USER_HOMES = [
+  ["/app/dashboard", "dashboard"], ["/app/aop/pnl", "aop_pnl"], ["/app/aop/inputs", "aop_inputs"],
+  ["/app/aop/revenue", "aop_revenue"], ["/app/aop/opex", "aop_opex"], ["/app/aop/overheads", "aop_overheads"],
+  ["/app/aop/payroll", "aop_payroll"], ["/app/aop/capex", "aop_capex"], ["/app/pipeline", "pipeline"],
+  ["/app/projects", "projects"], ["/app/change-requests", "change_requests"], ["/app/customers", "customer_profile"],
+  ["/app/wbs-budget", "wbs_budget"],
+];
+
+// /admin/* — system admin only. Anyone else is sent to their workspace.
+function AdminRoute({ children }) {
   const { user } = useAuth();
-  if (user === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-        <div className="text-[var(--muted)] tracking-overline text-xs">Loading…</div>
-      </div>
-    );
-  }
+  if (user === null) return <Loading />;
   if (!user) return <Navigate to="/login" replace />;
-  if (adminOnly && user.role !== "admin") return <Navigate to="/dashboard" replace />;
-  return <AppLayout>{children}</AppLayout>;
+  if (user.role !== "admin") return <Navigate to="/app" replace />;
+  return <AppLayout portal="admin">{children}</AppLayout>;
 }
 
-// Gate a workspace section by `can_view` permission. Admin always passes.
-function SectionProtected({ section, children }) {
+// /app/* — workspace sections gated by the role's can_view. Admins use the admin portal instead.
+function UserRoute({ section, anyAop, children }) {
   const { user } = useAuth();
-  const { is_admin, permissions, loading } = usePermissions();
-  if (user === null || loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-        <div className="text-[var(--muted)] tracking-overline text-xs">Loading…</div>
-      </div>
-    );
-  }
+  const { permissions, loading } = usePermissions();
+  if (user === null || loading) return <Loading />;
   if (!user) return <Navigate to="/login" replace />;
-  const allowed = is_admin || user.role === "admin" || !!permissions?.[section]?.can_view;
-  if (!allowed) return <Navigate to="/dashboard" replace />;
-  return <AppLayout>{children}</AppLayout>;
+  if (user.role === "admin") return <Navigate to="/admin" replace />;
+  const allowed = anyAop
+    ? Object.keys(permissions || {}).some((k) => k.startsWith("aop_") && permissions[k]?.can_view)
+    : !!permissions?.[section]?.can_view;
+  if (!allowed) {
+    const first = USER_HOMES.find(([, s]) => permissions?.[s]?.can_view);
+    return <Navigate to={first ? first[0] : "/app"} replace />;
+  }
+  return <AppLayout portal="app">{children}</AppLayout>;
 }
+
+function UserHome() {
+  const { user } = useAuth();
+  const { permissions, loading } = usePermissions();
+  if (user === null || loading) return <Loading />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === "admin") return <Navigate to="/admin" replace />;
+  const first = USER_HOMES.find(([, s]) => permissions?.[s]?.can_view);
+  if (first) return <Navigate to={first[0]} replace />;
+  return (
+    <AppLayout portal="app">
+      <div className="p-8 text-sm text-[var(--muted)]">Your role has no sections assigned yet — ask an administrator to grant access.</div>
+    </AppLayout>
+  );
+}
+
+function RootRedirect() {
+  const { user } = useAuth();
+  if (user === null) return <Loading />;
+  if (!user) return <Navigate to="/login" replace />;
+  return <Navigate to={homeFor(user)} replace />;
+}
+
+// Old (pre-split) URLs keep working, including links stored in notifications.
+function Legacy({ to }) {
+  const loc = useLocation();
+  return <Navigate to={`${to}${loc.pathname}${loc.search}`} replace />;
+}
+
+const U = (section, el) => <UserRoute section={section}>{el}</UserRoute>;
+const A = (el) => <AdminRoute>{el}</AdminRoute>;
 
 function App() {
   return (
@@ -61,28 +110,54 @@ function App() {
             <CurrencyProvider>
               <PermissionsProvider>
                 <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<SectionProtected section="dashboard"><DashboardPage /></SectionProtected>} />
-                <Route path="/projects" element={<SectionProtected section="projects"><ProjectsPage /></SectionProtected>} />
-                <Route path="/projects/:id" element={<SectionProtected section="projects"><ProjectDetailPage /></SectionProtected>} />
-                <Route path="/pipeline" element={<SectionProtected section="pipeline"><PipelinePage /></SectionProtected>} />
-                <Route path="/change-requests" element={<SectionProtected section="change_requests"><ChangeRequestsPage /></SectionProtected>} />
-                <Route path="/wbs-budget" element={<SectionProtected section="wbs_budget"><WBSBudgetPage /></SectionProtected>} />
-                <Route path="/customers" element={<SectionProtected section="customer_profile"><MasterPage entityKey="customers" /></SectionProtected>} />
-                <Route path="/customers/:id" element={<SectionProtected section="customer_profile"><CustomerProfilePage /></SectionProtected>} />
-                <Route path="/suppliers" element={<Protected adminOnly><MasterPage entityKey="suppliers" /></Protected>} />
-                <Route path="/employees" element={<Protected adminOnly><EmployeesPage /></Protected>} />
-                <Route path="/uploads" element={<Protected adminOnly><UploadsPage /></Protected>} />
-                <Route path="/approvals" element={<Protected adminOnly><ApprovalsPage /></Protected>} />
-                <Route path="/audit" element={<Protected adminOnly><AuditPage /></Protected>} />
-                {/* Backwards-compatible redirects — User Management is gone; Roles & Approval Matrix moved under Settings */}
-                <Route path="/admin/users" element={<Navigate to="/employees" replace />} />
-                <Route path="/admin/approval-matrix" element={<Navigate to="/admin/settings?tab=approval" replace />} />
-                <Route path="/admin/roles" element={<Navigate to="/admin/settings?tab=roles" replace />} />
-                <Route path="/admin/settings" element={<Protected adminOnly><SettingsPage /></Protected>} />
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
-              </Routes>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/" element={<RootRedirect />} />
+
+                  {/* ---------- user workspace ---------- */}
+                  <Route path="/app" element={<UserHome />} />
+                  <Route path="/app/dashboard" element={U("dashboard", <DashboardPage />)} />
+                  <Route path="/app/projects" element={U("projects", <ProjectsPage />)} />
+                  <Route path="/app/projects/:id" element={U("projects", <ProjectDetailPage />)} />
+                  <Route path="/app/pipeline" element={U("pipeline", <PipelinePage />)} />
+                  <Route path="/app/change-requests" element={U("change_requests", <ChangeRequestsPage />)} />
+                  <Route path="/app/wbs-budget" element={U("wbs_budget", <WBSBudgetPage />)} />
+                  <Route path="/app/customers" element={U("customer_profile", <MasterPage entityKey="customers" />)} />
+                  <Route path="/app/customers/:id" element={U("customer_profile", <CustomerProfilePage />)} />
+                  <Route path="/app/aop/pnl" element={U("aop_pnl", <PnLPage />)} />
+                  <Route path="/app/aop/inputs" element={U("aop_inputs", <AopSectionPage section="aop_inputs" />)} />
+                  <Route path="/app/aop/revenue" element={U("aop_revenue", <AopSectionPage section="aop_revenue" />)} />
+                  <Route path="/app/aop/opex" element={U("aop_opex", <AopSectionPage section="aop_opex" />)} />
+                  <Route path="/app/aop/overheads" element={U("aop_overheads", <AopSectionPage section="aop_overheads" />)} />
+                  <Route path="/app/aop/payroll" element={U("aop_payroll", <AopSectionPage section="aop_payroll" />)} />
+                  <Route path="/app/aop/capex" element={U("aop_capex", <AopSectionPage section="aop_capex" />)} />
+                  <Route path="/app/aop/changes" element={<UserRoute anyAop><MyChangesPage /></UserRoute>} />
+
+                  {/* ---------- admin portal ---------- */}
+                  <Route path="/admin" element={A(<AdminHome />)} />
+                  <Route path="/admin/aop/data" element={A(<AdminDataPage />)} />
+                  <Route path="/admin/aop/imports" element={A(<AdminImportsPage />)} />
+                  <Route path="/admin/aop/approvals" element={A(<AdminAopApprovals />)} />
+                  <Route path="/admin/aop/pnl" element={A(<PnLPage admin />)} />
+                  <Route path="/admin/aop/settings" element={A(<AdminPlanSettings />)} />
+                  <Route path="/admin/approvals" element={A(<ApprovalsPage />)} />
+                  <Route path="/admin/employees" element={A(<EmployeesPage />)} />
+                  <Route path="/admin/suppliers" element={A(<MasterPage entityKey="suppliers" />)} />
+                  <Route path="/admin/uploads" element={A(<UploadsPage />)} />
+                  <Route path="/admin/audit" element={A(<AuditPage />)} />
+                  <Route path="/admin/settings" element={A(<SettingsPage />)} />
+                  <Route path="/admin/users" element={<Navigate to="/admin/employees" replace />} />
+                  <Route path="/admin/approval-matrix" element={<Navigate to="/admin/settings?tab=approval" replace />} />
+                  <Route path="/admin/roles" element={<Navigate to="/admin/settings?tab=roles" replace />} />
+
+                  {/* ---------- legacy paths ---------- */}
+                  {["/dashboard", "/projects/*", "/projects", "/pipeline", "/change-requests/*", "/change-requests", "/wbs-budget", "/customers/*", "/customers"].map((p) => (
+                    <Route key={p} path={p} element={<Legacy to="/app" />} />
+                  ))}
+                  {["/suppliers", "/employees", "/uploads", "/approvals", "/audit"].map((p) => (
+                    <Route key={p} path={p} element={<Legacy to="/admin" />} />
+                  ))}
+                  <Route path="*" element={<RootRedirect />} />
+                </Routes>
               </PermissionsProvider>
             </CurrencyProvider>
           </ThemeProvider>

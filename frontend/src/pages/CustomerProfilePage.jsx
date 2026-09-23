@@ -27,7 +27,7 @@ export default function CustomerProfilePage() {
       <PageHeader
         title={customer.customer_name}
         subtitle={`SAP ${customer.sap_customer_code || "—"}  ·  ${customer.country || ""}`}
-        breadcrumb={<><button onClick={() => navigate("/customers")} className="hover:text-[var(--gold)] inline-flex items-center gap-1"><ArrowLeft size={11}/> ALL CUSTOMERS</button> · PROFILE</>}
+        breadcrumb={<><button onClick={() => navigate("/app/customers")} className="hover:text-[var(--gold)] inline-flex items-center gap-1"><ArrowLeft size={11}/> ALL CUSTOMERS</button> · PROFILE</>}
         testid="customer-profile-header"
       />
 
@@ -154,7 +154,7 @@ export default function CustomerProfilePage() {
             </thead>
             <tbody>
               {projects.map((p) => (
-                <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/projects/${p.id}`)} data-testid={`cust-project-${p.id}`}>
+                <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/app/projects/${p.id}`)} data-testid={`cust-project-${p.id}`}>
                   <td className="font-medium">{p.project_name}</td>
                   <td className="font-mono text-xs">{p.wbs_element || "—"}</td>
                   <td><StatusBadge status={p.current_stage} /></td>
