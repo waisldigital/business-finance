@@ -1,0 +1,42 @@
+{
+  "summary": "Phase 2 backend + frontend validation. Backend: 13/13 new pytest cases pass (queries CRUD + thread + close, customer profile structure + 404, document upload PDF/non-PDF, parse=true, parse=false, list, download, delete, apply_extracted with empty project). Frontend: pencil edit on project rows, Documents/Queries tabs, query thread with reply/close/reopen, document drop+upload+download/delete buttons, customer rows clickable to /customers/:id with profile (ageing chart, totals, projects table) all verified. Found and fixed ONE critical frontend bug.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ProjectDetailPage tab content router", "issue": "FIXED IN-FLIGHT. TABS array included 'Documents' and 'Queries' (lines 12) and rendered the buttons (line 106), but the conditional content block (was lines 119-125) only had cases for Overview/Revenue/Cost/Milestones/Audit. Clicking Documents or Queries tabs highlighted the tab but rendered an empty body. Added `{tab === 'Documents' && <DocumentsTab .../>}` and `{tab === 'Queries' && <QueriesTab .../>}`. After fix all flows green.", "selector": "[data-testid=\"tab-documents\"], [data-testid=\"tab-queries\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2.py",
+    "/app/test_reports/pytest/phase2_results.xml",
+    "/app/backend/tests/test_crackerpro.py"
+  ],
+  "action_items": [
+    "VERIFIED FIX: ProjectDetailPage.jsx now renders DocumentsTab and QueriesTab content. Main agent should keep this change (added 2 conditional render lines).",
+    "OPTIONAL: close-query-btn currently uses window.confirm() to confirm closure - same UX inconsistency as approval window.prompt noted in iteration_2. Consider styled modal."
+  ],
+  "critical_code_review_comments": [
+    "ProjectDetailPage.jsx grew sizable (>630 lines) due to inline DocumentsTab, QueriesTab, QueryThread, NewQueryModal. Recommend extracting to /pages/project_detail/ subfolder for maintainability (>700 line guideline pending).",
+    "server.py is now 1215 lines (>700 guideline). Phase 2 added queries + customer profile + document endpoints inline. Strongly suggest splitting into routers/queries.py, routers/documents.py, routers/customer_profile.py.",
+    "pdf_parser fallback returns dict with warnings on failure, which is correct. Document endpoint correctly catches parse exceptions and stores {error,warnings} payload (line 1126).",
+    "Document upload writes file to disk under /app/backend/uploads/ — works for single-pod, will not survive pod restarts in k8s without a PV. Acceptable for MVP, flag for production.",
+    "POST /projects/{pid}/documents `apply_extracted=true` only applies fields when current project field is empty/falsy — correct safe behaviour. milestones overwrite is unconditional when parsed.milestones present; safe because billing_type is also forced to 'Milestone'.",
+    "GET /projects/{pid}/documents correctly excludes storage_path; verified in test_list_documents."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/ProjectDetailPage.jsx (added 2 lines: render DocumentsTab and QueriesTab when tab matches)",
+    "/app/backend/tests/test_phase2.py (NEW - 13 pytest cases for queries, customer profile, documents)"
+  ],
+  "success_rate": {"backend": "100% (13/13 phase2 + 23/23 phase1 unchanged)", "frontend": "100% on all 8 review-requested phase 2 flows after the fix"},
+  "test_credentials": "admin@crackerpro.com / Admin@123 (working)",
+  "seed_data_creation": "Tests create TEST_-prefixed customers/projects and clean up. 1 leftover query and ~3 doc rows on the first seeded project from playwright runs (idempotent — doesn't break anything).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 complete and green. Critical fix applied to ProjectDetailPage.jsx tab router. Phase 1 regression NOT re-run; iteration_2 passed. PDF parser correctly returns warnings on minimal PDFs - that's expected, not a bug. apply_extracted only fills empty fields; tested with TEST_DocApply project and confirmed shape returns {document, applied:{}} dict.",
+  "rca_of_the_issue": "Root cause: in /app/frontend/src/pages/ProjectDetailPage.jsx, the TABS array was extended with 'Documents' and 'Queries' but the JSX conditional rendering block (lines 119-125 originally) was not updated with corresponding `{tab === 'Documents' && ...}` and `{tab === 'Queries' && ...}` clauses. As a result, those tabs were clickable and visually highlighted but rendered empty content. Fix: added the two missing render conditions invoking DocumentsTab and QueriesTab components which were already defined in the same file. Verified end-to-end via playwright: query create/reply/close/reopen all work, document upload/list/download/delete all work."
+}

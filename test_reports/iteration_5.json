@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 5 — aviation theme + SAP undo-last-import. Backend: 15/15 pytest passed (new endpoints sap-last-import & sap-undo-last incl. multi-batch isolation, validation, auth + iter4 regressions). Frontend: end-to-end Playwright run validated tricolor stripe, 'Welcome aboard' heading, airplane-icon login submit, login redirect, project header airline-stripe + aviation-watermark, advance-stage-btn airplane variant, SAP revenue upload → 'Undo last import (332)' chip → confirm/undo flow → button hidden, cost SAP button present, ProjectFormModal Save Project airplane button. Test env left clean (no leftover SAP batches). 0 pageerrors / 0 uncaught console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_sap_iter5.py",
+    "/app/test_reports/pytest/iter5_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PASS: server.py project_sap_upload (~lines 1039-1100) attaches batch_id + import_source='sap_excel' on every inserted row and returns batch_id in the response.",
+    "PASS: project_sap_last_import (~1103-1129) gracefully short-circuits when actual row count is 0 (handles externally-deleted rows) and properly excludes already-undone logs via undone_at marker.",
+    "PASS: project_sap_undo_last (~1132-1154) is correctly idempotent — second invocation returns 404 'No SAP import to undo' (validated by tests test_undo_idempotent_404 and test_upload_then_undo_round_trip).",
+    "PASS: Multi-batch isolation verified — when batches A and B exist, undo deletes only the latest (B), and last-import then surfaces A; second undo wipes A; third returns 404. Confirms log sort by uploaded_at + filtering by undone_at.",
+    "PASS: kind validation via FastAPI Query regex returns 422 for unknown values; pid not-found returns 404; unauthenticated requests blocked (401/403).",
+    "PASS: LoginPage tricolor stripe colors are exact India tricolor (rgb(255,153,51)/white/rgb(19,136,8)); Welcome aboard h1 present; AirplaneButton renders with class 'btn-airplane' and visible AirplaneTilt svg inside .plane-icon — confirmed for login-submit, advance-stage-btn, and form-submit.",
+    "PASS: PageHeader on project detail has both 'airline-stripe' and 'aviation-watermark' classes; the watermark pseudo-elements DO NOT block clicks (advance-stage-btn was clickable; SAP buttons within the page were clickable).",
+    "PASS: GET /api/projects/{pid}/revenue uses response_model=List[RevenueLineOut] which intentionally omits import_batch_id — adjusted test to verify deletion via has_batch:false + row-count delta instead. This is by design (line 686-688) but worth documenting that the field exists on the document yet isn't surfaced via API.",
+    "MINOR: AirplaneButton special-cases type='submit' to skip onClick delay (lines 31-36) so HTML form submission isn't suppressed — good. However the .plane-icon takeoff animation only fires for non-submit clicks; verify visually if desired.",
+    "OPEN (carried from iter4): server.py is 1497 lines; SAP / Upload / Project routes should be split into routers per domain."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_sap_iter5.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@crackerpro.com / Admin@123 (working)",
+  "seed_data_creation": "Tests upload SAP revenue/cost batches against seed project 'Smart Airside Gate Solution' (WSIN.000136.0001) and undo every batch they create so the env is left with has_batch:false for both kinds. Confirmed clean post-run via /sap-last-import.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 backend tests at /app/backend/tests/test_sap_iter5.py (15 tests, 6.9s runtime). The Playwright Sap upload flow uses page.locator('input[type=\"file\"]').first which targets the revenue uploader (works because it's the first file input on the Revenue tab). For cost, switch to the Cost tab first, then the same selector targets cost. Note that GET /api/projects/{pid}/revenue strips import_batch_id via RevenueLineOut response_model — verify deletion via /sap-last-import.has_batch + row-count delta instead. SAP test workbook persists at /tmp/sap_test.xlsx.",
+  "rca_of_the_issue": "No bugs found. All five iteration-5 acceptance items (batch_id persistence, sap-last-import GET, sap-undo-last POST incl. idempotent 404, aviation UI theme, AirplaneButton on login/advance/save) are working end-to-end."
+}

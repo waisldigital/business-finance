@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 2 re-validation of CRacker Pro: all 3 fixes from iteration 1 (excel phone coercion, brute-force email-only key, sidebar/tab data-testids) confirmed working. Backend pytest 23/25 passing (2 skipped legitimately - no pre-existing pending approvals at session start). Frontend: all 9 sidebar nav testids navigate correctly, all 5 project detail tabs switch, Add User + Add Rule modals open, Excel upload page has template/dropzone/logs, end-to-end approval UI flow advances project Deal P&L -> Customer PO via window.prompt.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/projects/{pid}/transition", "issue": "Stage 'Opportunity' returns 422 (not in valid stages list). Valid pipeline appears to be Pipeline -> Deal P&L -> Customer PO -> Operations -> Closure. Frontend should expose valid stage list explicitly."},
+      {"endpoint": "POST /api/approvals/requests/{id}/action", "issue": "UI uses window.prompt() for the approve/reject comment - works but not branded. Consider replacing with a styled modal for design consistency."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Approvals page", "issues": ["Approve/Reject use browser's native window.prompt for capturing comment - inconsistent with the dark+gold premium theme used elsewhere. Replace with custom modal."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_crackerpro.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL UX: Replace window.prompt in Approvals approve/reject with a styled modal matching premium dark+gold theme.",
+    "OPTIONAL: Document the valid stage list (Pipeline / Deal P&L / Customer PO / Operations / Closure) in the project transition endpoint or expose via GET /api/projects/stages."
+  ],
+  "critical_code_review_comments": [
+    "Confirmed: excel_utils.parse_xlsx now coerces non-numeric/bool fields to str (lines 102-107). Fix is correct and verified by new pytest test_upload_with_numeric_phone_and_listing.",
+    "Confirmed: server.py login (line 237) now uses email-only key for brute-force - locks reliably within 6 attempts. Verified.",
+    "Confirmed: AppLayout.jsx sidebar nav has data-testid='sidebar-{key}' (dashboard/projects/customers/suppliers/employees/uploads/approvals/audit/admin-users/approval-matrix) - all 9 navigations work.",
+    "Confirmed: ProjectDetailPage.jsx tabs use data-testid='tab-{lower}' - all 5 tabs (overview/revenue/cost/milestones/audit) switch content.",
+    "OPEN: server.py is still 956 lines (>700 line guideline). Consider splitting into routers per domain for maintainability.",
+    "OPEN: Some create/update routes still pass post-insert dict (mutated with _id) into write_audit; defensive _id strip added in iteration 1 prevents 500s but call sites should pass payload.model_dump()."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_crackerpro.py (added test_upload_with_numeric_phone_and_listing; tightened test_lockout_after_repeated_attempts to assert 429 within 6 attempts)"
+  ],
+  "success_rate": {"backend": "100% (23/23 executed; 2 skipped due to no pending approvals - not failures)", "frontend": "100% on the 8 review-requested flows"},
+  "test_credentials": "admin@crackerpro.com / Admin@123 (seeded). Working.",
+  "seed_data_creation": "No new seed data. Test suite cleans TEST_-prefixed customers/projects/users. login_attempts cleared at end.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All three iteration-1 fixes verified end-to-end. Skipped pytest cases (test_transition_creates_low_margin_approval, test_approve_pending_request) skip when no pre-existing low-margin Deal P&L project exists; setup/teardown helper pattern shown in /tmp/setup_pending.py creates one programmatically (project at 5% margin, advance to Deal P&L, then transition to Customer PO -> Pending). Approve UI uses window.prompt - playwright dialog handler must use exact=True role match for 'Approve' button (otherwise it matches 'Approved' tab).",
+  "rca_of_the_issue": "All three iteration-1 issues are now closed: (a) excel int phone -> 500 listing was fixed by string coercion in parse_xlsx. (b) brute-force IP key was unreliable behind k8s ingress; switched to email-only key, lockout now triggers exactly at 6th attempt. (c) Sidebar/tab testids now standardized to sidebar-{key} and tab-{lower}, enabling deterministic UI testing."
+}

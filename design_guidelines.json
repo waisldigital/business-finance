@@ -1,0 +1,86 @@
+{
+  "theme": "Light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast) + Archetype 1 (Warm Beige/Earthy) Hybrid. Vibe: High-End Enterprise Finance / Old Money Tech",
+  "typography": {
+    "headings": "Cabinet Grotesk",
+    "body": "Work Sans",
+    "data_and_numbers": "JetBrains Mono",
+    "rules": [
+      "Use tracking-tight for all headings above 32px to create a structured, authoritative feel.",
+      "Tabular nums MUST be used for all financial data (JetBrains Mono) to ensure vertical alignment in tables and KPI tiles.",
+      "Overlines and table headers must be uppercase, text-xs, tracking-widest (e.g., tracking-[0.2em]).",
+      "Do not use bold for everything. Use medium (font-medium) for standard emphasis and black (font-black) for large KPI numbers."
+    ]
+  },
+  "colors": {
+    "background": "#FAFAF8",
+    "surface": "#FFFFFF",
+    "text_primary": "#111110",
+    "text_secondary": "#5E5E5A",
+    "border": "#E5E5E0",
+    "accent_primary": "#A67C00",
+    "accent_secondary": "#D4AF37",
+    "success": "#2E6B4A",
+    "warning": "#B45309",
+    "danger": "#991B1B",
+    "rules": [
+      "Background is a very soft warm off-white (Alabaster), not pure white.",
+      "Surfaces (cards, modals) are pure white for maximum data clarity.",
+      "Accent color (Matte Gold/Bronze) should be used sparingly for active states, selected tabs, and primary action buttons. Never use large gold gradients.",
+      "Status colors are muted and deep (Forest Green, Terracotta Red) to avoid the 'cheap SaaS' neon look."
+    ]
+  },
+  "spacing_and_layout": {
+    "container_padding": "p-6 md:p-8",
+    "dashboard_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 lg:grid-cols-12",
+    "card_style": "Flat background, 1px solid border-border, no shadow. Hover state: shadow-sm, -translate-y-px.",
+    "border_radius": "rounded-sm (2px) or rounded-none. Maintain sharp, authoritative corners.",
+    "rules": [
+      "Implement the 'Control Room' grid for the dashboard. Tight gaps (gap-4 or gap-6).",
+      "Every pixel must be utilized in grids. Ensure h-full on children for uniform height.",
+      "Optical alignment: Add extra padding to visually center text if an element has a leading icon."
+    ]
+  },
+  "components": {
+    "buttons": "Flat, sharp corners (rounded-sm). Primary buttons use bg-[#111110] text-white hover:bg-[#A67C00] transition-colors. Secondary buttons are transparent with 1px border.",
+    "kpi_tiles": "F-pattern layout. 1px solid border. Clickable with hover effect: border-[#A67C00] and a subtle gold arrow icon appearing. Numbers must be in JetBrains Mono, text-4xl font-semibold tracking-tighter.",
+    "stage_tracker": "Horizontal segmented pipeline (Pipeline → Deal P&L → Customer PO → Operations → Closure). Use sharp rectangular blocks instead of rounded pills. Active stage gets a 2px bottom border in gold (#A67C00).",
+    "data_tables": "Dense, highly functional. 1px bottom border per row. Hover effect on rows: bg-[#FAFAF8]. Use sticky headers for large datasets. Align financial numbers to the right.",
+    "upload_engine": "Drag-and-drop zone using the 'Tracing Beam' concept or a dashed 2px border (#E5E5E0) that turns solid gold (#A67C00) on drag-over. Soft beige background on hover.",
+    "currency_toggle": "Small segmented control (₹ Crore / $ Million) placed in the top right of the dashboard header. Tactile neumorphism: background matches header, active state has white bg and 1px border.",
+    "sidebar": "Dark slate/charcoal (#111110) sidebar with white/gold text for high contrast against the light dashboard. Links hover state: bg-white/10 text-[#D4AF37]."
+  },
+  "motion_and_interactions": {
+    "hover_states": "All interactive elements must have a defined hover state. Button background changes, card borders highlight.",
+    "transitions": "Use fast, snappy transitions (e.g., transition-all duration-200 ease-out) to match the enterprise efficiency vibe.",
+    "loading_states": "Avoid generic spinners. Use skeleton loaders with a subtle shimmer effect (bg-gradient) for data grids and KPI tiles."
+  },
+  "media_and_icons": {
+    "icon_library": "@phosphor-icons/react",
+    "icon_style": "Duotone or thin line weights to match the crisp, elegant aesthetic.",
+    "image_urls": [
+      {
+        "url": "https://images.pexels.com/photos/3137084/pexels-photo-3137084.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "login_hero",
+        "description": "A striking minimalist photo of a modern architectural facade against a dark sky. Use on the left side of the split login screen (50w) with a bg-black/30 overlay."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1768101225267-c6fc5678c113?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzd8MHwxfHNlYXJjaHwyfHxidXNpbmVzcyUyMG9mZmljZSUyMGZpbmFuY2UlMjBtaW5pbWFsfGVufDB8fHx8MTc3NzExOTk0Nnww&ixlib=rb-4.1.0&q=85",
+        "category": "empty_state_background",
+        "description": "Modern glass skyscrapers with reflective surfaces. Use at very low opacity (10%) or as a watermarked background for empty state screens."
+      }
+    ]
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure all text meets WCAG AA standards. Gold accent text must only be used on dark backgrounds; on light backgrounds, use it for borders/icons, not small text.",
+    "testing_attributes": "All interactive elements MUST include data-testid attribute (e.g., data-testid='login-submit-button', data-testid='kpi-revenue-tile')."
+  },
+  "instructions_to_main_agent": [
+    "Install required font libraries or use Google Fonts (Cabinet Grotesk, Work Sans, JetBrains Mono).",
+    "Install @phosphor-icons/react for icons.",
+    "Build the dashboard using pure HTML/Tailwind for the structural layout to ensure the 'Control Room' grid is strictly followed.",
+    "Use Shadcn UI for complex interactive components (Tables, Dropdowns, Dialogs, Select), but OVERRIDE their default border-radius to rounded-sm or rounded-none to match this enterprise-grade guideline.",
+    "Implement the split-screen login page using the 'login_hero' image on the left and the auth form on the right.",
+    "Ensure the Indian/US currency toggle logic handles the formatting correctly (₹ Lakhs/Crores vs $ Millions)."
+  ]
+}

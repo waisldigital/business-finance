@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 6 — Pipeline module (5-stage wizard + Finance handoff gate) + Space/Navigation BRD items. Backend: 16/16 pytest passed (login, pipeline CRUD with full BRD fields, advance, close Won/Lost, approve-handoff create-project-with-matching-po/customer/margin, reject without project, 400 on non-Won / already-processed, 403 for sales role, document name Query(..., min_length=1) mandatory with 422 when missing and persisted name returned via GET, dashboard top_customers<=10 + vendor_exposure<=10). Frontend: verified login, collapsible sidebar 256->64px persisting across reload, new nav entries (Pipeline, Change Requests, Customer Profile), Dashboard Revenue KPI (not 'Recognized Revenue'), 'Top 10 Suppliers', Pipeline page with KPIs + funnel + stage/flag/handoff badges + 'view project ->' on approved rows, 5-stage tabbed wizard with Stage 1-5 tabs clickable, '*' markers rendered on required fields (visible in both pipeline wizard and New Project modal), informational banner 'validation is not enforced yet', Change Requests page loads (h1='Change Requests'). Screenshots attached in /root/.emergent/automation_output.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/pipeline/{id}", "issue": "Destructive full-document replace via PipelineIn.model_dump() — omitting any stage field resets it to the PipelineIn default (e.g. estimated_margin_pct resets to 0.0). Consider PATCH semantics or exclude_unset=True."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pipeline_iter6.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [
+    "Optional: convert PUT /api/pipeline/{id} to a partial-update to avoid resetting unsent fields (minor).",
+    "Optional: add data-testid on pipeline wizard tabs (e.g. wizard-tab-stage-3) + opportunity-title-input + wizard-save-btn + documents-tab for more robust future automation. Not a functional bug."
+  ],
+  "critical_code_review_comments": [
+    "PASS: approve-handoff correctly gated via require_role('finance','admin') (server.py L1633) — returns 403 for sales role (verified).",
+    "PASS: approve-handoff only allowed when outcome='Won' AND handoff_status='Pending Finance' — both guard clauses return 400 (verified for Open and Lost opportunities, and for already-approved).",
+    "PASS: On approval, project is created with po_value = negotiated_value or proposal_value or expected_revenue (L1657), customer_name/customer_id/business_category copied, margin_pct mirrors estimated_margin_pct; handoff_status set to Approved with handoff_project_id linked (verified via GET /api/projects/{pid}).",
+    "PASS: On reject, no project is created and handoff_status=Rejected (verified by comparing /api/projects count before/after).",
+    "PASS: POST /api/projects/{pid}/documents enforces name via Query(..., min_length=1) — 422 when missing, persisted on doc and returned by GET /api/projects/{pid}/documents.",
+    "PASS: GET /api/dashboard/summary returns top_customers[:10] and vendor_exposure[:10] (server.py L940,L951).",
+    "PASS: Pipeline seed data (4 opportunities) is idempotent and returned by GET /api/pipeline.",
+    "MINOR: server.py is now ~1806 lines (up from 1497). Router-level split into /routers/pipeline.py, /routers/dashboard.py, /routers/sap.py becomes important for maintainability.",
+    "MINOR: PUT /api/pipeline uses payload.model_dump() which replaces all PipelineIn fields; non-sent fields fall back to PipelineIn defaults (see minor backend issue).",
+    "NOTE: GET /api/pipeline/summary returns a flat shape ({funnel, total_opportunities, pending_handoff, total_value, ...}) rather than a nested totals object. Matches BRD intent; worth documenting in BRD doc."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pipeline_iter6.py"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% of reviewed items verified"},
+  "test_credentials": "admin@crackerpro.com / Admin@123 (working). Test ephemeral user created per run: TEST_sales_iter6_<rand>@example.com / Sales@123 (cleaned up is not automatic but login works).",
+  "seed_data_creation": "Test file creates TEST_-prefixed pipeline opportunities and deletes them in test_zz_cleanup. The approve-handoff test creates a real project (auto-generated from pipeline) and deletes it at the end. Env is left clean: verified via pytest run completing with no residual TEST_ rows surfacing in next list.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 6 backend tests at /app/backend/tests/test_pipeline_iter6.py (16 tests, ~3s). Pipeline summary endpoint returns FLAT shape {funnel[], total_opportunities, open_count, won_count, lost_count, pending_handoff, total_value}. PUT /api/pipeline is a full-doc replace — always send the complete PipelineIn payload in tests. Admin user-create endpoint is /api/admin/users (not /api/users). Document upload returns {document, applied} envelope when apply_extracted flag is set; without the flag, still wrapped. Sales user created per test run has unique UUID suffix to avoid password collisions. UI has no data-testid on wizard stage tabs — tabs are plain divs with text 'Stage N' and clicking the div triggers the tab change (works).",
+  "rca_of_the_issue": "No bugs found in the feature implementation. All review-request acceptance criteria (pipeline CRUD, 5-stage advance, close Won pending-finance, admin-or-finance approval creating project, reject not creating project, 400 on non-Won, 403 for other roles, document name mandatory with 422, dashboard top-10, sidebar collapse + persistence, new nav items, Revenue KPI rename, Top 10 Suppliers title, stage/flag/handoff chips, wizard with * markers and no blocking validation, Project modal * markers) passed."
+}
