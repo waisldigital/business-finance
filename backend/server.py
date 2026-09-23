@@ -65,6 +65,47 @@ api = APIRouter(prefix="/api")
 get_current_user = make_get_current_user(db)
 
 
+def _env_admins() -> List[Dict[str, str]]:
+    """System admins from the environment: ADMIN1_EMAIL/ADMIN1_PASSWORD[/ADMIN1_NAME] and ADMIN2_*.
+    ADMIN_EMAIL/ADMIN_PASSWORD are accepted as admin1 for existing deployments. No defaults in code."""
+    out = []
+    for i in (1, 2):
+        email = os.environ.get(f"ADMIN{i}_EMAIL") or (os.environ.get("ADMIN_EMAIL") if i == 1 else None)
+        pwd = os.environ.get(f"ADMIN{i}_PASSWORD") or (os.environ.get("ADMIN_PASSWORD") if i == 1 else None)
+        if email and pwd:
+            out.append({"email": email.strip().lower(), "password": pwd,
+                        "name": os.environ.get(f"ADMIN{i}_NAME") or f"System Administrator {i}"})
+    return out
+
+
+async def _seed_env_admins() -> None:
+    import secrets as _secrets
+    admins = _env_admins()
+    keep = {a["email"] for a in admins}
+    for a in admins:
+        ex = await db.users.find_one({"email": a["email"]})
+        if not ex:
+            await db.users.insert_one({
+                "id": gen_id(), "email": a["email"], "password_hash": hash_password(a["password"]),
+                "name": a["name"], "role": "admin", "location": "HQ", "reporting_manager_email": None,
+                "is_active": True, "is_permanent_admin": True, "role_id": None, "created_at": now_iso(),
+            })
+            logger.info("Seeded admin %s", a["email"])
+        else:
+            upd = {"role": "admin", "is_permanent_admin": True, "is_active": True}
+            if not verify_password(a["password"], ex.get("password_hash", "")):
+                upd["password_hash"] = hash_password(a["password"])  # the environment is the source of truth
+            await db.users.update_one({"email": a["email"]}, {"$set": upd})
+    # Earlier builds seeded permanent admins with passwords published in the source code.
+    # Revoke any permanent admin not configured in the environment: scramble the password and
+    # drop the permanent flag, so a login can be re-issued from the employee master.
+    async for u in db.users.find({"is_permanent_admin": True}, {"_id": 0, "email": 1}):
+        if u["email"] not in keep:
+            await db.users.update_one({"email": u["email"]}, {"$set": {
+                "is_permanent_admin": False, "password_hash": hash_password(_secrets.token_urlsafe(32))}})
+            logger.warning("Revoked hard-coded permanent admin %s (password scrambled)", u["email"])
+
+
 def require_role(*roles):
     async def _dep(user: dict = Depends(get_current_user)):
         if user.get("role") not in roles:
@@ -112,24 +153,10 @@ async def on_startup():
         await db.employees.delete_many({"employee_no": {"$exists": False}})
         logger.info("Migrated out %d legacy employee rows", legacy)
 
-    # Admin seed
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@crackerpro.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin@123")
-    existing = await db.users.find_one({"email": admin_email})
-    if not existing:
-        await db.users.insert_one({
-            "id": gen_id(), "email": admin_email,
-            "password_hash": hash_password(admin_password),
-            "name": "System Administrator", "role": "admin",
-            "location": "HQ", "reporting_manager_email": None,
-            "is_active": True, "created_at": now_iso(),
-        })
-        logger.info("Seeded admin user %s", admin_email)
-    elif not verify_password(admin_password, existing.get("password_hash", "")):
-        await db.users.update_one(
-            {"email": admin_email},
-            {"$set": {"password_hash": hash_password(admin_password)}},
-        )
+    # Admin seed — the two system admins come from the environment only (ADMIN1_*/ADMIN2_*);
+    # everyone else gets a login through the employee master.
+    await _seed_env_admins()
+    admin_email = (_env_admins()[0]["email"] if _env_admins() else "admin@crackerpro.com")
 
     # Seed default approval rule(s) and sample data once — idempotent by name
     default_rules = [
@@ -214,33 +241,6 @@ async def on_startup():
              "role_zoho": "Head Business Finance", "l1_manager": "W0839", "location": "New Delhi",
              "department": "Finance", "sub_department": "Business Finance", "created_at": now_iso()},
         ])
-
-    # Permanent admin users (cannot be replaced via Excel, cannot be deleted)
-    permanent_admins = [
-        {"email": "rohit.kataria@waisldigital.com", "name": "Rohit Kataria", "password": "RKataria@121"},
-        {"email": "tushar.sukhija@waisldigital.com", "name": "Tushar Sukhija", "password": "TSukhija@121"},
-    ]
-    for pa in permanent_admins:
-        ex = await db.users.find_one({"email": pa["email"]})
-        if not ex:
-            await db.users.insert_one({
-                "id": gen_id(), "email": pa["email"],
-                "password_hash": hash_password(pa["password"]),
-                "name": pa["name"], "role": "admin",
-                "location": "New Delhi", "reporting_manager_email": None,
-                "is_active": True, "is_permanent_admin": True,
-                "role_id": None, "created_at": now_iso(),
-            })
-            logger.info("Seeded permanent admin %s", pa["email"])
-        else:
-            # Ensure they remain permanent admin + correct password
-            await db.users.update_one(
-                {"email": pa["email"]},
-                {"$set": {
-                    "role": "admin", "is_permanent_admin": True, "is_active": True,
-                    "password_hash": hash_password(pa["password"]),
-                }}
-            )
 
     if await db.projects.count_documents({}) == 0:
         cust_list = await db.customers.find({}, {"_id": 0}).to_list(10)
@@ -803,11 +803,8 @@ async def delete_employee(eid: str, user: dict = Depends(require_role("admin")))
     return {"ok": True}
 
 
-# Permanent admin emails (lowercased) — these are NEVER touched by Excel replace
-PERMANENT_ADMIN_EMPLOYEES_LOWER = {
-    "rohit.kataria@waisldigital.com",
-    "tushar.sukhija@waisldigital.com",
-}
+# Permanent admin emails (lowercased) — the env-configured admins; NEVER touched by Excel replace
+PERMANENT_ADMIN_EMPLOYEES_LOWER = {a["email"] for a in _env_admins()}
 
 
 # BRD-format employee template (used by EmployeesPage)

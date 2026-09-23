@@ -19,6 +19,10 @@ services:
         value: admin@crackerpro.com
       - key: ADMIN_PASSWORD
         sync: false
+      - key: ADMIN2_EMAIL
+        sync: false
+      - key: ADMIN2_PASSWORD
+        sync: false
       - key: CORS_ORIGINS
         sync: false
       - key: CORS_ORIGIN_REGEX

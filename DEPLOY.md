@@ -49,3 +49,13 @@ per dataset in **Data manager → Columns**.
 
 Storage: `aop_rows` (all datasets, unique `dataset + key`), `aop_actuals` (the single actual source),
 `aop_dataset_meta` (columns), `aop_changes` (approval queue), `aop_history`, `aop_config`, `aop_imports`.
+
+## Logins
+
+* **Admins (2):** set in Render → Environment: `ADMIN_EMAIL` / `ADMIN_PASSWORD` (admin1) and
+  `ADMIN2_EMAIL` / `ADMIN2_PASSWORD` (admin2), optional `ADMIN1_NAME` / `ADMIN2_NAME`. They are
+  re-applied on every start, so rotating a password = change the env var + redeploy.
+* **Everyone else:** Admin portal → Users & employees → add / edit an employee with Email ID,
+  an initial password and a Workspace Role (or bulk-upload the employee template with the
+  Password and Roles columns). They sign in at `/login` with that email + password and land in `/app`,
+  seeing only the sections their role allows.
