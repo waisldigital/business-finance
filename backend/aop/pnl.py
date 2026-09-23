@@ -54,15 +54,30 @@ OH_BLOCKS = [
 SHARED = "shared services"
 
 
+# Region names as they appear across the datasets → the regions used in the regional P&L
+REGION_ALIASES = {"mea": "ME", "me": "ME", "middle east": "ME", "eu & uk": "Europe", "europe": "Europe", "uk": "Europe",
+                  "sea": "SEA", "anz": "ANZ", "americas": "Americas", "us": "Americas", "india": "India"}
+
+
+def region_of(v) -> str:
+    return REGION_ALIASES.get(norm(v), str(v).strip() if v not in (None, "") else "")
+
+
 class Filters:
-    def __init__(self, geo: str = "All", tag: str = "All", exclude: Optional[Iterable[str]] = None):
+    def __init__(self, geo: str = "All", tag: str = "All", exclude: Optional[Iterable[str]] = None,
+                 region: str = "All"):
         self.geo = geo or "All"
         self.tag = tag or "All"
         self.exclude = {norm(x) for x in (exclude or []) if x and norm(x) != "all"}
+        # region (India / ME / SEA / Europe / ANZ / Americas) — used by the regional P&L only
+        self.region = region or "All"
 
     @property
     def unfiltered(self) -> bool:
-        return norm(self.geo) == "all" and norm(self.tag) == "all" and not self.exclude
+        return norm(self.geo) == "all" and norm(self.tag) == "all" and not self.exclude and norm(self.region) == "all"
+
+    def region_ok(self, v) -> bool:
+        return norm(self.region) == "all" or norm(region_of(v)) == norm(region_of(self.region))
 
     def geo_ok(self, v) -> bool:
         return norm(self.geo) == "all" or norm(v) == norm(self.geo)
@@ -123,6 +138,14 @@ class PnLEngine:
         self.alloc = self._allocations()
         self.snapshot = {r.get("row_id"): r.get("value") for r in data.get("pl_snapshot", [])}
         self.overrides: Dict[str, float] = {}  # plan-total overrides (e.g. tax from the tax computation)
+        # actuals carry no region: resolve it through the source row (project id / payroll project code)
+        self.project_region = {}
+        for ds in ("project_master", "rev_projects"):
+            for r in data.get(ds, []):
+                if r.get("project_id") and r.get("region"):
+                    self.project_region[str(r["project_id"])] = r["region"]
+        self.payroll_region = {str(r["project_code"]): r.get("location") for r in data.get("payroll_lines", [])
+                               if r.get("project_code")}
 
     # ------------------------------------------------------------------ helpers
     def _allocations(self) -> Dict[str, float]:
@@ -186,18 +209,23 @@ class PnLEngine:
                                 b_base_fn=lambda r: _n(r.get(vkey(self.BB, "total"))))
 
     def rev_projects(self, f: Filters, category: str) -> Series:
-        pred = lambda r: norm(r.get("category")) == norm(category) and f.geo_ok(r.get("geo")) and f.tag_ok(r.get("tag"))
+        pred = lambda r: norm(r.get("category")) == norm(category) and f.geo_ok(r.get("geo")) and f.tag_ok(r.get("tag")) \
+            and f.region_ok(r.get("region") or r.get("geo"))
         s = self.line_series("rev_projects", "rev_projects", pred,
-                             pred_act=lambda d: norm(d.get("stream")) == norm(category) and f.geo_ok(d.get("geo")) and f.tag_ok(d.get("tag")))
+                             pred_act=lambda d: norm(d.get("stream")) == norm(category) and f.geo_ok(d.get("geo")) and f.tag_ok(d.get("tag"))
+                             and f.region_ok(self.project_region.get(str(d.get("project_id")), d.get("geo"))))
         if category == "Projects":
             s["b_base"] = sum(_n(r.get("revenue_b_base")) for r in self.data.get("project_master", [])
-                              if norm(r.get("category")) == "projects" and f.tag_ok(r.get("tag"), apply_exclusions=False))
+                              if norm(r.get("category")) == "projects" and f.tag_ok(r.get("tag"), apply_exclusions=False)
+                              and f.region_ok(r.get("region") or r.get("geo")))
         return s
 
     def payroll(self, f: Filters, category: str, *, shared: Optional[bool] = None, dept: Optional[str] = None,
                 ver: Optional[str] = None, zero_base: bool = False) -> Series:
         def ok(r):
             if norm(r.get("category")) != norm(category) or not f.geo_ok(r.get("geo")):
+                return False
+            if not f.region_ok(r.get("location") or r.get("geo")):
                 return False
             t = norm(r.get("tag"))
             if dept is not None:
@@ -218,7 +246,13 @@ class PnLEngine:
             fcst_fn = lambda r, p: _n(r.get(vkey(self.BB + "T", p)))
         else:
             plan_fn = None
-        s = self.line_series("payroll_lines", "payroll", ok, plan_ver=ver, plan_fn=plan_fn, fcst_fn=fcst_fn,
+        act_ok = None
+        if norm(f.region) != "all":
+            def act_ok(d):
+                d = dict(d)
+                d["location"] = self.payroll_region.get(str(d.get("project_code")), d.get("geo"))
+                return ok(d)
+        s = self.line_series("payroll_lines", "payroll", ok, pred_act=act_ok, plan_ver=ver, plan_fn=plan_fn, fcst_fn=fcst_fn,
                              b_base_fn=lambda r: _n(r.get(vkey(self.BB, "total"))))
         if zero_base:  # nothing "to be hired" in actual months or the prior-year budget column
             cut = self.cutoff("payroll")
@@ -231,6 +265,8 @@ class PnLEngine:
         def ok(r):
             if norm(r.get("category")) != norm(category) or not f.geo_ok(r.get("geo")):
                 return False
+            if not f.region_ok(r.get("region") or r.get("geo")):
+                return False
             t = norm(r.get("tag"))
             if shared is True:
                 return t == SHARED
@@ -240,7 +276,8 @@ class PnLEngine:
         s = self.line_series("opex_lines", "opex", ok)
         if projects_budget:  # the plan uses project master TP cost / 12 instead of PO lines
             pm = [r for r in self.data.get("project_master", [])
-                  if norm(r.get("category")) == norm(category) and f.geo_ok(r.get("geo")) and f.tag_ok(r.get("tag"))]
+                  if norm(r.get("category")) == norm(category) and f.geo_ok(r.get("geo")) and f.tag_ok(r.get("tag"))
+                  and f.region_ok(r.get("region") or r.get("geo"))]
             fld = "tp_cost_b_plan" if self.plan_fy == self.approved_fy else f"tp_cost_b{self.plan_fy[2:]}"
             if any(fld in r for r in pm):
                 annual = sum(_n(r.get(fld)) for r in pm)
@@ -389,12 +426,12 @@ class PnLEngine:
         for p in [p for p in self.base_m if p > cut] + self.plan_m:
             tax[p] = pbt.get(p, 0.0) * self.tax_rate
         dtax = self.pl_other("deferred_tax")
-        add("depreciation", "Less: Depreciation", dep, snap="less_depreciation")
-        add("interest", "Less: Interest", intr, snap="less_interest")
-        add("interest_income", "Add: Interest Income", inc, snap="add_interest_income")
+        add("depreciation", "Less: Depreciation", dep, level=0, snap="less_depreciation")
+        add("interest", "Less: Interest", intr, level=0, snap="less_interest")
+        add("interest_income", "Add: Interest Income", inc, level=0, snap="add_interest_income")
         add("pbt", "PBT", pbt, level=0, kind="total", snap="pbt")
-        add("taxes", "Less: Taxes", tax, snap="less_taxes")
-        add("deferred_tax", "Less: Deferred Tax", dtax, snap="less_deferred_tax")
+        add("taxes", "Less: Taxes", tax, level=0, snap="less_taxes")
+        add("deferred_tax", "Less: Deferred Tax", dtax, level=0, snap="less_deferred_tax")
         pat = pbt - (tax + dtax)
         add("pat", "PAT", pat, level=0, kind="total", snap="pat")
         add("pat_pct", "PAT Margin", ("pat", "revenue"), pct=True, snap="pat_margin")

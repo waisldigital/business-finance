@@ -30,6 +30,7 @@ from .opex import INPUT_FIELDS as TRACKER_INPUTS, forecast_line
 from .plan import build_draft, default_drivers
 from . import reports as rep
 from .pnl import Filters, PnLEngine
+from . import mis
 
 ACTUAL_COLUMNS = [
     column("uid", "Unique key"), column("domain", "Domain"), column("ref", "Line ref"), column("period", "Period (YYYY-MM)"),
@@ -108,7 +109,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             return cache["data"], cache["actuals"], cfg
         data: Dict[str, List[Dict[str, Any]]] = {}
         needed = ["rev_cute", "rev_noncute", "rev_projects", "project_master", "opex_lines", "payroll_lines",
-                  "overhead_lines", "overhead_plan", "assumptions", "pl_other", "pl_snapshot"]
+                  "overhead_lines", "overhead_plan", "assumptions", "pl_other", "pl_snapshot", "rev_cute_drivers"]
         async for d in db.aop_rows.find({"dataset": {"$in": needed}}, {"_id": 0, "dataset": 1, "fields": 1}):
             data.setdefault(d["dataset"], []).append(d.get("fields") or {})
         actuals = [a async for a in db.aop_actuals.find({}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
@@ -178,8 +179,14 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     @r.put("/config")
     async def update_config(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
         require_admin(user)
-        allowed = {"base_fy", "plan_fy", "draft_fy", "cutoffs", "tax_rate", "edit_modes", "drivers"}
+        allowed = {"base_fy", "plan_fy", "draft_fy", "cutoffs", "tax_rate", "edit_modes", "drivers", "report_formats",
+                   "mis_segments", "mis_solutions_noncute"}
         upd = {k: v for k, v in payload.items() if k in allowed}
+        if "report_formats" in upd:
+            keys = {f["key"] for f in mis.FORMATS}
+            upd["report_formats"] = {k: bool(v) for k, v in (upd["report_formats"] or {}).items() if k in keys}
+        if "mis_segments" in upd:
+            upd["mis_segments"] = {k: v for k, v in (upd["mis_segments"] or {}).items() if v in ("solutions", "ca_cr", "common")}
         if "edit_modes" in upd:
             upd["edit_modes"] = {k: ("approval" if v == "approval" else "direct") for k, v in upd["edit_modes"].items() if k in AOP_SECTIONS}
         await db.aop_config.update_one({"id": "aop"}, {"$set": upd}, upsert=True)
@@ -648,11 +655,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         ("b_draft", 1, "plan", "B {draft}", "budget"),
     ]
 
-    @r.get("/pnl")
-    async def pnl(geo: str = "All", tag: str = "All", exclude: Optional[str] = None, user: dict = Depends(get_current_user)):
-        """P&L in column blocks: B base · A base · B plan · plan A/F · B draft, plus variances.
-        Two engine runs: (base → plan) reproduces the approved workbook, (plan → draft) gives the current
-        year's actual/forecast and next year's budget."""
+    async def pnl_guard(user: dict, tag: str):
         p = await perms_for(user)
         if not (p["admin"] or p["sections"]["aop_pnl"]["can_view"]):
             raise HTTPException(403, "You don't have access to the P&L")
@@ -661,7 +664,19 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                 tag = p["tags"][0]
             else:
                 raise HTTPException(403, "Select one of your permitted airports / entities")
+        return p, tag
+
+    @r.get("/pnl")
+    async def pnl(geo: str = "All", tag: str = "All", exclude: Optional[str] = None, user: dict = Depends(get_current_user)):
+        """P&L in column blocks: B base · A base · B plan · plan A/F · B draft, plus variances.
+        Two engine runs: (base → plan) reproduces the approved workbook, (plan → draft) gives the current
+        year's actual/forecast and next year's budget."""
+        p, tag = await pnl_guard(user, tag)
         data, actuals, cfg = await load_all()
+        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        return pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok)
+
+    def pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok, mask=True):
         base, plan = cfg["base_fy"], cfg["plan_fy"]
         draft = cfg.get("draft_fy") or shift_fy(plan, 1)
         flt = Filters(geo, tag, [x for x in (exclude or "").split(",") if x])
@@ -703,8 +718,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         for b in blocks:
             for c in b["columns"]:
                 c.pop("src", None)
-        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
-        if not payroll_ok:
+        if mask and not payroll_ok:
             for row in rows:
                 if row["sensitive"]:
                     row["values"] = None
@@ -714,6 +728,67 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                 "meta": {"base_fy": base, "plan_fy": plan, "draft_fy": draft, "cutoffs": cfg["cutoffs"],
                          "payroll_visible": payroll_ok, "draft_ready": draft_ready,
                          "filters": {"geo": geo, "tag": tag, "exclude": exclude}}}
+
+    # ------------------------------------------------------------------ MIS report formats
+    def mis_cfg(cfg):
+        return {**cfg, "draft_fy": cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1)}
+
+    @r.get("/mis/formats")
+    async def mis_formats(user: dict = Depends(get_current_user)):
+        p = await perms_for(user)
+        cfg = await get_config()
+        allowed = {s for s, v in p["sections"].items() if v["can_view"]}
+        formats = mis.formats_for(cfg, None if p["admin"] else allowed, p["admin"])
+        if p["tags"]:  # the regional P&L spans every entity
+            formats = [f for f in formats if f["key"] != "regional_pnl"]
+        return {"formats": formats,
+                "segment_rules": mis.segment_rules(cfg), "blocks": [b for b, _ in mis.OH_BLOCKS],
+                "solutions_noncute": mis.DEFAULT_SOLUTIONS_NONCUTE if cfg.get("mis_solutions_noncute") is None
+                else cfg["mis_solutions_noncute"]}
+
+    async def format_guard(key: str, cfg: Dict[str, Any], p: Dict[str, Any]):
+        if not p["admin"] and not (cfg.get("report_formats") or {}).get(key, True):
+            raise HTTPException(403, "This report format is disabled by the administrator")
+
+    @r.get("/mis/full-pnl")
+    async def mis_full_pnl(geo: str = "All", tag: str = "All", exclude: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+        p, tag = await pnl_guard(user, tag)
+        data, actuals, cfg = await load_all()
+        await format_guard("full_pnl", cfg, p)
+        cfg = mis_cfg(cfg)
+        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        base = pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok, mask=False)
+        flt = Filters(geo, tag, [x for x in (exclude or "").split(",") if x])
+        out = mis.full_pnl(base, cfg, payroll_ok, mis.solutions_noncute(data, actuals, cfg, flt))
+        out["meta"] = {**base["meta"], "filters": {"geo": geo, "tag": tag, "exclude": exclude}}
+        return out
+
+    @r.get("/mis/revenue")
+    async def mis_revenue(geo: str = "All", tag: str = "All", exclude: Optional[str] = None,
+                          user: dict = Depends(get_current_user)):
+        p, tag = await pnl_guard(user, tag)
+        data, actuals, cfg = await load_all()
+        await format_guard("revenue_performance", cfg, p)
+        cfg = mis_cfg(cfg)
+        out = mis.revenue_performance(data, actuals, cfg, Filters(geo, tag, [x for x in (exclude or "").split(",") if x]))
+        out["meta"] = {"base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"], "draft_fy": cfg["draft_fy"],
+                       "cutoffs": cfg["cutoffs"], "filters": {"geo": geo, "tag": tag, "exclude": exclude}}
+        return out
+
+    @r.get("/mis/regional")
+    async def mis_regional(user: dict = Depends(get_current_user)):
+        p = await perms_for(user)
+        if p["tags"]:
+            raise HTTPException(403, "The regional P&L covers all entities — your role is limited to specific airports")
+        p, _ = await pnl_guard(user, "All")
+        data, actuals, cfg = await load_all()
+        await format_guard("regional_pnl", cfg, p)
+        cfg = mis_cfg(cfg)
+        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        out = mis.regional_pnl(data, actuals, cfg, payroll_ok)
+        out["meta"] = {"base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"], "draft_fy": cfg["draft_fy"], "cutoffs": cfg["cutoffs"]}
+        return out
 
     # ------------------------------------------------------------------ next-year draft
     @r.get("/plan/drivers")

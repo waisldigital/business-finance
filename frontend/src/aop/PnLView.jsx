@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { Globe, AirplaneTilt, Prohibit, ListBullets, ListDashes, LockSimple, ArrowClockwise, DownloadSimple, Info } from "@phosphor-icons/react";
+import { Globe, AirplaneTilt, Prohibit, LockSimple, ArrowClockwise, DownloadSimple, Info } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, download } from "./format";
 import ColumnSettings, { usePersistedColumns } from "./ColumnSettings";
+import { useTree } from "./mis";
+import { TreeLabel, ExpandButtons, Modal } from "./MisCommon";
+import RevenuePerformance from "./RevenuePerformance";
+
+// Headline ratios stay visible when the P&L is collapsed to its consolidated view
+const HEADLINE = new Set(["gm_pct", "ebitda_pct", "pat_pct", "cash_pct"]);
+const pinned = (r) => HEADLINE.has(r.id);
 
 // Default view: current-year actual/forecast and next year's budget; prior-year actuals and the
 // approved budget are one click away in the gear menu.
@@ -11,13 +18,14 @@ const DEFAULT_COLS = {
   months: { a_base: false, b_plan: false, af_plan: false, b_draft: true },
 };
 
-export default function PnLView() {
+export default function PnLView({ unit: unitProp }) {
   const [filters, setFilters] = useState({ geo: ["All", "India", "International"], tags: ["All"] });
   const [geo, setGeo] = useState("All");
   const [tag, setTag] = useState("All");
   const [exclude, setExclude] = useState([]);
-  const [unit, setUnit] = useState("cr");
-  const [detail, setDetail] = useState(true);
+  const [ownUnit, setUnit] = useState("cr");
+  const unit = unitProp || ownUnit;
+  const [drill, setDrill] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -43,7 +51,9 @@ export default function PnLView() {
     ...b, columns: b.columns.filter((c) => !c.month || colCfg.months[b.key]),
   })), [data, colCfg]);
   const cols = blocks.flatMap((b) => b.columns.map((c, i) => ({ ...c, block: b, first: i === 0 })));
-  const rows = useMemo(() => (data?.rows || []).filter((r) => detail || r.level <= 1 || r.pct), [data, detail]);
+  const allRows = useMemo(() => data?.rows || [], [data]);
+  const tree = useTree(allRows, { byLevel: true, defaultOpen: true, pinned });
+  const rows = allRows.filter(tree.visible);
 
   const cell = (r, c) => {
     const v = r.values?.[c.key];
@@ -56,7 +66,7 @@ export default function PnLView() {
   const exportCsv = () => {
     const head = ["Particular", ...cols.map((c) => `${c.block.label} ${c.month ? c.label : ""}`.trim())];
     const div = unit === "cr" ? 1e7 : 1e5;
-    const lines = [head, ...rows.map((r) => [r.label, ...cols.map((c) => {
+    const lines = [head, ...allRows.map((r) => [r.label, ...cols.map((c) => {
       const v = r.values?.[c.key];
       if (!r.values) return "restricted";
       return c.kind === "pct" || r.pct ? v : (v ?? 0) / div;
@@ -85,14 +95,13 @@ export default function PnLView() {
         </select>
         {exclude.map((x) => <button key={x} className="chip hover:border-[var(--danger)]" onClick={() => setExclude((e) => e.filter((y) => y !== x))} title="Remove">{x} ×</button>)}
         <div className="flex-1" />
-        <div className="seg" title="Rows">
-          <button className={!detail ? "on" : ""} onClick={() => setDetail(false)} title="Summary"><ListDashes size={12} /></button>
-          <button className={detail ? "on" : ""} onClick={() => setDetail(true)} title="Detail"><ListBullets size={12} /></button>
-        </div>
-        <div className="seg" title="Units">
-          <button className={unit === "cr" ? "on" : ""} onClick={() => setUnit("cr")}>₹ Cr</button>
-          <button className={unit === "lakh" ? "on" : ""} onClick={() => setUnit("lakh")}>₹ L</button>
-        </div>
+        <ExpandButtons tree={tree} />
+        {!unitProp && (
+          <div className="seg" title="Units">
+            <button className={unit === "cr" ? "on" : ""} onClick={() => setUnit("cr")}>₹ Cr</button>
+            <button className={unit === "lakh" ? "on" : ""} onClick={() => setUnit("lakh")}>₹ L</button>
+          </div>
+        )}
         <ColumnSettings blocks={settingsBlocks} value={colCfg} onChange={setColCfg} onReset={resetCols} testid="pnl-columns" />
         <button className="icon-btn" onClick={exportCsv} title="Export view (csv)"><DownloadSimple size={13} /></button>
         <button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} className={loading ? "animate-spin" : ""} /></button>
@@ -125,10 +134,13 @@ export default function PnLView() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className={`${r.kind === "total" ? "total" : r.kind === "subtotal" ? "subtotal" : ""} ${r.pct ? "pct" : ""}`} data-testid={`pnl-row-${r.id}`}>
-                  <td className="lbl" style={{ paddingLeft: 8 + (r.level || 0) * 14 }}>
-                    <span className="inline-flex items-center gap-1">{r.masked && <LockSimple size={10} className="text-[var(--muted)]" />}{r.label}</span>
+              {rows.map((r) => {
+                const isRev = r.id === "revenue" || tree.parentOf[r.id] === "revenue";
+                return (
+                <tr key={r.id} className={`${r.kind === "total" ? "total" : r.kind === "subtotal" ? "subtotal" : ""} ${r.pct ? "pct" : ""} ${isRev ? "cursor-zoom-in" : ""}`}
+                    onDoubleClick={isRev ? () => setDrill(true) : undefined} data-testid={`pnl-row-${r.id}`}>
+                  <td className="lbl">
+                    <TreeLabel row={r} tree={tree} depth={pinned(r) ? 1 : tree.depth(r.id)} title={isRev ? "Double-click for revenue performance" : undefined} />
                   </td>
                   {cols.map((c) => {
                     const v = r.values?.[c.key];
@@ -140,10 +152,16 @@ export default function PnLView() {
                     );
                   })}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
+      )}
+      {drill && (
+        <Modal title="Revenue performance — Actuals vs AOP" onClose={() => setDrill(false)} testid="revenue-drill">
+          <RevenuePerformance unit={unit} geo={geo} tag={tag} embedded />
+        </Modal>
       )}
     </div>
   );

@@ -23,7 +23,7 @@ import EmployeesPage from "@/pages/EmployeesPage";
 import PnLPage from "@/pages/aop/PnLPage";
 import AopSectionPage from "@/pages/aop/AopSectionPage";
 import MyChangesPage from "@/pages/aop/MyChangesPage";
-import ReportsPage from "@/pages/aop/ReportsPage";
+import AopReportsPage from "@/pages/aop/AopReportsPage";
 import AdminHome from "@/pages/admin/AdminHome";
 import AdminDataPage from "@/pages/admin/AdminDataPage";
 import AdminImportsPage from "@/pages/admin/AdminImportsPage";
@@ -38,7 +38,7 @@ const Loading = () => (
 
 // User workspace sections in landing order: (path, section)
 const USER_HOMES = [
-  ["/app/dashboard", "dashboard"], ["/app/aop/pnl", "aop_pnl"], ["/app/aop/inputs", "aop_inputs"],
+  ["/app/dashboard", "dashboard"], ["/app/aop/reports", "aop_pnl"], ["/app/aop/inputs", "aop_inputs"],
   ["/app/aop/revenue", "aop_revenue"], ["/app/aop/opex", "aop_opex"], ["/app/aop/overheads", "aop_overheads"],
   ["/app/aop/payroll", "aop_payroll"], ["/app/aop/capex", "aop_capex"], ["/app/aop/reports", "aop_reports"], ["/app/pipeline", "pipeline"],
   ["/app/projects", "projects"], ["/app/change-requests", "change_requests"], ["/app/customers", "customer_profile"],
@@ -55,7 +55,7 @@ function AdminRoute({ children }) {
 }
 
 // /app/* — workspace sections gated by the role's can_view. Admins use the admin portal instead.
-function UserRoute({ section, anyAop, children }) {
+function UserRoute({ section, sections, anyAop, children }) {
   const { user } = useAuth();
   const { permissions, loading } = usePermissions();
   if (user === null || loading) return <Loading />;
@@ -63,7 +63,7 @@ function UserRoute({ section, anyAop, children }) {
   if (user.role === "admin") return <Navigate to="/admin" replace />;
   const allowed = anyAop
     ? Object.keys(permissions || {}).some((k) => k.startsWith("aop_") && permissions[k]?.can_view)
-    : !!permissions?.[section]?.can_view;
+    : sections ? sections.some((s) => permissions?.[s]?.can_view) : !!permissions?.[section]?.can_view;
   if (!allowed) {
     const first = USER_HOMES.find(([, s]) => permissions?.[s]?.can_view);
     return <Navigate to={first ? first[0] : "/app"} replace />;
@@ -124,14 +124,14 @@ function App() {
                   <Route path="/app/wbs-budget" element={U("wbs_budget", <WBSBudgetPage />)} />
                   <Route path="/app/customers" element={U("customer_profile", <MasterPage entityKey="customers" />)} />
                   <Route path="/app/customers/:id" element={U("customer_profile", <CustomerProfilePage />)} />
-                  <Route path="/app/aop/pnl" element={U("aop_pnl", <PnLPage />)} />
+                  <Route path="/app/aop/pnl" element={<Navigate to="/app/aop/reports" replace />} />
                   <Route path="/app/aop/inputs" element={U("aop_inputs", <AopSectionPage section="aop_inputs" />)} />
                   <Route path="/app/aop/revenue" element={U("aop_revenue", <AopSectionPage section="aop_revenue" />)} />
                   <Route path="/app/aop/opex" element={U("aop_opex", <AopSectionPage section="aop_opex" />)} />
                   <Route path="/app/aop/overheads" element={U("aop_overheads", <AopSectionPage section="aop_overheads" />)} />
                   <Route path="/app/aop/payroll" element={U("aop_payroll", <AopSectionPage section="aop_payroll" />)} />
                   <Route path="/app/aop/capex" element={U("aop_capex", <AopSectionPage section="aop_capex" />)} />
-                  <Route path="/app/aop/reports" element={U("aop_reports", <ReportsPage />)} />
+                  <Route path="/app/aop/reports" element={<UserRoute sections={["aop_pnl", "aop_reports"]}><AopReportsPage /></UserRoute>} />
                   <Route path="/app/aop/changes" element={<UserRoute anyAop><MyChangesPage /></UserRoute>} />
 
                   {/* ---------- admin portal ---------- */}
@@ -140,7 +140,7 @@ function App() {
                   <Route path="/admin/aop/imports" element={A(<AdminImportsPage />)} />
                   <Route path="/admin/aop/approvals" element={A(<AdminAopApprovals />)} />
                   <Route path="/admin/aop/pnl" element={A(<PnLPage admin />)} />
-                  <Route path="/admin/aop/reports" element={A(<ReportsPage />)} />
+                  <Route path="/admin/aop/reports" element={A(<AopReportsPage admin />)} />
                   <Route path="/admin/aop/settings" element={A(<AdminPlanSettings />)} />
                   <Route path="/admin/approvals" element={A(<ApprovalsPage />)} />
                   <Route path="/admin/employees" element={A(<EmployeesPage />)} />

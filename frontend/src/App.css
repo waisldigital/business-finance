@@ -32,3 +32,58 @@
 .pnl-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .pnl-table td.fc { background: color-mix(in srgb, var(--surface-2) 60%, var(--surface)); }
 .pnl-table td.tot, .pnl-table th.tot { border-left: 1px solid var(--border); font-weight: 700; }
+
+/* ---------- MIS report formats (palette from the WAISL MIS pack) ---------- */
+.mis {
+  --mis-head: #0f1f3d; --mis-cacr: #31869b; --mis-sol: #963634; --mis-tot: #1e3a5f;
+  --mis-cacr-t: color-mix(in srgb, #b7dee8 55%, var(--surface));
+  --mis-sol-t: color-mix(in srgb, #e6b8b7 50%, var(--surface));
+  --mis-tot-t: color-mix(in srgb, #c5d9f1 55%, var(--surface));
+  --mis-key: color-mix(in srgb, #ebf5ff 80%, var(--surface));
+  --mis-band: color-mix(in srgb, #edf2f7 80%, var(--surface));
+  --mis-child: color-mix(in srgb, #f2f2f2 70%, var(--surface));
+  --mis-line: color-mix(in srgb, #cbd5e1 70%, var(--surface));
+}
+html[data-theme="charcoal"] .mis, html[data-theme="midnight"] .mis {
+  --mis-cacr-t: color-mix(in srgb, #31869b 22%, var(--surface));
+  --mis-sol-t: color-mix(in srgb, #963634 22%, var(--surface));
+  --mis-tot-t: color-mix(in srgb, #1e3a5f 35%, var(--surface));
+  --mis-key: color-mix(in srgb, #3b82f6 12%, var(--surface));
+  --mis-band: color-mix(in srgb, #94a3b8 8%, var(--surface));
+  --mis-child: color-mix(in srgb, #94a3b8 4%, var(--surface));
+  --mis-line: var(--border);
+}
+.mis-card { border: 1px solid var(--border); background: var(--surface); }
+.mis-card > .mis-title { background: var(--mis-head); color: #fff; display: flex; align-items: center; gap: 8px; padding: 5px 10px; }
+.mis-table { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.mis-table th, .mis-table td { padding: 3px 8px; white-space: nowrap; border-bottom: 1px solid var(--mis-line); }
+.mis-table thead th { position: sticky; top: 0; z-index: 2; color: #fff; font-weight: 600; font-size: 10.5px; text-align: center; }
+.mis-table thead tr:nth-child(2) th { top: 23px; }
+.mis-table th.h-head { background: var(--mis-head); text-align: left; }
+.mis-table th.h-cacr { background: var(--mis-cacr); } .mis-table th.h-sol { background: var(--mis-sol); }
+.mis-table th.h-tot { background: var(--mis-tot); } .mis-table th.h-sub { background: color-mix(in srgb, var(--mis-sol) 75%, #fff); }
+.mis-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mis-table td.v-cacr { background: var(--mis-cacr-t); } .mis-table td.v-sol { background: var(--mis-sol-t); }
+.mis-table td.v-tot { background: var(--mis-tot-t); }
+.mis-table td.gl { border-left: 1px solid var(--mis-line); }
+.mis-table .lbl { position: sticky; left: 0; z-index: 1; background: var(--surface); min-width: 250px; text-align: left; }
+.mis-table thead .lbl { z-index: 3; background: var(--mis-head); }
+.mis-table tr.key td { background-color: var(--mis-key); font-weight: 700; }
+.mis-table tr.key td.lbl { background: var(--mis-key); }
+.mis-table tr.sub td { font-weight: 600; }
+.mis-table tr.child td { background-color: var(--mis-child); }
+.mis-table tr.child td.lbl { background: var(--mis-child); }
+.mis-table tr.pct td { font-style: italic; color: var(--muted); }
+.mis-table tr.grand td { background: var(--mis-head) !important; color: #fff; font-weight: 700; }
+.mis-table td.neg { color: var(--danger); }
+.mis-table tr.grand td.neg { color: #fca5a5; }
+.mis-table tr.dbl td.lbl { cursor: zoom-in; }
+.tree-btn { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--border);
+  font-size: 10px; line-height: 1; color: var(--muted); background: var(--surface); flex-shrink: 0; }
+.tree-btn:hover { border-color: var(--gold); color: var(--gold); }
+/* the AOP-format P&L and analysis tables take the MIS palette on the AOP reports page */
+.mis .pnl-table thead th { background: var(--mis-head); color: #fff; }
+.mis .pnl-table thead th .opacity-70 { color: #cbd5e1; }
+.mis .pnl-table tr.total td { background: var(--mis-key); }
+.mis .pnl-table tr.subtotal td { background: var(--mis-band); }
+.mis .pnl-table td.fc { background: var(--mis-child); }

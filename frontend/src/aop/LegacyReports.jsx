@@ -1,43 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
 import ColumnSettings, { usePersistedColumns } from "@/aop/ColumnSettings";
 import PoDrawer from "@/aop/PoDrawer";
 import { fmtAmount, fmtPct, download } from "@/aop/format";
-import { ChartBar, CaretRight, CaretDown, DownloadSimple, ArrowClockwise, WarningCircle, CheckCircle } from "@phosphor-icons/react";
+import { CaretRight, CaretDown, DownloadSimple, ArrowClockwise, WarningCircle, CheckCircle } from "@phosphor-icons/react";
 
-const TABS = [
-  { key: "margin", label: "Airport margin profile" },
-  { key: "opex", label: "Opex budget vs forecast" },
-  { key: "overheads", label: "Overheads by department" },
-  { key: "wbs", label: "WBS" },
-];
-
-export default function ReportsPage() {
-  const [params, setParams] = useSearchParams();
-  const tab = params.get("r") || "margin";
-  const [unit, setUnit] = useState("cr");
-  return (
-    <div data-testid="aop-reports">
-      <Header icon={ChartBar} title="Reports" subtitle="Built on the same datasets and single actual source as the P&L"
-              actions={<div className="seg"><button className={unit === "cr" ? "on" : ""} onClick={() => setUnit("cr")}>₹ Cr</button>
-                <button className={unit === "lakh" ? "on" : ""} onClick={() => setUnit("lakh")}>₹ L</button></div>} />
-      <div className="px-3 pt-2 flex gap-1 border-b border-[var(--border)] bg-[var(--surface)]">
-        {TABS.map((t) => (
-          <button key={t.key} onClick={() => setParams({ r: t.key })} data-testid={`report-tab-${t.key}`}
-                  className={`px-3 py-1.5 text-xs border-b-2 -mb-px ${tab === t.key ? "border-[var(--gold)] font-semibold" : "border-transparent text-[var(--muted)]"}`}>{t.label}</button>
-        ))}
-      </div>
-      <div className="p-3">
-        {tab === "margin" && <Margin unit={unit} />}
-        {tab === "opex" && <Opex unit={unit} />}
-        {tab === "overheads" && <Overheads unit={unit} />}
-        {tab === "wbs" && <Wbs unit={unit} />}
-      </div>
-    </div>
-  );
-}
+// Report bodies (margin profile, opex, overheads, WBS) — rendered as formats on the AOP reports page.
+export { Margin, Opex, Overheads, Wbs };
 
 // ---------- shared table ----------
 function useReport(url, params) {

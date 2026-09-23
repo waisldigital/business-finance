@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import Header from "@/aop/Header";
-import { SlidersHorizontal, FloppyDisk, CheckCircle, PencilSimpleLine, ShieldCheck, MagicWand } from "@phosphor-icons/react";
+import { SlidersHorizontal, FloppyDisk, CheckCircle, PencilSimpleLine, ShieldCheck, MagicWand, PresentationChart, Eye, EyeSlash } from "@phosphor-icons/react";
 
 const DRIVERS = [
   ["cute_growth", "CUTE revenue growth (PAX × rate)"], ["noncute_growth", "Non-CUTE revenue growth"],
@@ -81,6 +81,7 @@ export default function AdminPlanSettings() {
           </table>
           <div className="text-[10.5px] text-[var(--muted)] mt-2">Which columns users may edit is set per dataset in Data manager → Columns. Section access comes from Roles.</div>
         </div>
+        <ReportFormatsPanel />
         <DraftPanel />
       </div>
     </div>
@@ -135,6 +136,82 @@ function DraftPanel() {
       {err && <div className="text-xs text-[var(--danger)] mt-1">{String(err)}</div>}
       {res && <div className="text-xs text-[var(--success)] mt-1 flex items-center gap-1"><CheckCircle size={12} />
         {Object.entries(res.counts).map(([k, v]) => `${k}: ${v}`).join(" · ")}</div>}
+    </div>
+  );
+}
+
+
+const SEGMENTS = [["ca_cr", "CA+CR"], ["solutions", "Solutions"], ["common", "Common · by revenue"]];
+
+// Which report formats users can open, and how indirect costs are split between CA+CR and Solutions
+function ReportFormatsPanel() {
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    api.get("/aop/mis/formats").then((r) => setInfo({
+      enabled: Object.fromEntries(r.data.formats.map((f) => [f.key, f.enabled])), formats: r.data.formats,
+      rules: r.data.segment_rules, blocks: r.data.blocks, noncute: (r.data.solutions_noncute || []).join(", "),
+    }));
+  }, []);
+  if (!info) return null;
+  const set = (patch) => { setSaved(false); setInfo((i) => ({ ...i, ...patch })); };
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.put("/aop/config", {
+        report_formats: info.enabled, mis_segments: info.rules,
+        mis_solutions_noncute: info.noncute.split(",").map((x) => x.trim()).filter(Boolean),
+      });
+      setSaved(true);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="border border-[var(--border)] bg-[var(--surface)] p-3 lg:col-span-2" data-testid="report-formats-panel">
+      <div className="flex items-center gap-2 mb-2">
+        <PresentationChart size={16} className="text-[var(--gold)]" />
+        <div className="font-semibold text-sm flex-1">AOP report formats</div>
+        {saved && <span className="text-[11px] text-[var(--success)] flex items-center gap-1"><CheckCircle size={12} />Saved</span>}
+        <button className="icon-btn primary" onClick={save} disabled={busy} data-testid="formats-save"><FloppyDisk size={14} />Save</button>
+      </div>
+      <div className="grid lg:grid-cols-2 gap-3">
+        <table className="w-full">
+          <tbody>
+            {info.formats.map((f) => (
+              <tr key={f.key} className="border-t border-[var(--border-soft)]">
+                <td className="py-1.5"><div className="font-medium">{f.label}</div><div className="text-[10px] text-[var(--muted)]">{f.ref} · {f.section === "aop_pnl" ? "needs P&L access" : "needs Reports access"}</div></td>
+                <td className="text-right">
+                  <div className="seg">
+                    <button className={info.enabled[f.key] ? "on" : ""} onClick={() => set({ enabled: { ...info.enabled, [f.key]: true } })} data-testid={`fmt-on-${f.key}`}><Eye size={11} />On</button>
+                    <button className={!info.enabled[f.key] ? "on" : ""} onClick={() => set({ enabled: { ...info.enabled, [f.key]: false } })} data-testid={`fmt-off-${f.key}`}><EyeSlash size={11} />Off</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div>
+          <div className="text-[10px] tracking-overline text-[var(--muted)] mb-1">Indirect costs by segment (Full P&L, Regional P&L)</div>
+          <table className="w-full">
+            <tbody>
+              {info.blocks.map((b) => (
+                <tr key={b} className="border-t border-[var(--border-soft)]">
+                  <td className="py-1">{b}</td>
+                  <td className="text-right">
+                    <select className="input-sm" value={info.rules[b] || "common"} onChange={(e) => set({ rules: { ...info.rules, [b]: e.target.value } })}>
+                      {SEGMENTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <label className="block mt-2">
+            <span className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Non-CUTE locations reported under Solutions</span>
+            <input className="input-sm w-full" value={info.noncute} onChange={(e) => set({ noncute: e.target.value })} placeholder="Kuwait, Kannur" />
+          </label>
+        </div>
+      </div>
     </div>
   );
 }
