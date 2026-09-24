@@ -67,7 +67,7 @@ export default function FullPnL({ unit, onDrill }) {
   const show = (r, v, isVar) => {
     if (r.masked) return "•••";
     if (v === null || v === undefined) return "";
-    return r.kind === "pct" ? (isVar ? `${(v * 100).toFixed(1)} pp` : fmtPct(v, 0)) : fmtAmount(v, unit);
+    return r.kind === "pct" ? (isVar ? `${(v * 100).toFixed(1)} pp` : fmtPct(v)) : fmtAmount(v, unit);
   };
   const varLabel = measures.length >= 2 ? `${measures[measures.length - 1].label} vs ${measures[0].label}` : "";
 

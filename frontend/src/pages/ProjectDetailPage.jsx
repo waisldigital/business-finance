@@ -231,7 +231,7 @@ function Overview({ project }) {
             <Info k="Customer Budget Approved" v={pipeline.customer_budget_approved ? "Yes" : "No"} />
             <Info k="Final Commercial Value" v={(pipeline.final_commercial_value || 0).toLocaleString()} />
             <Info k="Forecast Category" v={pipeline.forecast_category} />
-            <Info k="Probability %" v={`${(pipeline.probability_pct || 0).toFixed(0)}%`} />
+            <Info k="Probability %" v={`${(pipeline.probability_pct || 0).toFixed(1)}%`} />
             <Info k="Expected Closure" v={pipeline.expected_closure_date} />
             <Info k="Won Against" v={pipeline.won_against_competitor} />
             <Info k="Customer PO" v={pipeline.customer_po_number} />

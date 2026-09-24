@@ -36,7 +36,7 @@ const Err = ({ err }) => (err ? <div className="text-xs text-[var(--danger)] fle
 const Note = ({ children }) => <div className="text-[10.5px] text-[var(--muted)] flex items-center gap-1"><Info size={11} />{children}</div>;
 
 const money = (unit) => (v) => (v === null || v === undefined ? "" : fmtAmount(v, unit));
-const pct0 = (v) => (v === null || v === undefined || Number.isNaN(v) ? "NA" : fmtPct(v, 0));
+const pct0 = (v) => (v === null || v === undefined || Number.isNaN(v) ? "NA" : fmtPct(v));
 const ratio = (a, b) => (b ? a / b : null);
 const monthCols = (data, meas, get, unit, label = "") => (data?.months?.labels || []).map((l, i) => ({
   key: `m_${meas}_${i}`, label: `${l}${label}`, group: "12M", groupCls: "h-sub", num: true, get: (r) => get(r, i), fmt: money(unit),
@@ -80,7 +80,7 @@ export function AirportGM({ unit, onDrill }) {
             <ComposedChart data={chart} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="var(--border-soft)" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis yAxisId="l" tick={{ fontSize: 10 }} /><YAxis yAxisId="r" orientation="right" tick={{ fontSize: 10 }} unit="%" />
-              <Tooltip formatter={(v) => Number(v).toFixed(1)} /><Legend wrapperStyle={{ fontSize: 10 }} />
+              <Tooltip formatter={(v) => Number(v).toFixed(0)} /><Legend wrapperStyle={{ fontSize: 10 }} />
               <Bar yAxisId="l" dataKey="YTD AOP Rev" fill={TEAL} /><Bar yAxisId="l" dataKey="YTD Actual Rev" fill={MAROON} />
               <Line yAxisId="r" dataKey="AOP GM %" stroke={NAVY} strokeWidth={2} /><Line yAxisId="r" dataKey="Actual GM %" stroke="#d97706" strokeWidth={2} />
             </ComposedChart>
@@ -110,10 +110,10 @@ export function CuteAnalysis({ unit }) {
   const ms = [["a_base", "PY"], ["b_plan", "AOP"], ["af_plan", "Act"]];
   const columns = [
     ...ms.map(([m, l]) => ({ key: `rev_${m}`, label: l, group: `Revenue (${unit === "usd" ? "$ Mn" : unit === "lakh" ? "₹ L" : "₹ Cr"})`, groupCls: "h-cacr", num: true, get: (r) => rev(r, m), fmt: money(unit) })),
-    ...ms.map(([m, l]) => ({ key: `pax_${m}`, label: l, group: "Billable PAX (Mn)", groupCls: "h-sol", num: true, get: (r) => { const v = pax(r, m); return v === null ? null : v / 1e6; }, fmt: (v) => (v === null ? "—" : v.toFixed(2)) })),
-    ...ms.map(([m, l]) => ({ key: `rate_${m}`, label: l, group: "Rate (₹ / PAX)", groupCls: "h-tot", num: true, get: (r) => { const x = pax(r, m); return x ? rev(r, m) / x : null; }, fmt: (v) => (v === null ? "—" : v.toFixed(1)) })),
+    ...ms.map(([m, l]) => ({ key: `pax_${m}`, label: l, group: "Billable PAX ('000)", groupCls: "h-sol", num: true, get: (r) => { const v = pax(r, m); return v === null ? null : v / 1e3; }, fmt: (v) => (v === null ? "—" : Math.round(v).toLocaleString("en-IN")) })),
+    ...ms.map(([m, l]) => ({ key: `rate_${m}`, label: l, group: "Rate (₹ / PAX)", groupCls: "h-tot", num: true, get: (r) => { const x = pax(r, m); return x ? rev(r, m) / x : null; }, fmt: (v) => (v === null ? "—" : Math.round(v).toLocaleString("en-IN")) })),
     ...(p.view.twelveM ? monthCols(data, "rev", (r, i) => r.src.revenue?.[meas]?.[i], unit, "") : []),
-    ...(p.view.twelveM ? labels.map((l, i) => ({ key: `mp_${i}`, label: l, group: "12M PAX (Mn)", groupCls: "h-sub", num: true, get: (r) => (r.src.pax?.[meas]?.[i] || 0) / 1e6, fmt: (v) => v.toFixed(2) })) : []),
+    ...(p.view.twelveM ? labels.map((l, i) => ({ key: `mp_${i}`, label: l, group: "12M PAX ('000)", groupCls: "h-sub", num: true, get: (r) => (r.src.pax?.[meas]?.[i] || 0) / 1e3, fmt: (v) => Math.round(v).toLocaleString("en-IN") })) : []),
   ];
   return (
     <div className="space-y-2" data-testid="fmt-cute">
@@ -192,7 +192,7 @@ export function OpexAnalysis({ unit }) {
                 <BarChart data={chart} layout="vertical" margin={{ top: 0, right: 10, left: 40, bottom: 0 }}>
                   <CartesianGrid stroke="var(--border-soft)" horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110} />
-                  <Tooltip formatter={(x) => Number(x).toFixed(2)} /><Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Tooltip formatter={(x) => Number(x).toFixed(0)} /><Legend wrapperStyle={{ fontSize: 10 }} />
                   <Bar dataKey="AOP" fill={TEAL} /><Bar dataKey="Actual" fill={MAROON} />
                 </BarChart>
               </ResponsiveContainer>
@@ -293,7 +293,7 @@ export function OverheadsSummary({ unit, onDrill }) {
             <BarChart data={chart} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="var(--border-soft)" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} /><YAxis tick={{ fontSize: 10 }} />
-              <Tooltip formatter={(x) => Number(x).toFixed(2)} /><Legend wrapperStyle={{ fontSize: 10 }} />
+              <Tooltip formatter={(x) => Number(x).toFixed(0)} /><Legend wrapperStyle={{ fontSize: 10 }} />
               <Bar dataKey="YTD AOP" fill={TEAL} /><Bar dataKey="YTD Act" fill={MAROON} />
             </BarChart>
           </ResponsiveContainer>

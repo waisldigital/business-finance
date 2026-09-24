@@ -87,3 +87,10 @@ html[data-theme="charcoal"] .mis, html[data-theme="midnight"] .mis {
 .mis .pnl-table tr.total td { background: var(--mis-key); }
 .mis .pnl-table tr.subtotal td { background: var(--mis-band); }
 .mis .pnl-table td.fc { background: var(--mis-child); }
+
+/* column resize handle (lib/resizableColumns.js) */
+.col-rz { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 6; }
+.col-rz::after { content: ""; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 1px; background: transparent; }
+th:hover > .col-rz::after { background: color-mix(in srgb, var(--muted) 60%, transparent); }
+.col-rz:hover::after, body.col-resizing .col-rz::after { background: var(--gold) !important; width: 2px; }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }

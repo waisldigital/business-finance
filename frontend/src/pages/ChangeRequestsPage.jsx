@@ -98,7 +98,7 @@ export default function ChangeRequestsPage() {
           <Metric label="Total Cost" value={fmt(metrics.total_cost)} />
           <Metric
             label="Avg Margin %"
-            value={`${Number(metrics.total_margin_pct || 0).toFixed(2)} %`}
+            value={`${Number(metrics.total_margin_pct || 0).toFixed(1)} %`}
             tone={Number(metrics.total_margin_pct || 0) >= 25 ? "success" : "danger"}
           />
         </div>
@@ -172,7 +172,7 @@ export default function ChangeRequestsPage() {
                   <td className="font-mono text-xs">{r.wbs_element || "—"}</td>
                   <td className="num">{fmt(r.po_value)}</td>
                   <td className="num" style={{ color: Number(r.estimated_margin_pct || 0) >= 25 ? "var(--success, #22c55e)" : "var(--danger)" }}>
-                    {Number(r.estimated_margin_pct || 0).toFixed(2)} %
+                    {Number(r.estimated_margin_pct || 0).toFixed(1)} %
                   </td>
                   <td className="text-xs">{(r.approver_emails || []).join(", ") || (r.approver_role || "—")}</td>
                   <td><CRStatusBadge status={r.status} /></td>

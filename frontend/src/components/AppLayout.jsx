@@ -12,6 +12,7 @@ import {
   PresentationChart,
 } from "@phosphor-icons/react";
 import NotificationBell from "./NotificationBell";
+import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
 const USER_NAV = [
@@ -59,6 +60,7 @@ const AOP_SECTIONS = ["aop_pnl", "aop_inputs", "aop_revenue", "aop_opex", "aop_o
 
 export default function AppLayout({ children, portal = "app" }) {
   const { user, logout } = useAuth();
+  useResizableColumns(); // every table on every screen gets drag-to-resize column widths
   const { unit, setUnit } = useCurrency();
   const { theme, setTheme, themes } = useTheme();
   const { permissions } = usePermissions();

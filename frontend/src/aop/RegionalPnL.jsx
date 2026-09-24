@@ -36,7 +36,7 @@ export default function RegionalPnL({ unit, onDrill }) {
   const show = (r, v) => {
     if (r.masked) return "•••";
     if (v === null || v === undefined) return r.kind === "pct" ? "NA" : "";
-    return r.kind === "pct" ? fmtPct(v, 0) : fmtAmount(v, unit);
+    return r.kind === "pct" ? fmtPct(v) : fmtAmount(v, unit);
   };
   const cls = (c) => (c.group === "india" ? "h-cacr" : c.group === "total" ? "h-tot" : c.sub ? "h-sub" : "h-sol");
   const exportCsv = () => {

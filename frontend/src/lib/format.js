@@ -1,19 +1,19 @@
 // Currency formatting utilities for ₹ Crore (Indian) and $ Million (US)
 export function formatCurrency(amount, mode = "INR", inrPerUsd = 83, scale = "cr") {
   const n = Number(amount || 0);
-  if (mode === "INR" && scale === "lakh" && Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
+  if (mode === "INR" && scale === "lakh" && Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(0)} L`;
   if (mode === "INR") {
-    if (Math.abs(n) >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
-    if (Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
-    if (Math.abs(n) >= 1e3) return `₹${(n / 1e3).toFixed(1)} K`;
+    if (Math.abs(n) >= 1e7) return `₹${(n / 1e7).toFixed(0)} Cr`;
+    if (Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(0)} L`;
+    if (Math.abs(n) >= 1e3) return `₹${(n / 1e3).toFixed(0)} K`;
     return `₹${n.toFixed(0)}`;
   }
   // USD using admin-set INR→USD conversion rate
   const rate = inrPerUsd && inrPerUsd > 0 ? inrPerUsd : 83;
   const usd = n / rate;
-  if (Math.abs(usd) >= 1e9) return `$${(usd / 1e9).toFixed(2)} B`;
-  if (Math.abs(usd) >= 1e6) return `$${(usd / 1e6).toFixed(2)} M`;
-  if (Math.abs(usd) >= 1e3) return `$${(usd / 1e3).toFixed(1)} K`;
+  if (Math.abs(usd) >= 1e9) return `$${(usd / 1e9).toFixed(0)} B`;
+  if (Math.abs(usd) >= 1e6) return `$${(usd / 1e6).toFixed(0)} M`;
+  if (Math.abs(usd) >= 1e3) return `$${(usd / 1e3).toFixed(0)} K`;
   return `$${usd.toFixed(0)}`;
 }
 

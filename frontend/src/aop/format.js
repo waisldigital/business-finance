@@ -1,11 +1,12 @@
 // Number formatting for AOP screens (Indian digit grouping, Crore / Lakh units).
+// House style: amounts without decimals, percentages with one decimal.
 const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 const inr0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 export const UNITS = {
-  cr: { label: "₹ Cr", div: 1e7, digits: 2 },
-  lakh: { label: "₹ Lakh", div: 1e5, digits: 2 },
-  usd: { label: "$ Mn", div: 1e6 * 83, digits: 2 },
+  cr: { label: "₹ Cr", div: 1e7, digits: 0 },
+  lakh: { label: "₹ Lakh", div: 1e5, digits: 0 },
+  usd: { label: "$ Mn", div: 1e6 * 83, digits: 0 },
   inr: { label: "₹", div: 1, digits: 0 },
 };
 
@@ -20,23 +21,24 @@ export function fmtAmount(v, unit = "cr") {
   if (v === null || v === undefined || v === "" || Number.isNaN(Number(v))) return "";
   const u = UNITS[unit] || UNITS.cr;
   const n = Number(v) / u.div;
-  if (Math.abs(n) < 0.005 && u.digits) return "–";
+  if (Math.abs(n) < 0.5) return n === 0 ? "–" : "0";
   const s = new Intl.NumberFormat("en-IN", { minimumFractionDigits: u.digits, maximumFractionDigits: u.digits }).format(Math.abs(n));
   return n < 0 ? `(${s})` : s;
 }
 
-export function fmtPct(v, digits = 1) {
+export function fmtPct(v) {
   if (v === null || v === undefined || Number.isNaN(Number(v))) return "";
-  return `${(Number(v) * 100).toFixed(digits)}%`;
+  return `${(Number(v) * 100).toFixed(1)}%`;
 }
 
 export function fmtCell(v, type) {
   if (v === null || v === undefined || v === "") return "";
-  if (type === "percent") return fmtPct(v, 2);
+  if (type === "percent") return fmtPct(v);
   if (type === "number" || type === "money") {
     const n = Number(v);
     if (Number.isNaN(n)) return String(v);
-    return Math.abs(n) >= 1000 ? inr0.format(n) : inr.format(n);
+    // fractions below 1 (factors, allocation shares) keep their decimals; everything else is whole numbers
+    return Math.abs(n) < 1 && n !== 0 ? inr.format(n) : inr0.format(n);
   }
   if (type === "date" || (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T00:00:00/.test(v))) return String(v).slice(0, 10);
   return String(v);

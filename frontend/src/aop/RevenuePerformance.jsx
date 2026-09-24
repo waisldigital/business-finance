@@ -54,7 +54,7 @@ export default function RevenuePerformance({ unit, geo, tag, initialMonth, embed
     { key: "mtd", label: labels[m] || "MTD", cls: "h-sol" },
   ].map((x) => ({ ...x, span: cols.filter((c) => c.grp === x.key).length }));
 
-  const show = (c, v) => (v === null || v === undefined ? "" : c.pct ? fmtPct(v, 0) : fmtAmount(v, unit));
+  const show = (c, v) => (v === null || v === undefined ? "" : c.pct ? fmtPct(v) : fmtAmount(v, unit));
   const exportCsv = () => {
     const div = unitDiv(unit);
     csvDownload([["Revenue stream", ...cols.map((c) => `${groups.find((g2) => g2.key === c.grp)?.label} ${c.label}`)],
@@ -142,7 +142,7 @@ function PaxCharts({ pax, labels, month, aopLbl }) {
           <LineChart data={trend} margin={{ top: 5, right: 10, left: -18, bottom: 0 }}>
             <CartesianGrid stroke="var(--border-soft)" vertical={false} />
             <XAxis dataKey="month" tick={tick} /><YAxis tick={tick} />
-            <Tooltip formatter={(v) => (v === null ? "—" : v.toFixed(2))} />
+            <Tooltip formatter={(v) => (v === null ? "—" : `${Math.round(v * 1000).toLocaleString("en-IN")} K`)} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             <Line dataKey="AOP" name={`AOP PAX (${aopLbl})`} stroke={TEAL} strokeWidth={2} dot={false} />
             {hasAct && <Line dataKey="Actual" name="Actual PAX" stroke={MAROON} strokeWidth={2} dot={{ r: 2 }} />}
@@ -155,7 +155,7 @@ function PaxCharts({ pax, labels, month, aopLbl }) {
           <BarChart data={bars} margin={{ top: 5, right: 10, left: -18, bottom: 0 }}>
             <CartesianGrid stroke="var(--border-soft)" vertical={false} />
             <XAxis dataKey="name" tick={tick} /><YAxis tick={tick} />
-            <Tooltip formatter={(v) => (v === null ? "—" : v.toFixed(2))} />
+            <Tooltip formatter={(v) => (v === null ? "—" : `${Math.round(v * 1000).toLocaleString("en-IN")} K`)} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
             <Bar dataKey="AOP" fill={TEAL} />
             {hasAct && <Bar dataKey="Actual" fill={MAROON} />}

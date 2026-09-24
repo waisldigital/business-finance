@@ -389,7 +389,7 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
             <Tile label="Margin Amount" value={fmt(marginAmount)} />
             <Tile
               label="Margin %"
-              value={`${marginPct.toFixed(2)} %`}
+              value={`${marginPct.toFixed(1)} %`}
               accent={lowMargin ? "danger" : "success"}
               testid="cr-margin-pct"
             />
@@ -488,7 +488,7 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
                 )}
               </div>
             ) : (
-              <div className="text-xs text-[var(--muted)]">No matching approval rule for PO {fmt(form.po_value)} · Margin {marginPct.toFixed(2)}%. Define one in <span className="font-mono">Settings → Approval Matrix</span>.</div>
+              <div className="text-xs text-[var(--muted)]">No matching approval rule for PO {fmt(form.po_value)} · Margin {marginPct.toFixed(1)}%. Define one in <span className="font-mono">Settings → Approval Matrix</span>.</div>
             )}
           </div>
 

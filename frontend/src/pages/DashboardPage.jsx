@@ -352,7 +352,7 @@ export default function DashboardPage() {
                         <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: CHART_PALETTE[i % CHART_PALETTE.length] }} />
                         <span className="truncate">{v.supplier_name}</span>
                       </div>
-                      <span className="font-mono text-[var(--muted)]">{pct.toFixed(0)}%</span>
+                      <span className="font-mono text-[var(--muted)]">{pct.toFixed(1)}%</span>
                     </div>
                   );
                 })}
