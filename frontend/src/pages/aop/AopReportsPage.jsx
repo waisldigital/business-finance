@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useCurrency } from "@/lib/currency";
 import Header from "@/aop/Header";
 import { PresentationChart, Stack, CaretUp, CaretDown, X, EyeSlash } from "@phosphor-icons/react";
 import { Popover } from "@/aop/MisCommon";
@@ -20,9 +21,10 @@ const BODIES = {
  * stacked in the order chosen. The admin decides which formats users can see (Plan settings → Report formats).
  */
 export default function AopReportsPage({ admin = false }) {
+  const { unit } = useCurrency();
   const [catalog, setCatalog] = useState(null);
   const [err, setErr] = useState("");
-  const [pref, setPref] = usePref(admin ? "aop_reports_admin_v1" : "aop_reports_v1", { selected: ["full_pnl"], unit: "cr" });
+  const [pref, setPref] = usePref(admin ? "aop_reports_admin_v1" : "aop_reports_v1", { selected: ["full_pnl"] });
   useEffect(() => {
     api.get("/aop/mis/formats").then((r) => setCatalog(r.data.formats)).catch((e) => setErr(e.response?.data?.detail || e.message));
   }, []);
@@ -66,10 +68,6 @@ export default function AopReportsPage({ admin = false }) {
                     );
                   })}
                 </Popover>
-                <div className="seg" title="Units">
-                  <button className={pref.unit === "cr" ? "on" : ""} onClick={() => setPref({ unit: "cr" })}>₹ Cr</button>
-                  <button className={pref.unit === "lakh" ? "on" : ""} onClick={() => setPref({ unit: "lakh" })}>₹ L</button>
-                </div>
               </>} />
       <div className="p-3 space-y-4">
         {err && <div className="text-xs text-[var(--danger)]">{String(err)}</div>}
@@ -93,7 +91,7 @@ export default function AopReportsPage({ admin = false }) {
                 <button className="text-white/70 hover:text-white disabled:opacity-30" disabled={i === selected.length - 1} onClick={() => move(k, 1)} title="Move down"><CaretDown size={13} /></button>
                 <button className="text-white/70 hover:text-white" onClick={() => toggle(k, false)} title="Close"><X size={13} /></button>
               </div>
-              <div className="p-2"><Body unit={pref.unit} /></div>
+              <div className="p-2"><Body unit={unit} /></div>
             </section>
           );
         })}

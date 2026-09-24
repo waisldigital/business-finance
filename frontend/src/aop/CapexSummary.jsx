@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import { useCurrency } from "@/lib/currency";
 import { ArrowClockwise, CaretRight, CaretDown, Info } from "@phosphor-icons/react";
-import { fmtAmount, fmtPct } from "./format";
+import { fmtAmount, fmtPct, unitLabel } from "./format";
 import ColumnSettings, { usePersistedColumns } from "./ColumnSettings";
 
 const DEFAULT_COLS = {
@@ -12,7 +13,7 @@ const DEFAULT_COLS = {
 export default function CapexSummary() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
-  const [unit, setUnit] = useState("cr");
+  const { unit } = useCurrency();
   const [open, setOpen] = useState({});
   const [cfg, setCfg, reset] = usePersistedColumns("aop_capex_columns_v1", DEFAULT_COLS);
   const load = () => api.get("/aop/capex/summary").then((r) => setData(r.data)).catch((e) => setErr(e.response?.data?.detail || e.message));
@@ -46,10 +47,6 @@ export default function CapexSummary() {
           Spend = capex GRNs from the PO register (single actual source) · {m.af_rule}
         </span>
         <div className="flex-1" />
-        <div className="seg">
-          <button className={unit === "cr" ? "on" : ""} onClick={() => setUnit("cr")}>₹ Cr</button>
-          <button className={unit === "lakh" ? "on" : ""} onClick={() => setUnit("lakh")}>₹ L</button>
-        </div>
         <ColumnSettings blocks={COLS.map((c) => ({ key: c.key, label: c.label }))} value={cfg} onChange={setCfg} onReset={reset} testid="capex-columns" />
         <button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} /></button>
       </div>
@@ -59,7 +56,7 @@ export default function CapexSummary() {
           <table className="pnl-table text-[12px] w-max min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="lbl text-left">Location ({unit === "cr" ? "INR Cr" : "INR Lakh"})</th>
+                <th className="lbl text-left">Location ({unitLabel(unit)})</th>
                 <th className="text-right">Lines</th>
                 {cols.map((c) => <th key={c.key} className={`text-right ${c.strong ? "!text-[var(--gold)]" : ""}`}>{c.label}</th>)}
               </tr>

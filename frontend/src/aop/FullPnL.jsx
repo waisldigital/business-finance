@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { GearSix, DownloadSimple, ArrowClockwise, LockSimple, Info } from "@phosphor-icons/react";
-import { fmtAmount, fmtPct } from "./format";
+import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, periodPrefix, useTree, csvDownload, usePref } from "./mis";
 import { TreeLabel, ExpandButtons, PeriodPicker, Popover, Check, useFilters, FilterBar, Modal } from "./MisCommon";
 import RevenuePerformance from "./RevenuePerformance";
@@ -64,7 +64,7 @@ export default function FullPnL({ unit }) {
   const exportCsv = () => {
     const head = ["Particulars", ...segments.flatMap((s) => [...measures.map((m) => `${s.label} ${prefix} ${m.label}`.replace(/\s+/g, " ")),
                                                             ...(withVar ? [`${s.label} Var`] : [])])];
-    const div = unit === "cr" ? 1e7 : 1e5;
+    const div = unitDiv(unit);
     const out = rows.map((r) => [r.label, ...segments.flatMap((s) => {
       const cells = measures.map((m) => { const v = val(r, m.key, s.key); return r.masked ? "restricted" : r.kind === "pct" ? v : (v ?? 0) / div; });
       if (withVar) { const v = variance(r, s.key); cells.push(r.masked ? "restricted" : r.kind === "pct" ? v : (v ?? 0) / div); }
@@ -118,7 +118,7 @@ export default function FullPnL({ unit }) {
           <table className="mis-table w-max min-w-full" data-testid="full-pnl-table">
             <thead>
               <tr>
-                <th className="lbl h-head" rowSpan={2}>Particulars ({unit === "cr" ? "₹ Cr" : "₹ Lakh"})</th>
+                <th className="lbl h-head" rowSpan={2}>Particulars ({unitLabel(unit)})</th>
                 {segments.map((s) => <th key={s.key} className={`h-${SEG_CLASS[s.key]}`} colSpan={measures.length + (withVar ? 1 : 0)}>{s.label}</th>)}
               </tr>
               <tr>

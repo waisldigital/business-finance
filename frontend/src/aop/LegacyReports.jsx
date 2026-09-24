@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import ColumnSettings, { usePersistedColumns } from "@/aop/ColumnSettings";
 import PoDrawer from "@/aop/PoDrawer";
-import { fmtAmount, fmtPct, download } from "@/aop/format";
+import { fmtAmount, fmtPct, download, unitDiv } from "@/aop/format";
 import { CaretRight, CaretDown, DownloadSimple, ArrowClockwise, WarningCircle, CheckCircle } from "@phosphor-icons/react";
 
 // Report bodies (margin profile, opex, overheads, WBS) — rendered as formats on the AOP reports page.
@@ -22,7 +22,7 @@ function Table({ cols, rows, unit, rowKey, expand, total, name }) {
   const [open, setOpen] = useState({});
   const fmt = (c, v) => (v === null || v === undefined ? "" : c.pct ? fmtPct(v) : c.text ? String(v) : c.int ? v : fmtAmount(v, unit));
   const csv = () => {
-    const div = unit === "cr" ? 1e7 : 1e5;
+    const div = unitDiv(unit);
     const lines = [cols.map((c) => c.label), ...rows.map((r) => cols.map((c) => (c.text || c.pct || c.int ? r[c.key] : (r[c.key] ?? 0) / div)))];
     download(new Blob([lines.map((l) => l.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" }), `${name}.csv`);
   };

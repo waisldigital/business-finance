@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { DownloadSimple, ArrowClockwise, Info, LockSimple } from "@phosphor-icons/react";
-import { fmtAmount, fmtPct } from "./format";
+import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, useTree, csvDownload, usePref, periodPrefix } from "./mis";
 import { TreeLabel, ExpandButtons, PeriodPicker } from "./MisCommon";
 
@@ -40,7 +40,7 @@ export default function RegionalPnL({ unit }) {
   };
   const cls = (c) => (c.group === "india" ? "h-cacr" : c.group === "total" ? "h-tot" : c.sub ? "h-sub" : "h-sol");
   const exportCsv = () => {
-    const div = unit === "cr" ? 1e7 : 1e5;
+    const div = unitDiv(unit);
     csvDownload([["Particulars", ...cols.map((c) => c.label)],
                  ...rows.map((r) => [r.label, ...cols.map((c) => { const v = val(r, c.key); return r.masked ? "restricted" : r.kind === "pct" ? v : (v ?? 0) / div; })])],
                 `Regional_PnL_${measure?.key}_${pref.period}.csv`);
@@ -70,7 +70,7 @@ export default function RegionalPnL({ unit }) {
             <table className="mis-table w-max min-w-full" data-testid="regional-table">
               <thead>
                 <tr>
-                  <th className="lbl h-head">Particulars · {periodPrefix(pref.period, data.months, month)} {measure?.label} ({unit === "cr" ? "₹ Cr" : "₹ Lakh"})</th>
+                  <th className="lbl h-head">Particulars · {periodPrefix(pref.period, data.months, month)} {measure?.label} ({unitLabel(unit)})</th>
                   {cols.map((c) => <th key={c.key} className={`${cls(c)} !text-right`}>{c.label}</th>)}
                 </tr>
               </thead>

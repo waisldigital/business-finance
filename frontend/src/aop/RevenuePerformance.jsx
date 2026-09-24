@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { DownloadSimple, ArrowClockwise, CalendarBlank, Info } from "@phosphor-icons/react";
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
-import { fmtAmount, fmtPct } from "./format";
+import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, useTree, csvDownload } from "./mis";
 import { TreeLabel, ExpandButtons, useFilters, FilterBar } from "./MisCommon";
 
@@ -56,7 +56,7 @@ export default function RevenuePerformance({ unit, geo, tag, initialMonth, embed
 
   const show = (c, v) => (v === null || v === undefined ? "" : c.pct ? fmtPct(v, 0) : fmtAmount(v, unit));
   const exportCsv = () => {
-    const div = unit === "cr" ? 1e7 : 1e5;
+    const div = unitDiv(unit);
     csvDownload([["Revenue stream", ...cols.map((c) => `${groups.find((g2) => g2.key === c.grp)?.label} ${c.label}`)],
                  ...rows.map((r) => [r.label, ...cols.map((c) => { const v = c.get(r); return c.pct ? v : (v ?? 0) / div; })])], "Revenue_performance.csv");
   };
@@ -83,7 +83,7 @@ export default function RevenuePerformance({ unit, geo, tag, initialMonth, embed
           <table className="mis-table w-max min-w-full" data-testid="revenue-table">
             <thead>
               <tr>
-                <th className="lbl h-head" rowSpan={2}>Revenue stream ({unit === "cr" ? "₹ Cr" : "₹ Lakh"})</th>
+                <th className="lbl h-head" rowSpan={2}>Revenue stream ({unitLabel(unit)})</th>
                 {groups.map((x) => <th key={x.key} className={x.cls} colSpan={x.span}>{x.label}</th>)}
               </tr>
               <tr>{cols.map((c) => <th key={c.key} className={`${groups.find((x) => x.key === c.grp).cls} !text-right`}>{c.label}</th>)}</tr>

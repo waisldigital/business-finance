@@ -59,7 +59,7 @@ const AOP_SECTIONS = ["aop_pnl", "aop_inputs", "aop_revenue", "aop_opex", "aop_o
 
 export default function AppLayout({ children, portal = "app" }) {
   const { user, logout } = useAuth();
-  const { mode, setMode } = useCurrency();
+  const { unit, setUnit } = useCurrency();
   const { theme, setTheme, themes } = useTheme();
   const { permissions } = usePermissions();
   const navigate = useNavigate();
@@ -195,22 +195,15 @@ export default function AppLayout({ children, portal = "app" }) {
               )}
             </div>
 
-            {/* Currency toggle */}
+            {/* Number format: ₹ Crore · ₹ Lakh · $ Million — drives every screen */}
             <div className="flex items-center bg-[var(--surface-2)] border border-[var(--border)] p-0.5" data-testid="currency-toggle">
-              <button
-                className={`px-3 py-1 text-xs font-semibold transition-colors ${mode === "INR" ? "bg-[var(--surface)] border border-[var(--gold)] text-[var(--gold)]" : "text-[var(--muted)]"}`}
-                onClick={() => setMode("INR")}
-                data-testid="currency-inr-btn"
-              >
-                ₹ Crore
-              </button>
-              <button
-                className={`px-3 py-1 text-xs font-semibold transition-colors ${mode === "USD" ? "bg-[var(--surface)] border border-[var(--gold)] text-[var(--gold)]" : "text-[var(--muted)]"}`}
-                onClick={() => setMode("USD")}
-                data-testid="currency-usd-btn"
-              >
-                $ Million
-              </button>
+              {[["cr", "₹ Crore", "currency-inr-btn"], ["lakh", "₹ Lakh", "currency-lakh-btn"], ["usd", "$ Million", "currency-usd-btn"]].map(([u, label, tid]) => (
+                <button key={u}
+                  className={`px-3 py-1 text-xs font-semibold transition-colors ${unit === u ? "bg-[var(--surface)] border border-[var(--gold)] text-[var(--gold)]" : "text-[var(--muted)]"}`}
+                  onClick={() => setUnit(u)} data-testid={tid}>
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
         </div>

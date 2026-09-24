@@ -1,6 +1,7 @@
 // Currency formatting utilities for ₹ Crore (Indian) and $ Million (US)
-export function formatCurrency(amount, mode = "INR", inrPerUsd = 83) {
+export function formatCurrency(amount, mode = "INR", inrPerUsd = 83, scale = "cr") {
   const n = Number(amount || 0);
+  if (mode === "INR" && scale === "lakh" && Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;
   if (mode === "INR") {
     if (Math.abs(n) >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
     if (Math.abs(n) >= 1e5) return `₹${(n / 1e5).toFixed(2)} L`;

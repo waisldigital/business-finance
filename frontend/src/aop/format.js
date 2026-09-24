@@ -4,9 +4,17 @@ const inr0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 export const UNITS = {
   cr: { label: "₹ Cr", div: 1e7, digits: 2 },
-  lakh: { label: "₹ L", div: 1e5, digits: 2 },
+  lakh: { label: "₹ Lakh", div: 1e5, digits: 2 },
+  usd: { label: "$ Mn", div: 1e6 * 83, digits: 2 },
   inr: { label: "₹", div: 1, digits: 0 },
 };
+
+// $ Million uses the admin-set INR per USD rate (Settings); the currency provider keeps it in sync
+export function setUsdRate(rate) {
+  if (rate > 0) UNITS.usd.div = 1e6 * rate;
+}
+export const unitDiv = (unit) => (UNITS[unit] || UNITS.cr).div;
+export const unitLabel = (unit) => (UNITS[unit] || UNITS.cr).label;
 
 export function fmtAmount(v, unit = "cr") {
   if (v === null || v === undefined || v === "" || Number.isNaN(Number(v))) return "";

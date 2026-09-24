@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import { useCurrency } from "@/lib/currency";
 import { Globe, AirplaneTilt, Prohibit, LockSimple, ArrowClockwise, DownloadSimple, Info } from "@phosphor-icons/react";
-import { fmtAmount, fmtPct, download } from "./format";
+import { fmtAmount, fmtPct, download, unitDiv, unitLabel } from "./format";
 import ColumnSettings, { usePersistedColumns } from "./ColumnSettings";
 import { useTree } from "./mis";
 import { TreeLabel, ExpandButtons, Modal } from "./MisCommon";
@@ -23,8 +24,8 @@ export default function PnLView({ unit: unitProp }) {
   const [geo, setGeo] = useState("All");
   const [tag, setTag] = useState("All");
   const [exclude, setExclude] = useState([]);
-  const [ownUnit, setUnit] = useState("cr");
-  const unit = unitProp || ownUnit;
+  const { unit: ctxUnit } = useCurrency();
+  const unit = unitProp || ctxUnit;
   const [drill, setDrill] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -65,7 +66,7 @@ export default function PnLView({ unit: unitProp }) {
 
   const exportCsv = () => {
     const head = ["Particular", ...cols.map((c) => `${c.block.label} ${c.month ? c.label : ""}`.trim())];
-    const div = unit === "cr" ? 1e7 : 1e5;
+    const div = unitDiv(unit);
     const lines = [head, ...allRows.map((r) => [r.label, ...cols.map((c) => {
       const v = r.values?.[c.key];
       if (!r.values) return "restricted";
@@ -96,12 +97,6 @@ export default function PnLView({ unit: unitProp }) {
         {exclude.map((x) => <button key={x} className="chip hover:border-[var(--danger)]" onClick={() => setExclude((e) => e.filter((y) => y !== x))} title="Remove">{x} ×</button>)}
         <div className="flex-1" />
         <ExpandButtons tree={tree} />
-        {!unitProp && (
-          <div className="seg" title="Units">
-            <button className={unit === "cr" ? "on" : ""} onClick={() => setUnit("cr")}>₹ Cr</button>
-            <button className={unit === "lakh" ? "on" : ""} onClick={() => setUnit("lakh")}>₹ L</button>
-          </div>
-        )}
         <ColumnSettings blocks={settingsBlocks} value={colCfg} onChange={setColCfg} onReset={resetCols} testid="pnl-columns" />
         <button className="icon-btn" onClick={exportCsv} title="Export view (csv)"><DownloadSimple size={13} /></button>
         <button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} className={loading ? "animate-spin" : ""} /></button>
@@ -119,7 +114,7 @@ export default function PnLView({ unit: unitProp }) {
           <table className="pnl-table text-[12px] w-max min-w-full border-separate border-spacing-0">
             <thead>
               <tr>
-                <th className="lbl text-left" rowSpan={2}>Particular ({unit === "cr" ? "INR Cr" : "INR Lakh"})</th>
+                <th className="lbl text-left" rowSpan={2}>Particular ({unitLabel(unit)})</th>
                 {blocks.map((b) => (
                   <th key={b.key} colSpan={b.columns.length} className={`tot text-center !border-b ${b.key === "b_draft" ? "!text-[var(--gold)]" : ""}`}>{b.label}</th>
                 ))}
