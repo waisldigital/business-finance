@@ -4,7 +4,7 @@ import api from "@/lib/api";
 import Header from "@/aop/Header";
 import DatasetWorkspace from "@/aop/DatasetWorkspace";
 import CapexSummary from "@/aop/CapexSummary";
-import { SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Info } from "@phosphor-icons/react";
+import { SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives } from "@phosphor-icons/react";
 
 export const SECTION_META = {
   aop_inputs:    { icon: SlidersHorizontal, title: "AOP inputs", subtitle: "Drivers for next year's plan — scenario (Low/Base/High), FX, escalation, PAX, rates, growth, allocations" },
@@ -54,7 +54,6 @@ export default function AopSectionPage({ section }) {
         {current?.report && <CapexSummary />}
         {current && !current.report && (
           <>
-            <div className="text-[10.5px] text-[var(--muted)] mb-1.5 flex items-center gap-1"><Info size={11} />{current.description}</div>
             <DatasetWorkspace key={current.key} dataset={current} />
           </>
         )}

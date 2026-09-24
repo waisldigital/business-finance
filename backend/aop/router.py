@@ -131,6 +131,19 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         meta = await db.aop_dataset_meta.find_one({"dataset": dataset}, {"_id": 0})
         return (meta or {}).get("columns") or []
 
+    async def columns_with_draft(dataset: str) -> List[Dict[str, Any]]:
+        """Stored columns plus the draft year's budget months: every dataset that carries a monthly budget also
+        offers the next AOP's months, so it can be keyed in or uploaded before a draft is generated."""
+        cols = await columns_for(dataset)
+        spec = SPECS.get(dataset)
+        if spec and any(v.startswith("B") for v in spec.versions):
+            cfg = await get_config()
+            T = "B" + (cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1))[2:]
+            have = {c["key"] for c in cols}
+            cols = cols + [column(f"{T}__{q}", f"{T} {q}", "number", editable=True, group=T)
+                           for q in fy_months("FY" + T[1:]) if f"{T}__{q}" not in have]
+        return cols
+
     def ensure_ds(dataset: str):
         if dataset != ACTUALS and dataset not in SPECS:
             raise HTTPException(404, f"Unknown dataset {dataset}")
@@ -229,7 +242,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         ensure_ds(dataset)
         if not await can(user, dataset):
             raise HTTPException(403, "Not allowed")
-        return await columns_for(dataset)
+        return await columns_with_draft(dataset)
 
     @r.put("/datasets/{dataset}/columns")
     async def put_columns(dataset: str, columns: List[Dict[str, Any]] = Body(...), purge: bool = False,
@@ -314,7 +327,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         p = await perms_for(user)
         if not await can(user, dataset, "edit"):
             raise HTTPException(403, "You don't have edit rights on this section")
-        cols = {c["key"]: c for c in await columns_for(dataset)}
+        cols = {c["key"]: c for c in await columns_with_draft(dataset)}
         cfg = await get_config()
         spec = SPECS.get(dataset)
         mode = "direct" if p["admin"] else cfg["edit_modes"].get(spec.section if spec else "", "approval")
@@ -384,7 +397,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     # ------------------------------------------------------------------ upload / download (admin only)
     async def upsert_rows(dataset: str, incoming: List[Dict[str, Any]], mode: str, user: dict) -> Dict[str, Any]:
         spec = SPECS[dataset]
-        cols = {c["key"]: c for c in await columns_for(dataset)}
+        cols = {c["key"]: c for c in await columns_with_draft(dataset)}
         existing = {d["key"]: d for d in [x async for x in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "seq": 1})]}
         if mode == "replace":
             await db.aop_rows.delete_many({"dataset": dataset})
@@ -478,7 +491,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if mode == "replace" and user.get("role") != "admin":
             raise HTTPException(403, "Only an administrator can replace a whole dataset")
         content = await file.read()
-        cols = await columns_for(dataset)
+        cols = await columns_with_draft(dataset)
         incoming = read_table(content, file.filename or "upload.csv", cols)
         if dataset == ACTUALS:
             return await upsert_actuals(incoming, mode, user)
@@ -532,7 +545,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if not (await can(user, dataset, "upload") or (dataset != ACTUALS and await can(user, dataset, "view"))):
             raise HTTPException(403, "Not allowed")
         ensure_ds(dataset)
-        cols = [c for c in await columns_for(dataset)]
+        cols = [c for c in await columns_with_draft(dataset)]
         spec = SPECS.get(dataset)
         if spec and spec.auto_prefix and "line_id" not in {c["key"] for c in cols}:
             cols = [column("line_id", "line_id")] + cols

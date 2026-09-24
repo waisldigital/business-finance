@@ -64,7 +64,19 @@ export default function GridSettings({ cols, view, update, reset, hasMonths = tr
                 </select>
               </label>
             )}
-            {pivotable && <div className="text-[10px] text-[var(--muted)] leading-snug">Drag a column to the top to group by it. Click a group row to open or close it; numbers are summed.</div>}
+            {pivotable && view.pivot > 0 && (
+              <div className="flex items-center gap-3 pl-5">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" className="accent-[var(--gold)]" checked={!!view.subtotals} onChange={(e) => update({ subtotals: e.target.checked })} data-testid={`${testid}-subtotals`} />
+                  Subtotals
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" className="accent-[var(--gold)]" checked={view.repeatLabels !== false} onChange={(e) => update({ repeatLabels: e.target.checked })} data-testid={`${testid}-repeat`} />
+                  Repeat item labels
+                </label>
+              </div>
+            )}
+            {pivotable && <div className="text-[10px] text-[var(--muted)] leading-snug">Drag a column to the top to group by it. Click a group label to close it (one summed row) or open it again.</div>}
           </div>
           <div className="px-3 py-1.5 flex items-center gap-2 border-b border-[var(--border)]">
             <span className="text-[10px] tracking-overline text-[var(--muted)] flex-1">Columns · {visibleCount}/{cols.length}</span>

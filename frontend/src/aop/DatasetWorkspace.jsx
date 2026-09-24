@@ -23,9 +23,9 @@ const groupLabel = (g) => {
   if (!g) return "Details";
   const m = /^([ABF])(\d{2})([AT]?)$/.exec(g);
   if (!m) return g;
-  const kind = { A: "Actual", B: "Budget", F: "Forecast" }[m[1]];
+  // FY'27 A = actual, FY'27 B = budget, FY'26 F = forecast
   const sub = m[3] === "A" ? " · active" : m[3] === "T" ? " · to hire" : "";
-  return `${kind} FY${m[2]}${sub}`;
+  return `FY'${m[2]} ${m[1]}${sub}`;
 };
 
 export default function DatasetWorkspace({ dataset, admin = false, onChanged, focusVersion }) {
@@ -174,7 +174,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
       </div>
 
       {view.pivot > 0 ? (
-        <PivotTable cols={visible} rows={filtered} allRows={rowsV} view={view} update={updateView} levels={Math.min(view.pivot, visible.length)}
+        <PivotTable key={view.subtotals ? "sub" : "flat"} cols={visible} rows={filtered} allRows={rowsV} view={view} update={updateView} levels={Math.min(view.pivot, visible.length)}
                     testid="ds-pivot" />
       ) : (
       <DataGrid

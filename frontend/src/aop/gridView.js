@@ -6,9 +6,15 @@ const MONTH_KEY = /^([A-Z]\d{2}[A-Z]?)__(\d{4}-\d{2})$/;
 
 export const isMonthCol = (c) => MONTH_KEY.test(c.key);
 export const versionOf = (c) => (MONTH_KEY.exec(c.key) || [])[1];
+// "B27" → "FY'27 B" (A = actual, B = budget, F = forecast; B27A / B27T = active / to be hired)
+export const versionLabel = (v) => {
+  const m = /^([ABF])(\d{2})([AT]?)$/.exec(v || "");
+  return m ? `FY'${m[2]} ${m[1]}${m[3] === "A" ? " active" : m[3] === "T" ? " to hire" : ""}` : v;
+};
 export const isNumeric = (c) => ["number", "money", "percent"].includes(c.type) || isMonthCol(c) || c.numeric;
 
-const DEFAULT_VIEW = { order: null, hidden: [], pivot: 0, filtersOn: false, twelveM: false, sort: null, filters: {} };
+// pivot defaults follow Excel's tabular layout: no subtotal rows, item labels repeated on every line
+const DEFAULT_VIEW = { order: null, hidden: [], pivot: 0, subtotals: false, repeatLabels: true, filtersOn: false, twelveM: false, sort: null, filters: {} };
 
 function load(key) {
   try { return { ...DEFAULT_VIEW, ...(JSON.parse(localStorage.getItem(key) || "null") || {}) }; } catch { return DEFAULT_VIEW; }
@@ -40,7 +46,7 @@ export function arrangeColumns(columns, view) {
         const v = versionOf(c);
         if (!seen.has(v)) {
           seen.add(v);
-          out.push({ key: `${v}__sum`, label: `${c.group_label || v} total`, type: "number", group: c.group, virtual: true, version: v });
+          out.push({ key: `${v}__sum`, label: `${versionLabel(v)} total`, type: "number", group: c.group, virtual: true, version: v });
         }
       } else out.push(c);
     }
