@@ -13,7 +13,7 @@ import { csvDownload } from "./mis";
  *  - view / update / reset: from useGridView (column order, hidden, filters, sort, 12M)
  *  - onRowDrill(row): double-click action (drill-down)
  */
-export default function ReportTable({ rows, columns, view, update, reset, hasMonths = false, onRowDrill, labelHeader = "Particulars",
+export default function ReportTable({ rows, columns, view, update, reset, shared, hasMonths = false, onRowDrill, labelHeader = "Particulars",
                                       name = "report", defaultOpen = false, height = "calc(100vh - 260px)", testid = "report-table", toolbar }) {
   const [open, setOpen] = useState({});
   const kids = useMemo(() => {
@@ -107,7 +107,7 @@ export default function ReportTable({ rows, columns, view, update, reset, hasMon
             <button onClick={() => setAll(true)} title="Expand all" data-testid={`${testid}-expand`}><ArrowsOutLineVertical size={12} /></button>
           </div>
         )}
-        <GridSettings cols={all} view={view} update={update} reset={reset} hasMonths={hasMonths} pivotable={false} testid={`${testid}-settings`} />
+        <GridSettings cols={all} view={view} update={update} reset={reset} shared={shared} hasMonths={hasMonths} pivotable={false} testid={`${testid}-settings`} />
         <button className="icon-btn" onClick={exportCsv} title="Download this report (csv)" data-testid={`${testid}-download`}><DownloadSimple size={13} /></button>
       </div>
       <div className="overflow-auto border border-[var(--border)]" style={{ maxHeight: height }}>

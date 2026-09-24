@@ -27,9 +27,9 @@ function useMis(url, params) {
 }
 
 function usePeriod(storageKey, data) {
-  const [view, update, reset] = useGridView(storageKey, { period: "ytd", month: null });
+  const [view, update, reset, shared] = useGridView(storageKey, { period: "ytd", month: null });
   const month = view.month ?? data?.months?.default_month ?? 0;
-  return { view, update, reset, period: view.period || "ytd", month };
+  return { view, update, reset, shared, period: view.period || "ytd", month };
 }
 
 const Err = ({ err }) => (err ? <div className="text-xs text-[var(--danger)] flex items-center gap-1"><WarningCircle size={12} />{String(err)}</div> : null);
@@ -68,7 +68,7 @@ export function AirportGM({ unit, onDrill }) {
     <div className="space-y-2" data-testid="fmt-airport-gm">
       <Err err={err} />
       {data && (
-        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} name="airport_gm" testid="agm"
+        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} name="airport_gm" testid="agm"
                      labelHeader={`Particulars · ${periodPrefix(p.period, data.months, p.month) || "FY"}`} defaultOpen
                      onRowDrill={(r) => r.drill && onDrill?.(r.drill, {}, r.label)}
                      toolbar={<PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="agm-period" />} />
@@ -119,7 +119,7 @@ export function CuteAnalysis({ unit }) {
     <div className="space-y-2" data-testid="fmt-cute">
       <Err err={err} />
       {data && (
-        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} hasMonths name="cute_analysis" testid="cute"
+        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name="cute_analysis" testid="cute"
                      labelHeader={`Location · ${periodPrefix(p.period, data.months, p.month) || "FY"}`} defaultOpen
                      toolbar={<>
                        <PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="cute-period" />
@@ -178,13 +178,13 @@ export function OpexAnalysis({ unit }) {
       {data && (
         <>
           <div className="text-[11px] font-semibold">(1) Last year vs AOP vs current spend — by location</div>
-          <ReportTable rows={locRows} columns={locCols} view={p.view} update={p.update} reset={p.reset} name="opex_by_location" testid="opex-loc"
+          <ReportTable rows={locRows} columns={locCols} view={p.view} update={p.update} reset={p.reset} shared={p.shared} name="opex_by_location" testid="opex-loc"
                        labelHeader="Location" height="none"
                        toolbar={<PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="opex-period" />} />
           <div className="grid lg:grid-cols-2 gap-3">
             <div>
               <div className="text-[11px] font-semibold mb-1">(2) Spend by category — CA</div>
-              <ReportTable rows={catRows} columns={catCols} view={v2[0]} update={v2[1]} reset={v2[2]} name="opex_by_category" testid="opex-cat" labelHeader="Category" height="none" />
+              <ReportTable rows={catRows} columns={catCols} view={v2[0]} update={v2[1]} reset={v2[2]} shared={v2[3]} name="opex_by_category" testid="opex-cat" labelHeader="Category" height="none" />
             </div>
             <div className="border border-[var(--border)] p-2">
               <div className="text-[11px] font-semibold mb-1">AOP vs actual by category</div>
@@ -199,7 +199,7 @@ export function OpexAnalysis({ unit }) {
             </div>
           </div>
           <div className="text-[11px] font-semibold flex items-center gap-1"><CalendarBlank size={12} />(5) {data.plan_fy} opex act + fcst trend — CA only</div>
-          <ReportTable rows={[...trendRows, ...trendExtra]} columns={trendCols} view={v3[0]} update={v3[1]} reset={v3[2]} name="opex_trend" testid="opex-trend" labelHeader="Location" height="none" />
+          <ReportTable rows={[...trendRows, ...trendExtra]} columns={trendCols} view={v3[0]} update={v3[1]} reset={v3[2]} shared={v3[3]} name="opex_trend" testid="opex-trend" labelHeader="Location" height="none" />
           <Note>{data.category_note} Forecast months use the opex lines' forecast / budget until the tracker forecast is posted.</Note>
         </>
       )}
@@ -247,9 +247,10 @@ export function Resources({ unit, params }) {
   ];
   return (
     <div className="space-y-2" data-testid="fmt-resources">
+      {data?.departments && <Note>Your role shows your own department{data.departments.length > 1 ? "s" : ""} only: {data.departments.join(", ")}</Note>}
       <Err err={err} />
       {data && (
-        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} hasMonths name="resources" testid="res" labelHeader="Particulars"
+        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name="resources" testid="res" labelHeader="Particulars"
                      toolbar={<>
                        <div className="seg">{[["all", "All"], ["direct", "Direct"], ["indirect", "Indirect"]].map(([k, l]) => <button key={k} className={section === k ? "on" : ""} onClick={() => setSection(k)} data-testid={`res-${k}`}>{l}</button>)}</div>
                        <PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="res-period" />
@@ -281,9 +282,10 @@ export function OverheadsSummary({ unit, onDrill }) {
   const chart = (data?.rows || []).slice(0, 12).map((r) => ({ name: r.label, "YTD AOP": v(r, "Total", "b_plan") / unitDiv(unit), "YTD Act": v(r, "Total", "af_plan") / unitDiv(unit) }));
   return (
     <div className="space-y-2" data-testid="fmt-oh-summary">
+      {data?.departments && <Note>Your role shows your own department{data.departments.length > 1 ? "s" : ""} only: {data.departments.join(", ")}</Note>}
       <Err err={err} />
       {data && (
-        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} hasMonths name="overheads_sga" testid="ohs" labelHeader="Department"
+        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name="overheads_sga" testid="ohs" labelHeader="Department"
                      onRowDrill={(r) => r.drill && onDrill?.("overheads_nature", { dept: r.id }, r.label)}
                      toolbar={<PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="ohs-period" />} />
       )}
@@ -343,7 +345,7 @@ export function OverheadsNature({ unit, params, onDrill }) {
   return (
     <div className="space-y-2" data-testid="fmt-oh-nature">
       <Err err={dept ? err : ""} />
-      <ReportTable rows={dept ? rows : []} columns={columns} view={p.view} update={p.update} reset={p.reset} hasMonths name={`overheads_${dept}`} testid="ohn"
+      <ReportTable rows={dept ? rows : []} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name={`overheads_${dept}`} testid="ohn"
                    labelHeader={dept || "Nature"}
                    onRowDrill={(r) => r.drill && onDrill?.("overheads_lines", { dept, nature: r.id }, r.label)}
                    toolbar={<>
@@ -402,9 +404,9 @@ export function OverheadsLines({ unit, params }) {
       {dept && data && (
         <>
           <div className="text-[11px] font-semibold">AOP lines ({aopRows.length})</div>
-          <ReportTable rows={aopRows} columns={aopCols} view={p.view} update={p.update} reset={p.reset} hasMonths name="overhead_aop_lines" testid="ohl-aop" labelHeader="Description" height="360px" />
+          <ReportTable rows={aopRows} columns={aopCols} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name="overhead_aop_lines" testid="ohl-aop" labelHeader="Description" height="360px" />
           <div className="text-[11px] font-semibold">Actual bookings ({book.length})</div>
-          <ReportTable rows={book} columns={bookCols} view={pv[0]} update={pv[1]} reset={pv[2]} name="overhead_bookings" testid="ohl-book" labelHeader="Vendor" height="460px" />
+          <ReportTable rows={book} columns={bookCols} view={pv[0]} update={pv[1]} reset={pv[2]} shared={pv[3]} name="overhead_bookings" testid="ohl-book" labelHeader="Vendor" height="460px" />
         </>
       )}
       {!dept && <Note>Pick a department (and optionally a nature) to see its AOP lines and every actual booking.</Note>}
@@ -447,7 +449,7 @@ export function ProjectHealth({ unit }) {
     <div className="space-y-2" data-testid="fmt-projects">
       <Err err={err} />
       {data && (
-        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} hasMonths name="project_health" testid="prj" labelHeader="Project (Solutions)"
+        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name="project_health" testid="prj" labelHeader="Project (Solutions)"
                      toolbar={<>
                        <PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="prj-period" />
                        <label className="text-[11px] flex items-center gap-1">Top
@@ -501,7 +503,7 @@ export function CapexTracker({ unit }) {
     <div className="space-y-2" data-testid="fmt-capex">
       <Err err={err} />
       {data && (
-        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} hasMonths name="capex_tracker" testid="cap" labelHeader="Location / category"
+        <ReportTable rows={rows} columns={columns} view={p.view} update={p.update} reset={p.reset} shared={p.shared} hasMonths name="capex_tracker" testid="cap" labelHeader="Location / category"
                      toolbar={<PeriodPicker period={p.period} month={p.month} months={data.months} onChange={p.update} testid="cap-period" />} />
       )}
       <Note>Click a location to open its categories and a category for the AOP capex lines. Tracker figures (initial budget, monthly actuals, open PO / PR) come from the capex tracker dataset; locations without it use the capex lines and the year's capex postings.</Note>

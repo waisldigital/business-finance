@@ -91,6 +91,10 @@ class RoleIn(BaseModel):
     permissions: Dict[str, SectionPermission] = {}
     # AOP data scope: reporting tags (airports / entities) this role may see. Empty = all.
     aop_tags: List[str] = []
+    # Overheads & payroll department scope: "all", "own" (the user's department from the employee master)
+    # or "list" (aop_departments only). "own" also adds aop_departments.
+    aop_dept_scope: Literal["all", "own", "list"] = "all"
+    aop_departments: List[str] = []
 
 
 class RoleOut(RoleIn):

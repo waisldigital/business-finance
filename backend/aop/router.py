@@ -6,6 +6,8 @@ Access model (re-uses the existing roles system — no new role concept):
   * ``aop_payroll`` is confidential: without it, payroll datasets are hidden and resource-cost lines
     in the P&L are masked
   * a role's ``aop_tags`` (optional) restricts the reporting tags / airports a user's P&L can show
+  * a role's ``aop_dept_scope`` ("own" = the user's department from the employee master, "list" = the role's
+    ``aop_departments``) limits overhead and payroll data to those departments (see ``departments.py``)
   * user edits touch only columns an admin marked ``user_editable``; when the section's edit mode is
     ``approval`` they are queued in ``aop_changes`` for an admin decision instead of being applied
 """
@@ -14,6 +16,7 @@ from __future__ import annotations
 import csv
 import io
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -34,6 +37,7 @@ from . import reports as rep
 from .pnl import Filters, PnLEngine
 from . import mis
 from . import mis_reports as mr
+from . import departments as dept_scope
 
 ACTUAL_COLUMNS = [
     column("uid", "Unique key"), column("domain", "Domain"), column("ref", "Line ref"), column("period", "Period (YYYY-MM)"),
@@ -52,6 +56,42 @@ DEFAULT_CONFIG = {
 }
 
 
+# opex / capex / overhead lines: department budget inputs for the draft year (FY'28 while FY'27 is the plan year)
+BUDGET_INPUT_DATASETS = {"opex_lines", "overhead_lines", "overhead_plan", "capex_lines"}
+
+
+def budget_input_columns(T: str) -> List[Dict[str, Any]]:
+    fy, t = f"FY'{T[1:]} B", T.lower()
+    return [column(f"{t}_currency", f"{fy} Currency", editable=True, group=T),
+            column(f"{t}_qty", f"{fy} Qty", "number", editable=True, group=T),
+            column(f"{t}_unit_price", f"{fy} Unit price", "number", editable=True, group=T),
+            column(f"{t}_fx", f"{fy} FX rate", "number", group=T),
+            column(f"{T}__annual", f"{fy} (INR)", "number", editable=True, group=T),
+            column(f"{t}_dept_remarks", f"{fy} Department remarks", editable=True, group=T),
+            column(f"{t}_fin_remarks", f"{fy} Finance remarks", group=T)]
+
+
+def BUDGET_KEYS(T: str) -> set:  # noqa: N802 — reads like the constant it stands for
+    return {c["key"] for c in budget_input_columns(T)}
+
+
+def fx_rate(data: Dict[str, List[Dict[str, Any]]], currency: Any, fys: List[str]) -> Optional[float]:
+    """INR per unit of currency from the assumptions (Currency Assumptions · USD · USD to INR, code usd_inr)."""
+    cur = str(currency or "INR").strip().upper()
+    if cur in ("", "INR", "RS", "₹"):
+        return 1.0
+    for fy in fys:
+        for a in data.get("assumptions", []):
+            if a.get("fy") != fy:
+                continue
+            code, name = str(a.get("code") or "").lower(), str(a.get("name") or "").upper()
+            if code == f"{cur.lower()}_inr" or (f"· {cur} ·" in name and "INR" in name):
+                v = a.get("value") if a.get("value") is not None else a.get("base")
+                if isinstance(v, (int, float)) and v:
+                    return float(v)
+    return None
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -64,9 +104,11 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     async def perms_for(user: dict) -> Dict[str, Any]:
         if user.get("role") == "admin":
             return {"admin": True, "sections": {s: {"can_view": True, "can_edit": True, "can_upload": True} for s in AOP_SECTIONS},
-                    "tags": []}
+                    "tags": [], "departments": None, "dept_scope": "all"}
         sections = {s: {"can_view": False, "can_edit": False, "can_upload": False} for s in AOP_SECTIONS}
         tags: List[str] = []
+        departments: Optional[List[str]] = None
+        scope = "all"
         if user.get("role_id"):
             role = await db.roles.find_one({"id": user["role_id"]}, {"_id": 0})
             if role:
@@ -75,7 +117,20 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                         sections[s] = {"can_view": bool(p.get("can_view")), "can_edit": bool(p.get("can_edit")),
                                        "can_upload": bool(p.get("can_upload"))}
                 tags = [t for t in (role.get("aop_tags") or []) if t]
-        return {"admin": False, "sections": sections, "tags": tags}
+                scope = role.get("aop_dept_scope") or "all"
+                if scope in ("own", "list"):
+                    names = list(role.get("aop_departments") or [])
+                    if scope == "own":
+                        emp = await db.employees.find_one({"email_id": {"$regex": f"^{re.escape(user.get('email') or '')}$", "$options": "i"}},
+                                                          {"_id": 0, "department": 1, "sub_department": 1})
+                        names = [x for x in ((emp or {}).get("department"), (emp or {}).get("sub_department")) if x] + names
+                    cfg = await get_config()
+                    departments = dept_scope.expand(names, cfg.get("dept_aliases"))
+        return {"admin": False, "sections": sections, "tags": tags, "departments": departments, "dept_scope": scope}
+
+    def payroll_visible(p: Dict[str, Any]) -> bool:
+        """Company-wide payroll lines (P&L, airport GM, project health) — never for department-scoped users."""
+        return p["admin"] or (p["sections"]["aop_payroll"]["can_view"] and p.get("departments") is None)
 
     def require_admin(user: dict):
         if user.get("role") != "admin":
@@ -131,18 +186,34 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         meta = await db.aop_dataset_meta.find_one({"dataset": dataset}, {"_id": 0})
         return (meta or {}).get("columns") or []
 
+    async def draft_version() -> str:
+        cfg = await get_config()
+        return "B" + (cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1))[2:]
+
     async def columns_with_draft(dataset: str) -> List[Dict[str, Any]]:
-        """Stored columns plus the draft year's budget months: every dataset that carries a monthly budget also
-        offers the next AOP's months, so it can be keyed in or uploaded before a draft is generated."""
+        """Stored columns plus the draft year's budget: every dataset that carries a monthly budget also offers the
+        next AOP's months, and the opex / capex / overhead lines carry the department budget inputs (currency, qty,
+        unit price, FY budget, department and finance remarks). The draft year's cells stay open for departments."""
         cols = await columns_for(dataset)
         spec = SPECS.get(dataset)
-        if spec and any(v.startswith("B") for v in spec.versions):
-            cfg = await get_config()
-            T = "B" + (cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1))[2:]
-            have = {c["key"] for c in cols}
-            cols = cols + [column(f"{T}__{q}", f"{T} {q}", "number", editable=True, group=T)
-                           for q in fy_months("FY" + T[1:]) if f"{T}__{q}" not in have]
-        return cols
+        if not spec:
+            return cols
+        T = await draft_version()
+        monthly = any(v.startswith("B") for v in spec.versions)
+        have = {c["key"] for c in cols}
+        extra = []
+        if dataset in BUDGET_INPUT_DATASETS:
+            extra += [c for c in budget_input_columns(T) if c["key"] not in have]
+        if monthly:
+            extra += [column(f"{T}__{q}", f"{T} {q}", "number", editable=True, group=T)
+                      for q in fy_months("FY" + T[1:]) if f"{T}__{q}" not in have]
+        admin_only = {f"{T.lower()}_fin_remarks", f"{T.lower()}_fx"}
+        out = []
+        for c in cols + extra:
+            if (c["key"].startswith(f"{T}__") or c["key"] in BUDGET_KEYS(T)) and c["key"] not in admin_only and not c.get("user_editable"):
+                c = {**c, "user_editable": True}
+            out.append(c)
+        return out
 
     def ensure_ds(dataset: str):
         if dataset != ACTUALS and dataset not in SPECS:
@@ -180,7 +251,49 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             fc = forecast_line(d.get("fields") or {}, cfg["plan_fy"])
             await db.aop_rows.update_one({"dataset": "opex_tracker", "key": d["key"]}, {"$set": {f"fields.{k}": v for k, v in fc.items()}})
 
+    async def recalc_budget(dataset: str, changed: List[tuple]):
+        """Department budget inputs → the draft year's budget. Qty × unit price × FX (from the assumptions unless finance
+        set a rate) gives the FY budget in INR; a new FY budget is phased evenly over the months; editing a month
+        re-totals the FY budget."""
+        if dataset not in BUDGET_INPUT_DATASETS or not changed:
+            return
+        cfg = await get_config()
+        T = await draft_version()
+        t = T.lower()
+        months = fy_months("FY" + T[1:])
+        monthly = any(v.startswith("B") for v in SPECS[dataset].versions)
+        data = None
+        by_key: Dict[str, set] = {}
+        for k, fld in changed:
+            by_key.setdefault(k, set()).add(fld)
+        for key, flds in by_key.items():
+            doc = await db.aop_rows.find_one({"dataset": dataset, "key": key}, {"_id": 0, "fields": 1})
+            f = (doc or {}).get("fields") or {}
+            upd: Dict[str, Any] = {}
+            price_inputs = {f"{t}_currency", f"{t}_qty", f"{t}_unit_price", f"{t}_fx"}
+            if flds & price_inputs:
+                fx = f.get(f"{t}_fx") if f"{t}_fx" in flds else None
+                if not fx:
+                    if data is None:
+                        data, _, _ = await load_all()
+                    fx = fx_rate(data, f.get(f"{t}_currency") or f.get("currency"), ["FY" + T[1:], cfg["plan_fy"]])
+                    upd[f"{t}_fx"] = fx
+                qty, price = f.get(f"{t}_qty"), f.get(f"{t}_unit_price")
+                if isinstance(qty, (int, float)) and isinstance(price, (int, float)) and fx:
+                    annual = round(qty * price * fx, 2)
+                    if annual != f.get(f"{T}__annual"):
+                        upd[f"{T}__annual"] = annual
+            month_edit = any(fl.startswith(f"{T}__") and fl != f"{T}__annual" for fl in flds)
+            if monthly and (f"{T}__annual" in upd or (f"{T}__annual" in flds and not month_edit)):
+                annual = upd.get(f"{T}__annual", f.get(f"{T}__annual")) or 0
+                upd.update({f"{T}__{q}": round(annual / 12, 2) for q in months})
+            elif monthly and month_edit:
+                upd[f"{T}__annual"] = round(sum(float(f.get(f"{T}__{q}") or 0) for q in months), 2)
+            if upd:
+                await db.aop_rows.update_one({"dataset": dataset, "key": key}, {"$set": {f"fields.{k}": v for k, v in upd.items()}})
+
     async def after_edit(dataset: str, changed: List[tuple]):
+        await recalc_budget(dataset, changed)
         if dataset != "opex_tracker" or not changed:
             return
         po_keys = {k for k, fld in changed if fld in ("new_po", "mapped_new_pos")}
@@ -201,19 +314,68 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     async def update_config(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
         require_admin(user)
         allowed = {"base_fy", "plan_fy", "draft_fy", "cutoffs", "tax_rate", "edit_modes", "drivers", "report_formats",
-                   "mis_segments", "mis_solutions_noncute"}
+                   "mis_segments", "mis_solutions_noncute", "dept_aliases"}
         upd = {k: v for k, v in payload.items() if k in allowed}
         if "report_formats" in upd:
             keys = {f["key"] for f in mis.FORMATS}
             upd["report_formats"] = {k: bool(v) for k, v in (upd["report_formats"] or {}).items() if k in keys}
         if "mis_segments" in upd:
             upd["mis_segments"] = {k: v for k, v in (upd["mis_segments"] or {}).items() if v in ("solutions", "ca_cr", "common")}
+        if "dept_aliases" in upd:
+            upd["dept_aliases"] = {str(k).strip(): [str(x).strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
+                                   for k, v in (upd["dept_aliases"] or {}).items() if str(k).strip()}
         if "edit_modes" in upd:
             upd["edit_modes"] = {k: ("approval" if v == "approval" else "direct") for k, v in upd["edit_modes"].items() if k in AOP_SECTIONS}
         await db.aop_config.update_one({"id": "aop"}, {"$set": upd}, upsert=True)
         await bump_version()
         await write_audit(db, entity_type="aop_config", entity_id="aop", action="update", user=user, field_changes=upd)
         return await get_config()
+
+    # ------------------------------------------------------------------ admin default views (every report / grid)
+    VIEW_FIELDS = {"order", "hidden", "pivot", "subtotals", "repeatLabels", "filtersOn", "twelveM", "sort", "period",
+                   "measures", "segments", "variance", "subs", "section", "view", "selected"}
+
+    @r.get("/views")
+    async def views(user: dict = Depends(get_current_user)):
+        """Default layouts an admin saved for everyone: {grid key: view}. Viewers start from these; "Default" returns to them."""
+        return {d["key"]: d.get("view") or {} async for d in db.aop_views.find({}, {"_id": 0, "key": 1, "view": 1})}
+
+    @r.put("/views/{key}")
+    async def save_view(key: str, view: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
+        require_admin(user)
+        clean = {k: v for k, v in view.items() if k in VIEW_FIELDS}
+        await db.aop_views.update_one({"key": key}, {"$set": {"view": clean, "updated_at": now_iso(), "updated_by": user.get("email")}},
+                                      upsert=True)
+        await write_audit(db, entity_type="aop_view", entity_id=key, action="update", user=user, field_changes=clean)
+        return clean
+
+    @r.delete("/views/{key}")
+    async def clear_view(key: str, user: dict = Depends(get_current_user)):
+        require_admin(user)
+        await db.aop_views.delete_one({"key": key})
+        return {"ok": True}
+
+    @r.get("/departments")
+    async def departments(user: dict = Depends(get_current_user)):
+        """Department names in the overhead / payroll data, the employee master's departments and how they map
+        (for the role editor's department scope). Non-admins get their own resolved scope."""
+        p = await perms_for(user)
+        if not p["admin"]:
+            return {"scope": p.get("dept_scope"), "departments": p.get("departments")}
+        data, actuals, cfg = await load_all()
+        aop: set = set()
+        for ds, flds in (("overhead_lines", ("pl_tag",)), ("overhead_plan", ("department",)), ("payroll_lines", ("tag", "department"))):
+            for f in data.get(ds, []):
+                if ds == "payroll_lines" and norm(f.get("category")) in ("sub total", ""):
+                    continue
+                aop.update(str(f[k]).strip() for k in flds if f.get(k) not in (None, ""))
+        aop.update(str((a.get("dims") or {})["pl_tag"]) for a in actuals if a.get("domain") == "overhead" and (a.get("dims") or {}).get("pl_tag"))
+        aop.discard("Others")
+        emp = sorted({str(e[k]).strip() async for e in db.employees.find({}, {"_id": 0, "department": 1, "sub_department": 1})
+                      for k in ("department", "sub_department") if e.get(k)})
+        aliases = cfg.get("dept_aliases") or {}
+        mapping = {d: sorted(x for x in aop if dept_scope.allowed(dept_scope.expand([d], aliases), x)) for d in emp}
+        return {"aop": sorted(aop), "employees": emp, "aliases": aliases, "mapping": mapping}
 
     @r.get("/datasets")
     async def datasets(user: dict = Depends(get_current_user)):
@@ -305,9 +467,16 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             return {"total": total, "rows": [{"key": d.get("uid"), "fields": d} for d in docs]}
         if not p["admin"] and p["tags"]:
             mq["$and"] = [{"$or": [{"fields.tag": {"$in": p["tags"]}}, {"fields.tag": {"$exists": False}}]}]
-        total = await db.aop_rows.count_documents(mq)
-        docs = [d async for d in db.aop_rows.find(mq, {"_id": 0, "key": 1, "fields": 1, "updated_at": 1, "updated_by": 1})
-                .sort("seq", 1).skip(offset).limit(limit)]
+        proj = {"_id": 0, "key": 1, "fields": 1, "updated_at": 1, "updated_by": 1}
+        if p.get("departments") is not None and dataset in dept_scope.SCOPED_DATASETS:
+            # department-scoped role: only the user's own departments' lines
+            docs = [d async for d in db.aop_rows.find(mq, proj).sort("seq", 1)
+                    if dept_scope.row_allowed(p["departments"], dataset, d.get("fields") or {})]
+            total = len(docs)
+            docs = docs[offset:offset + limit]
+        else:
+            total = await db.aop_rows.count_documents(mq)
+            docs = [d async for d in db.aop_rows.find(mq, proj).sort("seq", 1).skip(offset).limit(limit)]
         pending = {}
         if docs:
             async for c in db.aop_changes.find({"dataset": dataset, "status": "pending", "key": {"$in": [d["key"] for d in docs]}},
@@ -350,6 +519,10 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             doc = await db.aop_rows.find_one({"dataset": dataset, "key": key}, {"_id": 0, "fields": 1})
             if not doc:
                 rejected.append({"key": key, "field": fld, "reason": "row not found"}); continue
+            if not dept_scope.row_allowed(p.get("departments"), dataset, doc.get("fields") or {}):
+                rejected.append({"key": key, "field": fld, "reason": "another department's line"}); continue
+            if p.get("departments") is not None and fld in dept_scope.ROW_FIELDS.get(dataset, ()):
+                rejected.append({"key": key, "field": fld, "reason": "the department can't be changed"}); continue
             old = (doc.get("fields") or {}).get(fld)
             if old == val:
                 continue
@@ -395,15 +568,19 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         return {"deleted": res.deleted_count}
 
     # ------------------------------------------------------------------ upload / download (admin only)
-    async def upsert_rows(dataset: str, incoming: List[Dict[str, Any]], mode: str, user: dict) -> Dict[str, Any]:
+    async def upsert_rows(dataset: str, incoming: List[Dict[str, Any]], mode: str, user: dict,
+                          scope: Optional[List[str]] = None) -> Dict[str, Any]:
         spec = SPECS[dataset]
         cols = {c["key"]: c for c in await columns_with_draft(dataset)}
-        existing = {d["key"]: d for d in [x async for x in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "seq": 1})]}
+        scoped = scope is not None and dataset in dept_scope.SCOPED_DATASETS
+        proj = {"_id": 0, "key": 1, "seq": 1, **({"fields": 1} if scoped or dataset in BUDGET_INPUT_DATASETS else {})}
+        existing = {d["key"]: d for d in [x async for x in db.aop_rows.find({"dataset": dataset}, proj)]}
         if mode == "replace":
             await db.aop_rows.delete_many({"dataset": dataset})
             existing = {}
         seq = max([d.get("seq") or 0 for d in existing.values()] + [0])
         added = updated = skipped = 0
+        touched: List[tuple] = []
         errors: List[Dict[str, Any]] = []
         auto_n = 0
         seen = set()
@@ -427,12 +604,19 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             if key in seen:
                 errors.append({"row": i, "reason": f"duplicate key in file: {key}"}); continue
             seen.add(key)
+            if scoped:  # department-scoped users upload their own departments' lines only
+                cur = (existing.get(key) or {}).get("fields") or {}
+                if not dept_scope.row_allowed(scope, dataset, cur or fields) or \
+                        (cur and not dept_scope.row_allowed(scope, dataset, {**cur, **fields})):
+                    errors.append({"row": i, "reason": "line belongs to another department"}); continue
             if key in existing:
                 if mode == "add":
                     skipped += 1; continue
                 await db.aop_rows.update_one({"dataset": dataset, "key": key},
                                              {"$set": {**{f"fields.{k}": v for k, v in fields.items()},
                                                        "updated_at": now_iso(), "updated_by": user.get("email")}})
+                old_f = existing[key].get("fields") or {}
+                touched += [(key, k) for k, v in fields.items() if old_f.get(k) != v]
                 updated += 1
             else:
                 if mode == "modify":
@@ -440,10 +624,12 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                 seq += 1
                 new_docs.append({"dataset": dataset, "key": key, "seq": seq, "fields": fields,
                                  "updated_at": now_iso(), "updated_by": user.get("email")})
+                touched += [(key, k) for k in fields]
                 added += 1
         if new_docs:
             for j in range(0, len(new_docs), 1000):
                 await db.aop_rows.insert_many(new_docs[j:j + 1000])
+        await recalc_budget(dataset, touched)
         # unseen columns in an upload are appended to the column list (admins can tidy them later)
         unknown = sorted({k for raw in incoming for k in raw if k not in cols and k not in ("key", "_key")})
         if unknown:
@@ -495,7 +681,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         incoming = read_table(content, file.filename or "upload.csv", cols)
         if dataset == ACTUALS:
             return await upsert_actuals(incoming, mode, user)
-        res = await upsert_rows(dataset, incoming, mode, user)
+        p = await perms_for(user)
+        res = await upsert_rows(dataset, incoming, mode, user, p.get("departments"))
         if dataset == "opex_tracker":
             await recalc_tracker()
         return res
@@ -556,9 +743,11 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                 async for d in db.aop_actuals.find({}, {"_id": 0}):
                     rows_iter.append([(d.get("dims") or {}).get(k[5:]) if k.startswith("dims.") else d.get(k) for k in keys])
             else:
+                scope = (await perms_for(user)).get("departments")
                 async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "fields": 1}).sort("seq", 1):
                     f = d.get("fields") or {}
-                    rows_iter.append([f.get(k) for k in keys])
+                    if dept_scope.row_allowed(scope, dataset, f):
+                        rows_iter.append([f.get(k) for k in keys])
         name = f"{dataset}{'_template' if template else ''}"
         if fmt == "csv":
             buf = io.StringIO()
@@ -802,7 +991,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         year's actual/forecast and next year's budget."""
         p, tag = await pnl_guard(user, tag)
         data, actuals, cfg = await load_all()
-        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        payroll_ok = payroll_visible(p)
         return pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok)
 
     def pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok, mask=True):
@@ -886,7 +1075,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         data, actuals, cfg = await load_all()
         await format_guard("full_pnl", cfg, p)
         cfg = mis_cfg(cfg)
-        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        payroll_ok = payroll_visible(p)
         base = pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok, mask=False)
         flt = Filters(geo, tag, [x for x in (exclude or "").split(",") if x])
         out = mis.full_pnl(base, cfg, payroll_ok, mis.solutions_noncute(data, actuals, cfg, flt))
@@ -914,7 +1103,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         data, actuals, cfg = await load_all()
         await format_guard("regional_pnl", cfg, p)
         cfg = mis_cfg(cfg)
-        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        payroll_ok = payroll_visible(p)
         out = mis.regional_pnl(data, actuals, cfg, payroll_ok)
         out["meta"] = {"base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"], "draft_fy": cfg["draft_fy"], "cutoffs": cfg["cutoffs"]}
         return out
@@ -922,13 +1111,14 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     # ------------------------------------------------------------------ MIS drill-down formats
     async def fmt_ctx(user: dict, key: str, section: str = "aop_pnl", allow_tags: bool = False):
         p = await perms_for(user)
-        if not (p["admin"] or p["sections"][section]["can_view"]):
+        sections = mis.format_sections(key) if any(f["key"] == key for f in mis.FORMATS) else [section]
+        if not (p["admin"] or any(p["sections"][x]["can_view"] for x in sections)):
             raise HTTPException(403, "You don't have access to this report")
         if p["tags"] and not allow_tags:
             raise HTTPException(403, "This report covers all entities — your role is limited to specific airports")
         data, actuals, cfg = await load_all()
         await format_guard(key, cfg, p)
-        return p, data, actuals, mis_cfg(cfg), p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        return p, data, actuals, mis_cfg(cfg), payroll_visible(p)
 
     @r.get("/mis/airport-gm")
     async def mis_airport_gm(user: dict = Depends(get_current_user)):
@@ -955,27 +1145,48 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         _, data, actuals, cfg, _ = await fmt_ctx(user, "opex_analysis")
         return mr.opex_analysis(data, actuals, cfg)
 
+    def scoped(p: Dict[str, Any], data: Dict[str, Any], actuals: List[Dict[str, Any]], domain: str, datasets: List[str]):
+        """Department-scoped roles: keep only their departments' plan lines and actuals of this domain."""
+        sc = p.get("departments")
+        if sc is None:
+            return data, actuals, None
+        data = {**data, **{ds: [f for f in data.get(ds, []) if dept_scope.row_allowed(sc, ds, f)] for ds in datasets}}
+        actuals = [a for a in actuals if a.get("domain") != domain or dept_scope.actual_allowed(sc, a)]
+        return data, actuals, sc
+
+    def dept_guard(p: Dict[str, Any], dept: str):
+        if not dept_scope.allowed(p.get("departments"), dept):
+            raise HTTPException(403, "Your role shows your own department's figures only")
+
     @r.get("/mis/resources")
     async def mis_resources(user: dict = Depends(get_current_user)):
-        _, data, _, cfg, pv = await fmt_ctx(user, "resources")
+        p, data, _, cfg, pv = await fmt_ctx(user, "resources")
         plan_m = fy_months(cfg["plan_fy"])
         res_act = [a async for a in db.aop_actuals.find({"domain": "payroll", "period": {"$in": plan_m}},
-                                                        {"_id": 0, "period": 1, "amount": 1, "dims": 1, "qty": 1})]
-        return mr.resources(data, None, res_act, cfg, pv)
+                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "qty": 1})]
+        data, res_act, sc = scoped(p, data, res_act, "payroll", ["payroll_lines"])
+        # department-scoped roles with payroll access see their own departments' cost
+        own = sc is not None and (p["sections"]["aop_payroll"]["can_view"])
+        out = mr.resources(data, None, res_act, cfg, pv or own)
+        out["departments"] = sc
+        return out
 
     @r.get("/mis/overheads")
     async def mis_overheads(user: dict = Depends(get_current_user)):
-        _, data, actuals, cfg, _ = await fmt_ctx(user, "overheads_summary")
-        return mr.overheads_summary(data, actuals, cfg)
+        p, data, actuals, cfg, _ = await fmt_ctx(user, "overheads_summary")
+        data, actuals, sc = scoped(p, data, actuals, "overhead", ["overhead_lines"])
+        return {**mr.overheads_summary(data, actuals, cfg), "departments": sc}
 
     @r.get("/mis/overheads/nature")
     async def mis_overheads_nature(dept: str, user: dict = Depends(get_current_user)):
-        _, data, actuals, cfg, _ = await fmt_ctx(user, "overheads_nature")
+        p, data, actuals, cfg, _ = await fmt_ctx(user, "overheads_nature")
+        dept_guard(p, dept)
         return mr.overheads_nature(data, actuals, cfg, dept)
 
     @r.get("/mis/overheads/lines")
     async def mis_overheads_lines(dept: str, nature: Optional[str] = None, user: dict = Depends(get_current_user)):
-        _, data, _, cfg, _ = await fmt_ctx(user, "overheads_lines")
+        p, data, _, cfg, _ = await fmt_ctx(user, "overheads_lines")
+        dept_guard(p, dept)
         q: Dict[str, Any] = {"domain": "overhead", "period": {"$in": fy_months(cfg["plan_fy"])}, "dims.pl_tag": dept}
         bookings = [a async for a in db.aop_actuals.find(q, {"_id": 0}).limit(20000)]
         if nature:  # natures match case-insensitively (SAP and AOP spell them differently)
@@ -984,7 +1195,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
 
     @r.get("/mis/overheads/departments")
     async def mis_overhead_depts(user: dict = Depends(get_current_user)):
-        _, data, actuals, _, _ = await fmt_ctx(user, "overheads_summary")
+        p, data, actuals, _, _ = await fmt_ctx(user, "overheads_summary")
+        data, actuals, _ = scoped(p, data, actuals, "overhead", ["overhead_lines"])
         depts = {r.get("pl_tag") for r in data.get("overhead_lines", []) if r.get("pl_tag")}
         natures: Dict[str, set] = {}
         for r in data.get("overhead_lines", []):
@@ -1140,7 +1352,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         tags = rep.tags_for_margin(data)
         if p["tags"]:
             tags = [t for t in tags if norm(t) in {norm(x) for x in p["tags"]}]
-        payroll_ok = p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+        payroll_ok = payroll_visible(p)
         return rep.margin_profile(data, actuals, cfg, block, tags, payroll_ok)
 
     @r.get("/reports/opex")
@@ -1155,9 +1367,12 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
 
     @r.get("/reports/overheads")
     async def report_overheads(user: dict = Depends(get_current_user)):
-        await reports_guard(user)
+        p = await perms_for(user)
+        if not (p["admin"] or p["sections"]["aop_reports"]["can_view"] or p["sections"]["aop_overheads"]["can_view"]):
+            raise HTTPException(403, "You don't have access to AOP reports")
         data, _, cfg = await load_all()
         actuals = [a async for a in db.aop_actuals.find({"domain": "overhead"}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
+        data, actuals, _ = scoped(p, data, actuals, "overhead", ["overhead_lines", "overhead_plan"])
         out = rep.overheads_by_department(data, actuals, cfg)
         out.update(base_fy=cfg["base_fy"], plan_fy=cfg["plan_fy"], draft_fy=cfg.get("draft_fy"))
         return out

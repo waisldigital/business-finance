@@ -495,13 +495,13 @@ FORMATS = [
      "description": "CUTE revenue, billable PAX and per-PAX rate by airport and passenger type"},
     {"key": "opex_analysis", "label": "Opex analysis — airport & category", "section": "aop_pnl", "ref": "MIS A5 / A5a",
      "description": "TP opex by airport and category, with the 12-month actual + forecast trend"},
-    {"key": "resources", "label": "Resources — headcount & cost", "section": "aop_pnl", "ref": "MIS A6 / A7",
+    {"key": "resources", "also": ["aop_payroll"], "label": "Resources — headcount & cost", "section": "aop_pnl", "ref": "MIS A6 / A7",
      "description": "Direct and indirect resources: headcount and cost, AOP vs actual"},
-    {"key": "overheads_summary", "label": "Enabling overheads — SG&A", "section": "aop_pnl", "ref": "MIS A8.a",
+    {"key": "overheads_summary", "also": ["aop_overheads"], "label": "Enabling overheads — SG&A", "section": "aop_pnl", "ref": "MIS A8.a",
      "description": "Overheads by department and segment, AOP vs actual"},
-    {"key": "overheads_nature", "label": "Overheads — department by nature", "section": "aop_pnl", "ref": "MIS A8.b",
+    {"key": "overheads_nature", "also": ["aop_overheads"], "label": "Overheads — department by nature", "section": "aop_pnl", "ref": "MIS A8.b",
      "description": "One department's overheads by nature", "params": ["dept"]},
-    {"key": "overheads_lines", "label": "Overheads — budget monitoring (raw)", "section": "aop_pnl", "ref": "Raw data",
+    {"key": "overheads_lines", "also": ["aop_overheads"], "label": "Overheads — budget monitoring (raw)", "section": "aop_pnl", "ref": "Raw data",
      "description": "AOP lines and actual bookings behind a department / nature", "params": ["dept", "nature"]},
     {"key": "project_health", "label": "Project P&L health", "section": "aop_reports", "ref": "MIS 7b",
      "description": "Solutions projects: TCV, deal margin, YTD revenue, cost and GM vs AOP"},
@@ -509,9 +509,15 @@ FORMATS = [
      "description": "Location → category → AOP lines: budget, YTD actual, open PO / PR, utilisation"},
     {"key": "margin_profile", "label": "Margin profile by airport", "section": "aop_reports", "ref": "AOP · Margin Profile"},
     {"key": "opex_forecast", "label": "Opex forecast", "section": "aop_reports", "ref": "Opex_Forecast"},
-    {"key": "overheads", "label": "Overheads by department", "section": "aop_reports", "ref": "AOP · OH"},
+    {"key": "overheads", "also": ["aop_overheads"], "label": "Overheads by department", "section": "aop_reports", "ref": "AOP · OH"},
     {"key": "wbs", "label": "WBS budget vs actual", "section": "aop_reports", "ref": "WBS"},
 ]
+
+
+def format_sections(key: str) -> List[str]:
+    """Permission sections that open a format: its own section plus any data section it reports on."""
+    f = next((x for x in FORMATS if x["key"] == key), None)
+    return [f["section"], *f.get("also", [])] if f else ["aop_pnl"]
 
 
 def formats_for(cfg: Dict[str, Any], allowed_sections: Optional[set], admin: bool) -> List[Dict[str, Any]]:
@@ -519,7 +525,7 @@ def formats_for(cfg: Dict[str, Any], allowed_sections: Optional[set], admin: boo
     out = []
     for f in FORMATS:
         on = enabled.get(f["key"], True)
-        if not admin and (not on or (allowed_sections is not None and f["section"] not in allowed_sections)):
+        if not admin and (not on or (allowed_sections is not None and not ({f["section"], *f.get("also", [])} & allowed_sections))):
             continue
         out.append({**f, "enabled": on})
     return out

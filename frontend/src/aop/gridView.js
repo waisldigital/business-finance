@@ -1,6 +1,7 @@
 // Grid view state shared by dataset screens and report tables: column order / visibility, pivot levels,
 // sorting, Excel-style column filters and the 12-month toggle. Saved per viewer and per grid in localStorage.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import api from "@/lib/api";
 
 const MONTH_KEY = /^([A-Z]\d{2}[A-Z]?)__(\d{4}-\d{2})$/;
 
@@ -16,20 +17,79 @@ export const isNumeric = (c) => ["number", "money", "percent"].includes(c.type) 
 // pivot defaults follow Excel's tabular layout: no subtotal rows, item labels repeated on every line
 const DEFAULT_VIEW = { order: null, hidden: [], pivot: 0, subtotals: false, repeatLabels: true, filtersOn: false, twelveM: false, sort: null, filters: {} };
 
-function load(key) {
-  try { return { ...DEFAULT_VIEW, ...(JSON.parse(localStorage.getItem(key) || "null") || {}) }; } catch { return DEFAULT_VIEW; }
+function loadLocal(key) {
+  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
 }
 
+// ------------------------------------------------------------------ admin default views (shared by every viewer)
+// The admin can save any grid's / report's current layout as everyone's default (server: /aop/views). A viewer
+// starts from it until they change something; "Default" returns to it.
+let shared = null;
+let pending = null;
+const listeners = new Set();
+const notify = () => listeners.forEach((f) => f(shared || {}));
+
+export function loadSharedViews(force = false) {
+  if (!pending || force) {
+    pending = api.get("/aop/views").then((r) => { shared = r.data || {}; notify(); return shared; })
+      .catch(() => { shared = shared || {}; return shared; });
+  }
+  return pending;
+}
+
+export function useSharedView(key) {
+  const [v, setV] = useState(() => (shared ? shared[key] || null : null));
+  useEffect(() => {
+    const f = (all) => setV(all[key] || null);
+    listeners.add(f);
+    if (shared) f(shared); else loadSharedViews();
+    return () => listeners.delete(f);
+  }, [key]);
+  return v;
+}
+
+const SHARED_FIELDS = ["order", "hidden", "pivot", "subtotals", "repeatLabels", "filtersOn", "twelveM", "sort", "period",
+  "measures", "segments", "variance", "subs", "section", "view", "selected"];
+
+export async function saveSharedView(key, view) {
+  const body = Object.fromEntries(SHARED_FIELDS.filter((k) => k in view).map((k) => [k, view[k]]));
+  await api.put(`/aop/views/${encodeURIComponent(key)}`, body);
+  shared = { ...(shared || {}), [key]: body };
+  notify();
+}
+
+export async function clearSharedView(key) {
+  await api.delete(`/aop/views/${encodeURIComponent(key)}`);
+  const next = { ...(shared || {}) };
+  delete next[key];
+  shared = next;
+  notify();
+}
+
+/**
+ * View state for one grid: the code default, overlaid with the admin's default for everyone, overlaid with the
+ * viewer's own changes (kept in localStorage). reset() drops the viewer's changes → back to the admin default.
+ * The 4th element carries the admin actions (save the current layout as everyone's default / clear it).
+ */
 export function useGridView(storageKey, defaults = {}) {
   const init = { ...DEFAULT_VIEW, ...defaults };
-  const [view, setView] = useState(() => ({ ...init, ...load(storageKey) }));
-  const update = (patch) => setView((v) => {
+  const sharedView = useSharedView(storageKey);
+  const [local, setLocal] = useState(() => loadLocal(storageKey));
+  const base = { ...init, ...(sharedView || {}) };
+  const view = local ? { ...base, ...local } : base;
+  const update = (patch) => setLocal((cur) => {
+    const v = cur ? { ...base, ...cur } : base;
     const next = { ...v, ...(typeof patch === "function" ? patch(v) : patch) };
     try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* storage unavailable */ }
     return next;
   });
-  const reset = () => { try { localStorage.removeItem(storageKey); } catch { /* ignore */ } setView(init); };
-  return [view, update, reset];
+  const reset = () => { try { localStorage.removeItem(storageKey); } catch { /* ignore */ } setLocal(null); };
+  const admin = {
+    key: storageKey, hasDefault: !!sharedView,
+    save: () => saveSharedView(storageKey, view).then(reset),
+    clear: () => clearSharedView(storageKey),
+  };
+  return [view, update, reset, admin];
 }
 
 /**
@@ -41,16 +101,19 @@ export function arrangeColumns(columns, view) {
   if (!view.twelveM) {
     const out = [];
     const seen = new Set();
+    // a version with an editable FY column (<VER>__annual, e.g. the departments' FY'28 budget) shows that column
+    // instead of a read-only sum of its months
+    const annual = new Set(cols.filter((c) => /__annual$/.test(c.key)).map((c) => c.key.split("__")[0]));
     for (const c of cols) {
       if (isMonthCol(c)) {
         const v = versionOf(c);
         if (!seen.has(v)) {
           seen.add(v);
-          out.push({ key: `${v}__sum`, label: `${versionLabel(v)} total`, type: "number", group: c.group, virtual: true, version: v });
+          if (!annual.has(v)) out.push({ key: `${v}__sum`, label: `${versionLabel(v)} total`, type: "number", group: c.group, virtual: true, version: v });
         }
       } else out.push(c);
     }
-    cols = out.filter((c) => !(c.key.endsWith("__total") && seen.has(c.key.split("__")[0])) || true);
+    cols = out;
   }
   const byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
   const order = (view.order || []).filter((k) => byKey[k]);

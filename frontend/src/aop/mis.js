@@ -1,6 +1,7 @@
 // Helpers shared by the MIS report formats (Full P&L, revenue performance, regional P&L).
 import { useCallback, useMemo, useState } from "react";
 import { download } from "./format";
+import { useGridView } from "./gridView";
 
 // Values arrive as 13-slot vectors: 12 fiscal months (Apr..Mar) + full-year total (slot 12).
 export function agg(vec, period, month) {
@@ -64,15 +65,8 @@ export function csvDownload(lines, name) {
                     { type: "text/csv" }), name);
 }
 
-// localStorage-backed state for per-viewer view preferences (falls back to the default when storage is blocked)
+// Per-viewer view preferences (localStorage) over the admin's default for everyone (see gridView.useGridView)
 export function usePref(key, initial) {
-  const [v, setV] = useState(() => {
-    try { const s = localStorage.getItem(key); return s ? { ...initial, ...JSON.parse(s) } : initial; } catch { return initial; }
-  });
-  const set = (patch) => setV((cur) => {
-    const next = { ...cur, ...(typeof patch === "function" ? patch(cur) : patch) };
-    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage unavailable */ }
-    return next;
-  });
-  return [v, set, () => { try { localStorage.removeItem(key); } catch { /* ignore */ } setV(initial); }];
+  const [v, set, reset, admin] = useGridView(key, initial);
+  return [v, set, reset, admin];
 }

@@ -159,6 +159,8 @@ function RoleModal({ role, onClose, onSaved }) {
   const [name, setName] = useState(role?.name || "");
   const [description, setDescription] = useState(role?.description || "");
   const [aopTags, setAopTags] = useState((role?.aop_tags || []).join(", "));
+  const [deptScope, setDeptScope] = useState(role?.aop_dept_scope || "all");
+  const [depts, setDepts] = useState(role?.aop_departments || []);
   const [perms, setPerms] = useState(() => {
     const base = { ...EMPTY_PERMS };
     if (role?.permissions) {
@@ -192,7 +194,7 @@ function RoleModal({ role, onClose, onSaved }) {
     setBusy(true); setErr("");
     try {
       const aop_tags = aopTags.split(",").map((t) => t.trim()).filter(Boolean);
-      const payload = { name: name.trim(), description, permissions: perms, aop_tags };
+      const payload = { name: name.trim(), description, permissions: perms, aop_tags, aop_dept_scope: deptScope, aop_departments: depts };
       if (isEdit) {
         await api.put(`/roles/${role.id}`, payload);
       } else {
@@ -233,6 +235,8 @@ function RoleModal({ role, onClose, onSaved }) {
                    placeholder="Leave empty for all — e.g. DIAL, GHIAL" data-testid="role-aop-tags" />
             <div className="text-[10px] text-[var(--muted)] mt-1">Limits the P&L and AOP lines this role can see to these airports / entities.</div>
           </div>
+
+          <DepartmentScope scope={deptScope} setScope={setDeptScope} depts={depts} setDepts={setDepts} />
 
           <div>
             <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">Workspace Section Permissions</div>
@@ -303,6 +307,81 @@ function RoleModal({ role, onClose, onSaved }) {
           <button className="btn-primary" onClick={submit} disabled={busy} data-testid="role-save-btn">{busy ? "Saving…" : "Save Role"}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Overheads & payroll department scope: every department, the user's own department (from the employee master,
+ * matched to the AOP department names — the mapping below is editable) or a fixed list of departments.
+ */
+function DepartmentScope({ scope, setScope, depts, setDepts }) {
+  const [info, setInfo] = useState(null);
+  const [aliases, setAliases] = useState({});
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    api.get("/aop/departments").then((r) => {
+      setInfo(r.data);
+      setAliases(Object.fromEntries(Object.entries(r.data.aliases || {}).map(([k, v]) => [k, (v || []).join(", ")])));
+    }).catch(() => setInfo({ aop: [], employees: [], mapping: {} }));
+  }, []);
+  const toggle = (d) => setDepts((x) => (x.includes(d) ? x.filter((y) => y !== d) : [...x, d]));
+  const saveAliases = async () => {
+    const clean = Object.fromEntries(Object.entries(aliases).map(([k, v]) => [k, String(v || "").split(",").map((x) => x.trim()).filter(Boolean)]));
+    await api.put("/aop/config", { dept_aliases: clean });
+    const r = await api.get("/aop/departments");
+    setInfo(r.data); setSaved("Mapping saved");
+    setTimeout(() => setSaved(""), 2500);
+  };
+  return (
+    <div className="border border-[var(--border)] p-3 space-y-2" data-testid="role-dept-scope">
+      <div className="text-[10px] tracking-overline text-[var(--muted)]">Overheads &amp; payroll — department scope</div>
+      <div className="flex gap-4 flex-wrap text-xs">
+        {[["all", "All departments"], ["own", "Own department only (employee master)"], ["list", "Selected departments"]].map(([k, l]) => (
+          <label key={k} className="flex items-center gap-1.5 cursor-pointer">
+            <input type="radio" name="dept-scope" className="accent-[var(--gold)]" checked={scope === k} onChange={() => setScope(k)} data-testid={`dept-scope-${k}`} />{l}
+          </label>
+        ))}
+      </div>
+      <div className="text-[10px] text-[var(--muted)]">
+        {scope === "all" && "Users see every department's overheads and payroll (subject to the section permissions below)."}
+        {scope === "own" && "Each user sees only the overheads and payroll of the department recorded against them in the employee master — e.g. Admin head / staff see Admin only. Company-wide payroll lines in the P&L stay masked. Tick departments below to add more."}
+        {scope === "list" && "Users see only the departments ticked below."}
+      </div>
+      {scope !== "all" && info && (
+        <div className="flex flex-wrap gap-1">
+          {info.aop.map((d) => (
+            <button type="button" key={d} onClick={() => toggle(d)} data-testid={`dept-${d}`}
+                    className={`chip ${depts.includes(d) ? "!border-[var(--gold)] !text-[var(--gold)] font-semibold" : ""}`}>{d}</button>
+          ))}
+          {!info.aop.length && <span className="text-[10.5px] text-[var(--muted)]">No departments in the overhead / payroll data yet.</span>}
+        </div>
+      )}
+      {scope === "own" && info && info.employees.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-[10.5px] text-[var(--muted)]">Employee-master department → AOP department mapping</summary>
+          <table className="w-full tbl mt-1">
+            <thead><tr><th>Employee master</th><th>Matches (automatic)</th><th>Also maps to (comma separated)</th></tr></thead>
+            <tbody>
+              {info.employees.map((e) => (
+                <tr key={e}>
+                  <td>{e}</td>
+                  <td className="text-[var(--muted)]">{(info.mapping[e] || []).join(", ") || "—"}</td>
+                  <td>
+                    <input className="input-sm w-full" list="aop-depts" value={aliases[e] || ""}
+                           onChange={(ev) => setAliases((a) => ({ ...a, [e]: ev.target.value }))} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <datalist id="aop-depts">{info.aop.map((d) => <option key={d} value={d} />)}</datalist>
+          <div className="flex items-center gap-2 mt-1">
+            <button type="button" className="btn-secondary !py-1 !text-[11px]" onClick={saveAliases}>Save mapping</button>
+            <span className="text-[10.5px] text-[var(--success)]">{saved}</span>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

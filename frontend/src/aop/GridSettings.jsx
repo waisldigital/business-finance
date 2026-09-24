@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
-import { GearSix, ArrowCounterClockwise, DotsSixVertical, Eye, EyeSlash, Funnel, CalendarBlank, TreeStructure } from "@phosphor-icons/react";
+import { GearSix, ArrowCounterClockwise, DotsSixVertical, Eye, EyeSlash, Funnel, CalendarBlank, TreeStructure, UsersThree } from "@phosphor-icons/react";
+import { useAuth } from "@/lib/auth";
 
 /**
  * Settings icon for any grid: show / hide and drag to reorder columns, pivot on the leading columns,
  * switch the Excel-style column filters and the 12-month view on or off, and return to the default layout.
  * cols: arranged columns ({key, label, hiddenByUser}); view / update / reset from useGridView.
  */
-export default function GridSettings({ cols, view, update, reset, hasMonths = true, pivotable = true, align = "right", testid = "grid-settings" }) {
+export default function GridSettings({ cols, view, update, reset, shared, hasMonths = true, pivotable = true, align = "right", testid = "grid-settings" }) {
   const [open, setOpen] = useState(false);
+  const { user } = useAuth() || {};
+  const isAdmin = user?.role === "admin" && !!shared;
   const [drag, setDrag] = useState(null);
   const [q, setQ] = useState("");
   const ref = useRef(null);
@@ -78,6 +81,7 @@ export default function GridSettings({ cols, view, update, reset, hasMonths = tr
             )}
             {pivotable && <div className="text-[10px] text-[var(--muted)] leading-snug">Drag a column to the top to group by it. Click a group label to close it (one summed row) or open it again.</div>}
           </div>
+          {isAdmin && <SharedDefault shared={shared} testid={testid} />}
           <div className="px-3 py-1.5 flex items-center gap-2 border-b border-[var(--border)]">
             <span className="text-[10px] tracking-overline text-[var(--muted)] flex-1">Columns · {visibleCount}/{cols.length}</span>
             <input className="input-sm w-28" placeholder="Find…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -107,6 +111,29 @@ export default function GridSettings({ cols, view, update, reset, hasMonths = tr
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Admin: make the current layout (visible / hidden columns, order, pivot, 12M, filters on, sort) everyone's default
+export function SharedDefault({ shared, testid }) {
+  const [msg, setMsg] = useState("");
+  const run = (fn, done) => fn().then(() => setMsg(done)).catch((e) => setMsg(e.response?.data?.detail || e.message));
+  return (
+    <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface-2)] space-y-1" data-testid={`${testid}-shared`}>
+      <div className="flex items-center gap-1.5">
+        <UsersThree size={13} className="text-[var(--gold)]" />
+        <span className="flex-1 text-[10.5px] font-semibold">Default for everyone {shared.hasDefault ? "· set" : "· not set"}</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button className="icon-btn !h-7" onClick={() => run(shared.save, "Saved — users start from this layout")} data-testid={`${testid}-save-default`}>
+          Save current as default
+        </button>
+        {shared.hasDefault && (
+          <button className="icon-btn !h-7" onClick={() => run(shared.clear, "Cleared — standard layout")} data-testid={`${testid}-clear-default`}>Clear</button>
+        )}
+      </div>
+      <div className="text-[10px] text-[var(--muted)] leading-snug">{msg || "Columns shown / hidden, order, pivot, 12M and sort. Users can still change their own view; Default returns them here."}</div>
     </div>
   );
 }

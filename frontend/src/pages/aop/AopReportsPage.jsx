@@ -7,6 +7,7 @@ import { Popover } from "@/aop/MisCommon";
 import DatasetWorkspace from "@/aop/DatasetWorkspace";
 import { AirportGM, CuteAnalysis, OpexAnalysis, Resources, OverheadsSummary, OverheadsNature, OverheadsLines, ProjectHealth, CapexTracker } from "@/aop/MisDrillReports";
 import { usePref } from "@/aop/mis";
+import { saveSharedView, clearSharedView, useSharedView } from "@/aop/gridView";
 import FullPnL from "@/aop/FullPnL";
 import PnLView from "@/aop/PnLView";
 import RevenuePerformance from "@/aop/RevenuePerformance";
@@ -52,6 +53,8 @@ export default function AopReportsPage({ admin = false }) {
   const [datasets, setDatasets] = useState([]);
   const [err, setErr] = useState("");
   const [pref, setPref] = usePref(admin ? "aop_reports_admin_v1" : "aop_reports_v1", { selected: ["full_pnl"] });
+  const usersDefault = useSharedView("aop_reports_v1");
+  const [defMsg, setDefMsg] = useState("");
   useEffect(() => {
     api.get("/aop/mis/formats").then((r) => setCatalog(r.data.formats)).catch((e) => setErr(e.response?.data?.detail || e.message));
     api.get("/aop/datasets").then((r) => setDatasets(r.data)).catch(() => {});
@@ -74,6 +77,15 @@ export default function AopReportsPage({ admin = false }) {
               subtitle="MIS and AOP report formats on the single actual source — pick one or more formats; each opens as its own page below"
               actions={<>
                 <Popover icon={<Stack size={14} />} label={<span className="text-[11px]">Formats · {selected.length}</span>} testid="format-picker" width="w-80">
+                  <div className="px-3 py-1.5 text-[10px] text-[var(--muted)] border-b border-[var(--border)]">Click a format to show it alone · tick the box to add it to the page</div>
+                  {admin && (
+                    <div className="px-3 py-1.5 border-b border-[var(--border)] bg-[var(--surface-2)] flex items-center gap-1.5 flex-wrap" data-testid="formats-default">
+                      <span className="text-[10.5px] flex-1">{defMsg || (usersDefault ? `Users' default: ${(usersDefault.selected || []).length} format(s)` : "Users' default: Full P&L")}</span>
+                      <button className="icon-btn !h-6 !text-[10.5px]" onClick={() => saveSharedView("aop_reports_v1", { selected }).then(() => setDefMsg("Saved as users' default"))}
+                              data-testid="formats-save-default">Set as users' default</button>
+                      {usersDefault && <button className="icon-btn !h-6 !text-[10.5px]" onClick={() => clearSharedView("aop_reports_v1").then(() => setDefMsg("Cleared"))}>Clear</button>}
+                    </div>
+                  )}
                   {groups.map(([sec, title]) => {
                     const items = (catalog || []).filter((f) => f.section === sec);
                     if (!items.length) return null;
@@ -81,16 +93,18 @@ export default function AopReportsPage({ admin = false }) {
                       <div key={sec}>
                         <div className="px-3 py-1.5 border-b border-[var(--border)] text-[10px] tracking-overline text-[var(--muted)]">{title}</div>
                         {items.map((f) => (
-                          <label key={f.key} className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--row-hover)]">
-                            <input type="checkbox" className="accent-[var(--gold)] mt-0.5" checked={selected.includes(f.key)}
-                                   onChange={(e) => toggle(f.key, e.target.checked)} data-testid={`fmt-${f.key}`} />
+                          <div key={f.key} className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--row-hover)]"
+                               onClick={() => setPref({ selected: [f.key] })} title="Click to show only this format · tick the box to add it"
+                               data-testid={`fmt-row-${f.key}`}>
+                            <input type="checkbox" className="accent-[var(--gold)] mt-0.5 cursor-pointer" checked={selected.includes(f.key)}
+                                   onClick={(e) => e.stopPropagation()} onChange={(e) => toggle(f.key, e.target.checked)} data-testid={`fmt-${f.key}`} />
                             <span className="flex-1 min-w-0">
                               <span className={`block ${selected.includes(f.key) ? "font-semibold" : ""}`}>{f.label}</span>
                               {f.description && <span className="block text-[10px] text-[var(--muted)] truncate">{f.description}</span>}
                             </span>
                             {!f.enabled && <span className="chip !text-[9.5px] text-[var(--warning)]" title="Hidden from users"><EyeSlash size={10} />off</span>}
                             <span className="chip !text-[9.5px]">{f.ref}</span>
-                          </label>
+                          </div>
                         ))}
                       </div>
                     );

@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { DownloadSimple, ArrowClockwise, Info, LockSimple } from "@phosphor-icons/react";
+import { DownloadSimple, ArrowClockwise, Info, LockSimple, GearSix, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, useTree, csvDownload, usePref, periodPrefix } from "./mis";
-import { TreeLabel, ExpandButtons, PeriodPicker } from "./MisCommon";
+import { TreeLabel, ExpandButtons, PeriodPicker, Popover } from "./MisCommon";
+import { SharedDefault } from "./GridSettings";
+import { useAuth } from "@/lib/auth";
 
 const DEFAULTS = { measure: "af_plan", period: "fy", month: null, subs: true };
 
 /** Regional P&L — Solutions (MIS slide 5b): India, International and its regions, Total. */
 export default function RegionalPnL({ unit, onDrill }) {
-  const [pref, setPref] = usePref("aop_mis_regional_v1", DEFAULTS);
+  const [pref, setPref, resetPref, sharedPref] = usePref("aop_mis_regional_v1", DEFAULTS);
+  const { user } = useAuth() || {};
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const load = () => {
@@ -60,6 +63,10 @@ export default function RegionalPnL({ unit, onDrill }) {
         </label>
         <div className="flex-1" />
         <ExpandButtons tree={tree} />
+        <button className="icon-btn" onClick={resetPref} title="Return to default view"><ArrowCounterClockwise size={13} /></button>
+        {user?.role === "admin" && (
+          <Popover icon={<GearSix size={14} />} testid="reg-settings" width="w-72"><SharedDefault shared={sharedPref} testid="reg" /></Popover>
+        )}
         <button className="icon-btn" onClick={exportCsv} title="Export (csv)"><DownloadSimple size={13} /></button>
         <button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} /></button>
       </div>

@@ -5,6 +5,8 @@ import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, periodPrefix, useTree, csvDownload, usePref } from "./mis";
 import { TreeLabel, ExpandButtons, PeriodPicker, Popover, Check, useFilters, FilterBar, Modal } from "./MisCommon";
 import RevenuePerformance from "./RevenuePerformance";
+import { SharedDefault } from "./GridSettings";
+import { useAuth } from "@/lib/auth";
 
 const SEG_CLASS = { cacr: "cacr", sol: "sol", total: "tot" };
 const DEFAULTS = { measures: ["af_plan", "b_draft"], segments: ["cacr", "sol", "total"], variance: true, period: "fy", month: null };
@@ -26,7 +28,8 @@ const drillOf = (r) => DRILL[r.id] || (r.parent === "emp_direct" ? ["resources",
 
 export default function FullPnL({ unit, onDrill }) {
   const f = useFilters();
-  const [pref, setPref, resetPref] = usePref("aop_mis_full_pnl_v1", DEFAULTS);
+  const [pref, setPref, resetPref, sharedPref] = usePref("aop_mis_full_pnl_v1", DEFAULTS);
+  const { user } = useAuth() || {};
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -111,6 +114,7 @@ export default function FullPnL({ unit, onDrill }) {
           <div className="border-t border-[var(--border)]">
             <Check checked={pref.variance} onChange={(on) => setPref({ variance: on })} testid="full-var">Variance (last vs first year)</Check>
           </div>
+          {user?.role === "admin" && <div className="border-t border-[var(--border)]"><SharedDefault shared={sharedPref} testid="full" /></div>}
         </Popover>
         <button className="icon-btn" onClick={exportCsv} title="Export view (csv)"><DownloadSimple size={13} /></button>
         <button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} className={loading ? "animate-spin" : ""} /></button>

@@ -42,7 +42,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   const [po, setPo] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [groups, setGroups] = useState(null);
-  const [view, updateView, resetView] = useGridView(`aop_grid_${dataset.key}_v1`, {});
+  const [view, updateView, resetView, sharedView] = useGridView(`aop_grid_${dataset.key}_v1`, {});
   const canUpload = admin || !!dataset.can_upload;
 
   const load = useCallback(async () => {
@@ -83,12 +83,22 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   })) : rows), [rows, virtual]);
   const filtered = useMemo(() => applyView(rowsV, arranged, view), [rowsV, arranged, view]);
 
-  const canEdit = useCallback((c) => !c.virtual && (admin || !!c.user_editable), [admin]);
+  // a folded FY total (12M off) is editable when its months are: the value is phased evenly over the months
+  const monthsOf = useCallback((v) => columns.filter((c) => isMonthCol(c) && c.key.startsWith(`${v}__`)), [columns]);
+  const canEdit = useCallback((c) => (c.virtual ? monthsOf(c.version).some((m) => admin || !!m.user_editable)
+    : admin || !!c.user_editable), [admin, monthsOf]);
   const downloadView = () => {
     csvDownload([visible.map((c) => c.label), ...filtered.map((r) => visible.map((c) => cellValue(r, c)))], `${dataset.key}_view.csv`);
   };
 
-  const onCommit = async (edits) => {
+  const onCommit = async (raw) => {
+    const edits = raw.flatMap((e) => {
+      const v = /^(.+)__sum$/.exec(e.field)?.[1];
+      if (!v) return [e];
+      const ms = monthsOf(v);
+      const n = e.value === null || e.value === "" ? null : Number(String(e.value).replace(/,/g, ""));
+      return ms.map((m) => ({ key: e.key, field: m.key, value: n === null || Number.isNaN(n) ? null : Math.round((n / ms.length) * 100) / 100 }));
+    });
     try {
       const { data } = await api.patch(`/aop/datasets/${dataset.key}/rows`, edits);
       const parts = [];
@@ -124,7 +134,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
           <MagnifyingGlass size={12} className="absolute left-2 top-2 text-[var(--muted)]" />
           <input className="input-sm pl-6 w-56" placeholder="Search key, PO, vendor, AOP code…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="ds-search" />
         </form>
-        <GridSettings cols={arranged} view={view} update={updateView} reset={resetView} hasMonths={hasMonths} align="left" testid="ds-grid" />
+        <GridSettings cols={arranged} view={view} update={updateView} reset={resetView} shared={sharedView} hasMonths={hasMonths} align="left" testid="ds-grid" />
         <div className="seg" title="Column groups">
           {allGroups.map((g) => (
             <button key={g || "details"} className={groups?.has(g) ? "on" : ""}

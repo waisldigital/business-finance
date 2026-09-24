@@ -112,3 +112,27 @@ def test_opex_category_normalisation():
     assert opex_category("Software & Licenses ") == "Software/Licenses"
     assert opex_category("Manpower") == "Third Party Manpower"
     assert opex_category(None) == "Overheads"
+
+
+def test_department_scope_matching():
+    from aop import departments as d
+    scope = d.expand(["Finance"], {})
+    assert d.allowed(scope, "Finance & Accounts")
+    assert not d.allowed(scope, "HR")
+    assert d.allowed(d.expand(["IT"], {}), "Internal IT")
+    assert d.allowed(d.expand(["Facilities"], {"Facilities": ["Admin"]}), "Admin")
+    assert d.allowed(None, "anything")
+    assert d.row_allowed(d.expand(["Admin"], {}), "overhead_lines", {"pl_tag": "Admin", "department": "Admin"})
+    assert not d.row_allowed(d.expand(["Admin"], {}), "overhead_lines", {"pl_tag": "Marketing"})
+    assert d.row_allowed(d.expand(["Admin"], {}), "opex_lines", {"department": "Marketing"})  # not a scoped dataset
+    assert d.actual_allowed(d.expand(["HR"], {}), {"dims": {"pl_tag": "HR"}})
+
+
+def test_budget_fx_rate():
+    from aop.router import fx_rate, budget_input_columns
+    data = {"assumptions": [{"fy": "FY27", "name": "Currency Assumptions · USD · USD to INR", "code": "usd_inr", "value": 92}]}
+    assert fx_rate(data, "INR", ["FY28", "FY27"]) == 1.0
+    assert fx_rate(data, "usd", ["FY28", "FY27"]) == 92
+    assert fx_rate(data, "GBP", ["FY28", "FY27"]) is None
+    keys = [c["key"] for c in budget_input_columns("B28")]
+    assert keys == ["b28_currency", "b28_qty", "b28_unit_price", "b28_fx", "B28__annual", "b28_dept_remarks", "b28_fin_remarks"]
