@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import { Plus, PencilSimple, Trash, X, Eye, PencilLine, ShieldStar, Warning } from "@phosphor-icons/react";
+import { Plus, PencilSimple, Trash, X, Eye, PencilLine, ShieldStar, Warning, UploadSimple } from "@phosphor-icons/react";
 
 const SECTIONS = [
   { key: "dashboard",        label: "Dashboard" },
@@ -21,7 +21,7 @@ const SECTIONS = [
 ];
 
 const EMPTY_PERMS = SECTIONS.reduce((acc, s) => {
-  acc[s.key] = { can_view: false, can_edit: false };
+  acc[s.key] = { can_view: false, can_edit: false, can_upload: false };
   return acc;
 }, {});
 
@@ -120,6 +120,7 @@ export default function RolesPage({ embedded = false }) {
                         <div className="flex items-center justify-center gap-1">
                           {p.can_view ? <Eye size={13} weight="duotone" className="text-[var(--gold)]" title="View" /> : <span className="text-[var(--muted)]">·</span>}
                           {p.can_edit ? <PencilLine size={13} weight="duotone" className="text-[var(--success)]" title="Edit" /> : null}
+                          {p.can_upload ? <UploadSimple size={13} weight="duotone" className="text-[var(--warning)]" title="Bulk upload" /> : null}
                         </div>
                       </td>
                     );
@@ -165,6 +166,7 @@ function RoleModal({ role, onClose, onSaved }) {
         base[k] = {
           can_view: !!role.permissions[k]?.can_view,
           can_edit: !!role.permissions[k]?.can_edit,
+          can_upload: !!role.permissions[k]?.can_upload,
         };
       }
     }
@@ -179,7 +181,8 @@ function RoleModal({ role, onClose, onSaved }) {
       // If can_edit becomes true, can_view should also be true
       if (action === "can_edit" && value) next[sectionKey].can_view = true;
       // If can_view becomes false, can_edit should also be false
-      if (action === "can_view" && !value) next[sectionKey].can_edit = false;
+      if (action === "can_view" && !value) { next[sectionKey].can_edit = false; next[sectionKey].can_upload = false; }
+      if (action === "can_upload" && value) next[sectionKey].can_view = true;
       return next;
     });
   };
@@ -240,6 +243,7 @@ function RoleModal({ role, onClose, onSaved }) {
                     <th>Section</th>
                     <th className="text-center w-32">View</th>
                     <th className="text-center w-32">Edit (Create + Modify)</th>
+                    <th className="text-center w-32" title="Bulk upload / download of data files (AOP sections)">Upload (bulk)</th>
                     <th className="text-center w-24">Delete</th>
                   </tr>
                 </thead>
@@ -264,6 +268,17 @@ function RoleModal({ role, onClose, onSaved }) {
                           onChange={(e) => setPerm(s.key, "can_edit", e.target.checked)}
                           data-testid={`perm-edit-${s.key}`}
                         />
+                      </td>
+                      <td className="text-center">
+                        {s.key.startsWith("aop_") ? (
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 accent-[var(--gold)] cursor-pointer"
+                            checked={!!perms[s.key]?.can_upload}
+                            onChange={(e) => setPerm(s.key, "can_upload", e.target.checked)}
+                            data-testid={`perm-upload-${s.key}`}
+                          />
+                        ) : <span className="text-[var(--muted)]">·</span>}
                       </td>
                       <td className="text-center">
                         <span className="text-[10px] tracking-overline text-[var(--muted)]" title="Reserved for Admin">ADMIN ONLY</span>

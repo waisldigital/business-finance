@@ -82,6 +82,7 @@ WORKSPACE_SECTIONS = [
 class SectionPermission(BaseModel):
     can_view: bool = False
     can_edit: bool = False  # Edit includes create + modify (NOT delete)
+    can_upload: bool = False  # bulk upload / download of the section's data files (granted by an admin)
 
 
 class RoleIn(BaseModel):

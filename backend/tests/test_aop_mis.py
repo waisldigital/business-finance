@@ -84,3 +84,31 @@ def test_revenue_performance_rows():
     assert by["total"]["values"]["b_plan"][12] == 12 * 195
     assert by["cute_dial"]["parent"] == "cute"
     assert by["pj_international"]["values"]["b_plan"][0] == 40
+
+
+def test_mis_reports_on_synthetic_data():
+    from aop import mis_reports as mr
+    cfg = {**CFG, "cutoffs": {"default": "2026-05", "overhead": "2026-05"}}
+    data = {**DATA,
+            "overhead_lines": [{"pl_tag": "Admin", "final_tag": "Office Rent", "geo": "India", "aop_head": "OH1", **_b(4.0)}],
+            "opex_lines": [{"category": "CA", "geo": "India", "tag": "DIAL", "nature_of_expense_2": "AMC & CMC", **_b(3.0)}]}
+    acts = [{"domain": "overhead", "period": "2026-04", "amount": 5.0, "dims": {"pl_tag": "Admin", "nature": "Office Rent", "segment": "CA+CR"}},
+            {"domain": "opex", "period": "2026-04", "amount": 2.0, "dims": {"category": "CA", "geo": "India", "tag": "DIAL", "nature": "AMC/CMC"}}]
+    s = mr.overheads_summary(data, acts, cfg)
+    admin = next(r for r in s["rows"] if r["id"] == "Admin")["values"]["CA+CR"]
+    assert admin["b_plan"][0] == 4.0 and admin["af_plan"][0] == 5.0
+    n = mr.overheads_nature(data, acts, cfg, "Admin")
+    assert n["rows"][0]["label"] == "Office Rent"
+    o = mr.opex_analysis(data, acts, cfg)
+    amc = next(r for r in o["by_category"] if r["id"] == "AMC/CMC")["values"]
+    assert amc["b_plan"][0] == 3.0 and amc["af_plan"][0] == 2.0
+    dial = next(r for r in o["by_location"] if r["id"] == "DIAL")["values"]
+    assert dial["af_plan"][0] == 2.0 and dial["af_plan"][2] == 3.0   # actual to the cut-off, then plan
+
+
+def test_opex_category_normalisation():
+    from aop.actuals_import import opex_category
+    assert opex_category("AMC & CMC") == "AMC/CMC"
+    assert opex_category("Software & Licenses ") == "Software/Licenses"
+    assert opex_category("Manpower") == "Third Party Manpower"
+    assert opex_category(None) == "Overheads"

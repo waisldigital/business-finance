@@ -8,7 +8,7 @@ import { TreeLabel, ExpandButtons, PeriodPicker } from "./MisCommon";
 const DEFAULTS = { measure: "af_plan", period: "fy", month: null, subs: true };
 
 /** Regional P&L — Solutions (MIS slide 5b): India, International and its regions, Total. */
-export default function RegionalPnL({ unit }) {
+export default function RegionalPnL({ unit, onDrill }) {
   const [pref, setPref] = usePref("aop_mis_regional_v1", DEFAULTS);
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -78,7 +78,9 @@ export default function RegionalPnL({ unit }) {
                 {rows.filter(tree.visible).map((r) => {
                   const d = tree.depth(r.id);
                   return (
-                    <tr key={r.id} className={`${r.key ? "key" : r.kind === "subtotal" ? "sub" : ""} ${d ? "child" : ""} ${r.kind === "pct" ? "pct" : ""}`} data-testid={`reg-row-${r.id}`}>
+                    <tr key={r.id} className={`${r.key ? "key" : r.kind === "subtotal" ? "sub" : ""} ${d ? "child" : ""} ${r.kind === "pct" ? "pct" : ""} ${onDrill && ["rev", "gm", "direct"].includes(r.id) ? "dbl" : ""}`}
+                        onDoubleClick={onDrill && ["rev", "gm", "direct"].includes(r.id) ? () => onDrill("project_health", {}, "Project health") : undefined}
+                        data-testid={`reg-row-${r.id}`}>
                       <td className="lbl"><TreeLabel row={r} tree={tree} depth={d} /></td>
                       {cols.map((c) => {
                         const v = val(r, c.key);

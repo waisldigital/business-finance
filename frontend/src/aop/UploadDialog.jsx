@@ -10,7 +10,7 @@ const MODES = [
   { key: "replace", label: "Replace all",  icon: ArrowsCounterClockwise, help: "Deletes every row of this dataset, then loads the file." },
 ];
 
-export default function UploadDialog({ dataset, keyFields = [], onClose, onDone }) {
+export default function UploadDialog({ dataset, keyFields = [], onClose, onDone, admin = true }) {
   const [mode, setMode] = useState("upsert");
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export default function UploadDialog({ dataset, keyFields = [], onClose, onDone 
             Unique key: <span className="font-mono text-[var(--text)]">{keyFields.join(" + ") || "line_id"}</span>. Headers may be column keys or labels. CSV or XLSX (first sheet).
           </div>
           <div className="grid grid-cols-2 gap-1.5">
-            {MODES.map((m) => (
+            {MODES.filter((m) => admin || m.key !== "replace").map((m) => (
               <button key={m.key} onClick={() => setMode(m.key)} data-testid={`upload-mode-${m.key}`}
                       className={`flex items-start gap-2 p-2 border text-left ${mode === m.key ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_8%,transparent)]" : "border-[var(--border)]"}`}>
                 <m.icon size={15} className={mode === m.key ? "text-[var(--gold)]" : "text-[var(--muted)]"} />

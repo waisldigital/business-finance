@@ -554,7 +554,8 @@ async def create_role(payload: RoleIn, admin: dict = Depends(require_role("admin
     perms: Dict[str, Any] = {}
     for k, v in (payload.permissions or {}).items():
         if k in WORKSPACE_SECTIONS:
-            perms[k] = {"can_view": bool(v.can_view), "can_edit": bool(v.can_edit)}
+            perms[k] = {"can_view": bool(v.can_view) or bool(v.can_upload), "can_edit": bool(v.can_edit),
+                        "can_upload": bool(v.can_upload)}
     doc["permissions"] = perms
     await db.roles.insert_one(doc)
     await write_audit(db, entity_type="role", entity_id=doc["id"], action="create", user=admin,
@@ -574,7 +575,8 @@ async def update_role(rid: str, payload: RoleIn, admin: dict = Depends(require_r
     perms: Dict[str, Any] = {}
     for k, v in (payload.permissions or {}).items():
         if k in WORKSPACE_SECTIONS:
-            perms[k] = {"can_view": bool(v.can_view), "can_edit": bool(v.can_edit)}
+            perms[k] = {"can_view": bool(v.can_view) or bool(v.can_upload), "can_edit": bool(v.can_edit),
+                        "can_upload": bool(v.can_upload)}
     updates["permissions"] = perms
     updates["updated_at"] = now_iso()
     await db.roles.update_one({"id": rid}, {"$set": updates})
@@ -616,6 +618,7 @@ async def my_permissions(user: dict = Depends(get_current_user)):
                     perms[s] = {
                         "can_view": bool(p.get("can_view")),
                         "can_edit": bool(p.get("can_edit")),
+                        "can_upload": bool(p.get("can_upload")),
                         "can_delete": False,  # only admin can delete
                     }
     else:

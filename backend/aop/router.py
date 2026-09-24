@@ -24,6 +24,8 @@ import openpyxl
 
 from .datasets import ACTUALS, AOP_SECTIONS, SPECS, build_key, coerce, column, norm, slug
 from .importer import Result, import_aop_workbook, import_opex_workbook
+from .actuals_import import (import_mis_working, import_project_health, import_reporting_package, import_resource_cost,
+                             pax_driver_key)
 from .periods import shift_fy
 from .periods import fy_months
 from .opex import INPUT_FIELDS as TRACKER_INPUTS, forecast_line
@@ -31,6 +33,7 @@ from .plan import build_draft, default_drivers
 from . import reports as rep
 from .pnl import Filters, PnLEngine
 from . import mis
+from . import mis_reports as mr
 
 ACTUAL_COLUMNS = [
     column("uid", "Unique key"), column("domain", "Domain"), column("ref", "Line ref"), column("period", "Period (YYYY-MM)"),
@@ -60,15 +63,17 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     # ------------------------------------------------------------------ access
     async def perms_for(user: dict) -> Dict[str, Any]:
         if user.get("role") == "admin":
-            return {"admin": True, "sections": {s: {"can_view": True, "can_edit": True} for s in AOP_SECTIONS}, "tags": []}
-        sections = {s: {"can_view": False, "can_edit": False} for s in AOP_SECTIONS}
+            return {"admin": True, "sections": {s: {"can_view": True, "can_edit": True, "can_upload": True} for s in AOP_SECTIONS},
+                    "tags": []}
+        sections = {s: {"can_view": False, "can_edit": False, "can_upload": False} for s in AOP_SECTIONS}
         tags: List[str] = []
         if user.get("role_id"):
             role = await db.roles.find_one({"id": user["role_id"]}, {"_id": 0})
             if role:
                 for s, p in (role.get("permissions") or {}).items():
                     if s in sections:
-                        sections[s] = {"can_view": bool(p.get("can_view")), "can_edit": bool(p.get("can_edit"))}
+                        sections[s] = {"can_view": bool(p.get("can_view")), "can_edit": bool(p.get("can_edit")),
+                                       "can_upload": bool(p.get("can_upload"))}
                 tags = [t for t in (role.get("aop_tags") or []) if t]
         return {"admin": False, "sections": sections, "tags": tags}
 
@@ -88,7 +93,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if spec.sensitive and not p["sections"]["aop_payroll"]["can_view"]:
             return False
         sp = p["sections"].get(spec.section, {})
-        return bool(sp.get("can_view" if action == "view" else "can_edit"))
+        return bool(sp.get({"view": "can_view", "upload": "can_upload"}.get(action, "can_edit")))
 
     async def get_config() -> Dict[str, Any]:
         cfg = await db.aop_config.find_one({"id": "aop"}, {"_id": 0})
@@ -109,10 +114,13 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             return cache["data"], cache["actuals"], cfg
         data: Dict[str, List[Dict[str, Any]]] = {}
         needed = ["rev_cute", "rev_noncute", "rev_projects", "project_master", "opex_lines", "payroll_lines",
-                  "overhead_lines", "overhead_plan", "assumptions", "pl_other", "pl_snapshot", "rev_cute_drivers"]
+                  "overhead_lines", "overhead_plan", "assumptions", "pl_other", "pl_snapshot", "rev_cute_drivers",
+                  "capex_lines", "capex_tracker", "capex_history"]
         async for d in db.aop_rows.find({"dataset": {"$in": needed}}, {"_id": 0, "dataset": 1, "fields": 1}):
             data.setdefault(d["dataset"], []).append(d.get("fields") or {})
-        actuals = [a async for a in db.aop_actuals.find({}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
+        # reconciliation-only domains (SAP payroll / capex postings) stay out of the engine's working set
+        actuals = [a async for a in db.aop_actuals.find({"domain": {"$nin": ["payroll_sap", "capex_sap"]}},
+                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
         cache.update(version=cfg.get("data_version"), data=data, actuals=actuals)
         return data, actuals, cfg
 
@@ -206,7 +214,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             out.append({"key": key, "label": spec.label, "group": spec.group, "section": spec.section,
                         "description": spec.description, "sensitive": spec.sensitive,
                         "key_fields": spec.key_fields or ["line_id"], "rows": counts.get(key, 0),
-                        "columns": len(m.get("columns") or []), "updated_at": m.get("updated_at")})
+                        "columns": len(m.get("columns") or []), "updated_at": m.get("updated_at"),
+                        "can_upload": await can(user, key, "upload")})
         if user.get("role") == "admin":
             n = await db.aop_actuals.count_documents({})
             out.append({"key": ACTUALS, "label": "Actuals (single source)", "group": "Actuals", "section": "admin",
@@ -462,8 +471,12 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     @r.post("/datasets/{dataset}/upload")
     async def upload(dataset: str, mode: str = Query("upsert", pattern="^(add|replace|modify|upsert)$"),
                      file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-        require_admin(user)
+        # bulk change: admins, or roles an admin granted "upload" on this section
         ensure_ds(dataset)
+        if not await can(user, dataset, "upload"):
+            raise HTTPException(403, "Bulk upload needs the upload permission for this section — ask an administrator")
+        if mode == "replace" and user.get("role") != "admin":
+            raise HTTPException(403, "Only an administrator can replace a whole dataset")
         content = await file.read()
         cols = await columns_for(dataset)
         incoming = read_table(content, file.filename or "upload.csv", cols)
@@ -515,7 +528,9 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     @r.get("/datasets/{dataset}/download")
     async def download(dataset: str, fmt: str = Query("xlsx", pattern="^(xlsx|csv)$"), template: bool = False,
                        user: dict = Depends(get_current_user)):
-        require_admin(user)
+        ensure_ds(dataset)
+        if not (await can(user, dataset, "upload") or (dataset != ACTUALS and await can(user, dataset, "view"))):
+            raise HTTPException(403, "Not allowed")
         ensure_ds(dataset)
         cols = [c for c in await columns_for(dataset)]
         spec = SPECS.get(dataset)
@@ -620,6 +635,107 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                                          "meta": res.meta, "warnings": res.warnings,
                                          "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}})
         return {"meta": res.meta, "warnings": res.warnings, "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}}
+
+    # ------------------------------------------------------------------ monthly actuals (single actual source)
+    async def replace_source(res: Result, source: str, user: dict):
+        """Replace this source's actuals for the months the file contains; other sources and months are untouched."""
+        periods = sorted({a["period"] for a in res.actuals})
+        if periods:
+            await db.aop_actuals.delete_many({"source": source, "period": {"$in": periods}})
+        for a in res.actuals:
+            a["source"] = source
+            a["imported_by"] = user.get("email")
+        for j in range(0, len(res.actuals), 2000):
+            await db.aop_actuals.insert_many([dict(a) for a in res.actuals[j:j + 2000]])
+        return periods
+
+    async def log_import(kind: str, file, user: dict, meta: Dict[str, Any], extra: Optional[Dict[str, Any]] = None):
+        await db.aop_imports.insert_one({"id": gen_id(), "kind": kind, "file": file.filename, "at": now_iso(),
+                                         "by": user.get("email"), "meta": meta, **(extra or {})})
+        await write_audit(db, entity_type="aop_import", entity_id=kind, action="import", user=user,
+                          field_changes={"file": file.filename})
+
+    async def run_import(file: UploadFile, fn, *args):
+        path = await save_upload(file)
+        try:
+            return fn(path, *args)
+        except Exception as e:  # noqa: BLE001 — report parse problems to the admin verbatim
+            raise HTTPException(400, f"Could not read {file.filename}: {e}")
+        finally:
+            os.unlink(path)
+
+    async def move_cutoff(keys: List[str], cutoff: Optional[str]):
+        """Actual months now run to the file's last month (never moves a cut-off backwards)."""
+        if not cutoff:
+            return
+        cfg = await get_config()
+        cut = dict(cfg.get("cutoffs") or {})
+        for k in keys:
+            if not cut.get(k) or cut[k] < cutoff:
+                cut[k] = cutoff
+        await db.aop_config.update_one({"id": "aop"}, {"$set": {"cutoffs": cut}})
+
+    @r.post("/import/mis-actuals")
+    async def import_mis(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        """MIS working file (SAP_Revenue + SAP_Expense + Mapping) → the plan year's actuals."""
+        require_admin(user)
+        cfg = await get_config()
+        res = await run_import(file, import_mis_working, cfg["plan_fy"])
+        periods = await replace_source(res, "mis", user)
+        cut = res.meta.get("cutoff")
+        keys = ["default", "overhead"] + [k for k in (cfg.get("cutoffs") or {}) if k not in ("payroll",)]
+        await move_cutoff(sorted(set(keys)), cut)
+        await bump_version()
+        await log_import("mis_actuals", file, user, res.meta, {"actuals": len(res.actuals)})
+        return {"meta": res.meta, "periods": periods, "actuals": len(res.actuals)}
+
+    @r.post("/import/resource-cost")
+    async def import_resources(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        """Resource cost file (employee × WBS × month) → payroll actuals with FTE and headcount."""
+        require_admin(user)
+        cfg = await get_config()
+        res = await run_import(file, import_resource_cost, cfg["plan_fy"])
+        periods = await replace_source(res, "resource", user)
+        await move_cutoff(["payroll"], res.meta.get("cutoff"))
+        await bump_version()
+        await log_import("resource_cost", file, user, res.meta, {"actuals": len(res.actuals)})
+        return {"meta": res.meta, "periods": periods, "actuals": len(res.actuals)}
+
+    @r.post("/import/reporting-package")
+    async def import_package(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        """Reporting package → actual billable PAX (CUTE drivers) and the capex tracker."""
+        require_admin(user)
+        cfg = await get_config()
+        res = await run_import(file, import_reporting_package, cfg["plan_fy"])
+        pax = res.datasets.pop("_pax_actual", {"rows": []})["rows"]
+        for f in pax:
+            key = pax_driver_key(f)
+            cur = await db.aop_rows.find_one({"dataset": "rev_cute_drivers", "key": key}, {"_id": 0, "fields": 1})
+            fields = {**((cur or {}).get("fields") or {}), **f}
+            await db.aop_rows.update_one({"dataset": "rev_cute_drivers", "key": key},
+                                         {"$set": {"fields": fields, "updated_at": now_iso(), "updated_by": user.get("email")},
+                                          "$setOnInsert": {"seq": 9000}}, upsert=True)
+        if res.datasets:
+            await write_result(res, user)
+        await bump_version()
+        await log_import("reporting_package", file, user, res.meta)
+        return {"meta": res.meta, "pax_rows": len(pax), "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}}
+
+    @r.post("/import/project-health")
+    async def import_projects(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        """Project health tracker (revenue master) → TCV, customer, owner and status on the project master."""
+        require_admin(user)
+        info = await run_import(file, import_project_health)
+        n = 0
+        for pid, f in info.items():
+            upd = {f"fields.{k}": v for k, v in f.items() if v not in (None, "") and k != "project_name"}
+            if not upd:
+                continue
+            r0 = await db.aop_rows.update_one({"dataset": "project_master", "key": pid}, {"$set": upd})
+            n += r0.matched_count
+        await bump_version()
+        await log_import("project_health", file, user, {"projects": len(info), "matched": n})
+        return {"projects": len(info), "matched": n}
 
     @r.get("/imports")
     async def imports(user: dict = Depends(get_current_user)):
@@ -789,6 +905,96 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         out = mis.regional_pnl(data, actuals, cfg, payroll_ok)
         out["meta"] = {"base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"], "draft_fy": cfg["draft_fy"], "cutoffs": cfg["cutoffs"]}
         return out
+
+    # ------------------------------------------------------------------ MIS drill-down formats
+    async def fmt_ctx(user: dict, key: str, section: str = "aop_pnl", allow_tags: bool = False):
+        p = await perms_for(user)
+        if not (p["admin"] or p["sections"][section]["can_view"]):
+            raise HTTPException(403, "You don't have access to this report")
+        if p["tags"] and not allow_tags:
+            raise HTTPException(403, "This report covers all entities — your role is limited to specific airports")
+        data, actuals, cfg = await load_all()
+        await format_guard(key, cfg, p)
+        return p, data, actuals, mis_cfg(cfg), p["admin"] or p["sections"]["aop_payroll"]["can_view"]
+
+    @r.get("/mis/airport-gm")
+    async def mis_airport_gm(user: dict = Depends(get_current_user)):
+        p, data, actuals, cfg, pv = await fmt_ctx(user, "airport_gm", allow_tags=True)
+        out = mr.airport_gm(data, actuals, cfg, pv)
+        if p["tags"]:  # restricted roles see their airports only
+            allowed = {norm(t) for t in p["tags"]}
+            keep = [c["key"] for c in out["columns"] if norm(c["key"]) in allowed]
+            out["columns"] = [c for c in out["columns"] if c["key"] in keep]
+            for row in out["rows"]:
+                if row.get("values"):
+                    row["values"] = {k: v for k, v in row["values"].items() if k in keep}
+        return out
+
+    @r.get("/mis/cute")
+    async def mis_cute(tag: str = "All", user: dict = Depends(get_current_user)):
+        p, data, actuals, cfg, _ = await fmt_ctx(user, "cute_analysis", allow_tags=True)
+        if p["tags"] and norm(tag) not in {norm(t) for t in p["tags"]}:
+            tag = p["tags"][0]
+        return mr.cute_analysis(data, actuals, cfg, Filters(tag=tag))
+
+    @r.get("/mis/opex")
+    async def mis_opex(user: dict = Depends(get_current_user)):
+        _, data, actuals, cfg, _ = await fmt_ctx(user, "opex_analysis")
+        return mr.opex_analysis(data, actuals, cfg)
+
+    @r.get("/mis/resources")
+    async def mis_resources(user: dict = Depends(get_current_user)):
+        _, data, _, cfg, pv = await fmt_ctx(user, "resources")
+        plan_m = fy_months(cfg["plan_fy"])
+        res_act = [a async for a in db.aop_actuals.find({"domain": "payroll", "period": {"$in": plan_m}},
+                                                        {"_id": 0, "period": 1, "amount": 1, "dims": 1, "qty": 1})]
+        return mr.resources(data, None, res_act, cfg, pv)
+
+    @r.get("/mis/overheads")
+    async def mis_overheads(user: dict = Depends(get_current_user)):
+        _, data, actuals, cfg, _ = await fmt_ctx(user, "overheads_summary")
+        return mr.overheads_summary(data, actuals, cfg)
+
+    @r.get("/mis/overheads/nature")
+    async def mis_overheads_nature(dept: str, user: dict = Depends(get_current_user)):
+        _, data, actuals, cfg, _ = await fmt_ctx(user, "overheads_nature")
+        return mr.overheads_nature(data, actuals, cfg, dept)
+
+    @r.get("/mis/overheads/lines")
+    async def mis_overheads_lines(dept: str, nature: Optional[str] = None, user: dict = Depends(get_current_user)):
+        _, data, _, cfg, _ = await fmt_ctx(user, "overheads_lines")
+        q: Dict[str, Any] = {"domain": "overhead", "period": {"$in": fy_months(cfg["plan_fy"])}, "dims.pl_tag": dept}
+        bookings = [a async for a in db.aop_actuals.find(q, {"_id": 0}).limit(20000)]
+        if nature:  # natures match case-insensitively (SAP and AOP spell them differently)
+            bookings = [a for a in bookings if norm((a.get("dims") or {}).get("nature")) == norm(nature)]
+        return mr.overheads_lines(data, bookings, cfg, dept, nature)
+
+    @r.get("/mis/overheads/departments")
+    async def mis_overhead_depts(user: dict = Depends(get_current_user)):
+        _, data, actuals, _, _ = await fmt_ctx(user, "overheads_summary")
+        depts = {r.get("pl_tag") for r in data.get("overhead_lines", []) if r.get("pl_tag")}
+        natures: Dict[str, set] = {}
+        for r in data.get("overhead_lines", []):
+            natures.setdefault(r.get("pl_tag") or "Others", set()).add(r.get("final_tag") or "Others")
+        for a in actuals:
+            d = a.get("dims") or {}
+            if a["domain"] == "overhead" and d.get("pl_tag"):
+                depts.add(d["pl_tag"])
+                natures.setdefault(d["pl_tag"], set()).add(d.get("nature") or "Others")
+        return {"departments": sorted(depts), "natures": {k: sorted(v) for k, v in natures.items()}}
+
+    @r.get("/mis/project-health")
+    async def mis_project_health(user: dict = Depends(get_current_user)):
+        _, data, actuals, cfg, pv = await fmt_ctx(user, "project_health", "aop_reports")
+        return mr.project_health(data, actuals, cfg, pv)
+
+    @r.get("/mis/capex-tracker")
+    async def mis_capex_tracker(user: dict = Depends(get_current_user)):
+        _, data, actuals, cfg, _ = await fmt_ctx(user, "capex_tracker", "aop_reports")
+        cap = [a async for a in db.aop_actuals.find({"domain": {"$in": ["capex", "capex_sap"]},
+                                                     "period": {"$in": fy_months(cfg["plan_fy"])}},
+                                                    {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
+        return mr.capex_tracker(data, cap, cfg)
 
     # ------------------------------------------------------------------ next-year draft
     @r.get("/plan/drivers")

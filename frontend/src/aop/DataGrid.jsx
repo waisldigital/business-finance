@@ -14,7 +14,7 @@ import { fmtCell, parseTSV, toTSV } from "./format";
  *        onCommit([{key, field, value}]) → Promise, onCellLink(col, row) optional (renders links for
  *        columns flagged `link`), selectable (row checkboxes), selected Set, onSelect(Set)
  */
-export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink, linkColumns = [],
+export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink, linkColumns = [], renderHeader,
                                    selectable = false, selected, onSelect, height = "calc(100vh - 230px)", testid = "data-grid" }) {
   const cols = useMemo(() => columns.filter((c) => !c.hidden), [columns]);
   const [active, setActive] = useState({ r: 0, c: 0 });
@@ -157,7 +157,7 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
                     title={c.key}>
                   <span className="inline-flex items-center gap-1">
                     {!canEdit(c) && <LockSimple size={10} className="opacity-40" />}
-                    {c.label}
+                    {renderHeader ? renderHeader(c) : c.label}
                   </span>
                 </th>
               ))}

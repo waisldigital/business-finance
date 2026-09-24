@@ -297,6 +297,8 @@ class PnLEngine:
         ok = lambda r: (dept is None or norm(r.get("pl_tag")) == norm(dept)) and f.geo_ok(r.get("geo"))
 
         def act_ok(d):
+            if d.get("pl_tag") and not d.get("aop_head"):  # monthly MIS bookings carry the P&L tag directly
+                return (dept is None or norm(d["pl_tag"]) == norm(dept)) and f.geo_ok(d.get("geo") or "India")
             line = self.oh_by_head.get(d.get("aop_head"))
             return bool(line) and ok(line)
         s = self.line_series("overhead_lines", "overhead", ok, pred_act=act_ok,
@@ -315,6 +317,15 @@ class PnLEngine:
     def pl_other(self, line: str) -> Series:
         s = self.line_series("pl_other", "pl_other", lambda r: r.get("line") == line,
                              pred_act=lambda d: d.get("line") == line)
+        # an actual month without any booking for this line keeps the line's plan / forecast for that month
+        booked = {a["period"] for a in self.act.get("pl_other", []) if (a.get("dims") or {}).get("line") == line}
+        cut = self.cutoff("pl_other")
+        rows = [r for r in self.data.get("pl_other", []) if r.get("line") == line]
+        for p in self.base_m:
+            if p <= cut and p not in booked:
+                fill = sum(_n(r[vkey(self.F, p)]) if vkey(self.F, p) in r else _n(r.get(vkey(self.BB, p))) for r in rows)
+                if fill:
+                    s[p] = fill
         tot = [r.get(vkey(self.B, "total")) for r in self.data.get("pl_other", []) if r.get("line") == line]
         if tot and tot[0] is not None:
             self.overrides[line] = float(tot[0])
@@ -423,7 +434,8 @@ class PnLEngine:
         tax = self.pl_other("taxes")
         # tax in forecast / budget months follows the sheet: tax rate × PBT of that month
         cut = self.cutoff("pl_other")
-        for p in [p for p in self.base_m if p > cut] + self.plan_m:
+        booked_tax = {a["period"] for a in self.act.get("pl_other", []) if (a.get("dims") or {}).get("line") == "taxes"}
+        for p in [p for p in self.base_m if p > cut or p not in booked_tax] + self.plan_m:
             tax[p] = pbt.get(p, 0.0) * self.tax_rate
         dtax = self.pl_other("deferred_tax")
         add("depreciation", "Less: Depreciation", dep, level=0, snap="less_depreciation")

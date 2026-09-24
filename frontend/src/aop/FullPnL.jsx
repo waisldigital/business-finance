@@ -14,7 +14,17 @@ const DEFAULTS = { measures: ["af_plan", "b_draft"], segments: ["cacr", "sol", "
  * toggle replaces the separate MTD slide. Parent lines collapse with "+"; double-click Revenue for the
  * revenue performance drill-down.
  */
-export default function FullPnL({ unit }) {
+// Full P&L row → drill-down format
+const DRILL = {
+  rev: ["revenue_performance"], rev_cute: ["cute_analysis"], rev_noncute: ["revenue_performance"], rev_cr: ["revenue_performance"],
+  rev_projects: ["project_health"], gm: ["airport_gm"], total_direct: ["airport_gm"], opex_tp: ["opex_analysis"], opex_ca: ["opex_analysis"],
+  opex_shared: ["opex_analysis"], opex_cr: ["opex_analysis"], opex_pj: ["project_health"], emp_direct: ["resources", { section: "direct" }],
+  emp_indirect: ["resources", { section: "indirect" }], sga: ["overheads_summary"], total_indirect: ["overheads_summary"],
+};
+const drillOf = (r) => DRILL[r.id] || (r.parent === "emp_direct" ? ["resources", { section: "direct" }]
+  : r.parent === "emp_indirect" ? ["resources", { section: "indirect" }] : r.parent === "sga" ? ["overheads_summary"] : null);
+
+export default function FullPnL({ unit, onDrill }) {
   const f = useFilters();
   const [pref, setPref, resetPref] = usePref("aop_mis_full_pnl_v1", DEFAULTS);
   const [data, setData] = useState(null);
@@ -109,7 +119,7 @@ export default function FullPnL({ unit }) {
       {data && (
         <div className="flex items-center gap-3 text-[10.5px] text-[var(--muted)] flex-wrap">
           {!data.meta?.payroll_visible && <span className="flex items-center gap-1"><LockSimple size={11} /> Employee cost lines are confidential for your role; totals include them.</span>}
-          <span className="flex items-center gap-1"><Info size={11} /> Indirect costs: department → segment rules; common costs split by revenue. Double-click Revenue for the drill-down.</span>
+          <span className="flex items-center gap-1"><Info size={11} /> Indirect costs: department → segment rules; common costs split by revenue. Double-click a line to drill down (Back returns here).</span>
           <span className="ml-auto">Actuals to {data.months?.cutoff}</span>
         </div>
       )}
@@ -132,12 +142,13 @@ export default function FullPnL({ unit }) {
             </thead>
             <tbody>
               {rows.filter(tree.visible).map((r) => {
-                const isRev = r.id === "rev" || r.parent === "rev";
+                const dr = onDrill ? drillOf(r) : (r.id === "rev" || r.parent === "rev" ? ["modal"] : null);
+                const isRev = !!dr;
                 const d = tree.depth(r.id);
                 return (
                   <tr key={r.id} className={`${r.key ? "key" : r.kind === "subtotal" ? "sub" : ""} ${d ? "child" : ""} ${r.kind === "pct" ? "pct" : ""} ${isRev ? "dbl" : ""}`}
-                      onDoubleClick={isRev ? () => setDrill(true) : undefined} data-testid={`full-row-${r.id}`}>
-                    <td className="lbl"><TreeLabel row={r} tree={tree} depth={d} title={isRev ? "Double-click for revenue performance" : undefined} /></td>
+                      onDoubleClick={isRev ? () => (onDrill ? onDrill(dr[0], dr[1] || {}, r.label) : setDrill(true)) : undefined} data-testid={`full-row-${r.id}`}>
+                    <td className="lbl"><TreeLabel row={r} tree={tree} depth={d} title={isRev ? "Double-click to drill down" : undefined} /></td>
                     {cols === 0 && <td />}
                     {segments.map((s) => (
                       <React.Fragment key={s.key}>

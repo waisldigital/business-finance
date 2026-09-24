@@ -13,7 +13,7 @@ const MAROON = "#963634";
  * Revenue performance (MIS slide 4): revenue by stream — full-year AOP, YTD and MTD AOP vs actual/forecast
  * with variances — plus billable PAX. Standalone format, and the drill-down on the P&L Revenue line.
  */
-export default function RevenuePerformance({ unit, geo, tag, initialMonth, embedded = false }) {
+export default function RevenuePerformance({ unit, geo, tag, initialMonth, embedded = false, onDrill }) {
   const own = useFilters();
   const g = embedded ? geo : own.geo;
   const t = embedded ? tag : own.tag;
@@ -92,7 +92,10 @@ export default function RevenuePerformance({ unit, geo, tag, initialMonth, embed
               {rows.filter(tree.visible).map((r) => {
                 const d = tree.depth(r.id);
                 return (
-                  <tr key={r.id} className={`${r.kind === "total" ? "grand" : ""} ${d ? "child" : ""}`} data-testid={`rev-row-${r.id}`}>
+                  <tr key={r.id} className={`${r.kind === "total" ? "grand" : ""} ${d ? "child" : ""} ${onDrill && (r.id === "cute" || r.parent === "cute" || r.id === "projects") ? "dbl" : ""}`}
+                      onDoubleClick={onDrill && (r.id === "cute" || r.parent === "cute") ? () => onDrill("cute_analysis", {}, "CUTE — PAX × rate")
+                        : onDrill && (r.id === "projects" || r.parent === "projects") ? () => onDrill("project_health", {}, "Project health") : undefined}
+                      data-testid={`rev-row-${r.id}`}>
                     <td className={`lbl ${r.kind === "total" ? "!bg-[var(--mis-head)]" : ""}`}><TreeLabel row={r} tree={tree} depth={d} /></td>
                     {cols.map((c, i) => {
                       const v = c.get(r);

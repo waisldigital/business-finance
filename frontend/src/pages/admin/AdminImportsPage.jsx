@@ -8,6 +8,14 @@ const KINDS = [
     help: "Reads Assumptions, CUTE / Non-CUTE / CR & Project revenue, Opex_Raw Data, Resource Dashboard, Overhead_Inputs + Indirect Cost ledger, Budgeted CAPEX and the WAISL P&L. Replaces those datasets and the imported actuals." },
   { key: "opex", url: "/aop/import/opex-workbook", title: "Opex forecast workbook",
     help: "Reads the Opex_Forecast tab (old ↔ new PO mapping, overrides, forecast) and the ZMM_PO_Report (PO register)." },
+  { key: "mis", url: "/aop/import/mis-actuals", title: "Monthly actuals — MIS working file", monthly: true,
+    help: "SAP_Revenue + SAP_Expense classified with the Mapping sheet → revenue, revenue share, opex, overheads and finance-cost actuals of the plan year, line by line. Replaces only the months in the file and moves the actual cut-off." },
+  { key: "resource", url: "/aop/import/resource-cost", title: "Monthly actuals — resource cost file", monthly: true,
+    help: "Final Resource Cost (employee × WBS × month) → payroll actuals by airport, project and department with FTE / headcount." },
+  { key: "package", url: "/aop/import/reporting-package", title: "Reporting package — PAX & capex tracker", monthly: true,
+    help: "Revenue Analysis billable PAX (actual months) → CUTE drivers “PAX Actual”; CAPEX Tracker → capex tracker (initial budget, capex till last year, monthly actuals, open PO / PR)." },
+  { key: "projects", url: "/aop/import/project-health", title: "Project health tracker", monthly: true,
+    help: "Project revenue master → TCV (PO value), customer, sales owner and status on the CR & project master." },
 ];
 
 export default function AdminImportsPage() {
@@ -32,7 +40,9 @@ export default function AdminImportsPage() {
                 <span className="text-[var(--muted)]">{new Date(h.at).toLocaleString("en-IN")} · {h.by}</span>
                 {h.meta?.base_fy && <span className="chip">{h.meta.base_fy} actuals to {h.meta.actual_cutoff} · plan {h.meta.plan_fy}</span>}
               </div>
-              <div className="text-[var(--muted)] mt-0.5">{Object.entries(h.counts || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}{h.actuals ? ` · actuals: ${h.actuals}` : ""}</div>
+              <div className="text-[var(--muted)] mt-0.5">{Object.entries(h.counts || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}{h.actuals ? ` · actuals: ${h.actuals}` : ""}
+                {h.meta?.periods ? ` · months ${h.meta.periods.join(", ")}` : ""}
+                {h.meta?.skipped ? ` · skipped: ${Object.entries(h.meta.skipped).map(([k, v]) => `${k} ${v}`).join(", ")}` : ""}</div>
               {h.warnings?.map((w, i) => <div key={i} className="text-[var(--warning)] flex items-center gap-1"><Warning size={11} />{w}</div>)}
             </div>
           ))}
@@ -49,7 +59,8 @@ function ImportCard({ kind, onDone }) {
   const [res, setRes] = useState(null);
   const [err, setErr] = useState("");
   const run = async () => {
-    if (!file || !window.confirm(`Import "${file.name}"? The datasets it contains will be replaced.`)) return;
+    const msg = kind.monthly ? `Import "${file.name}"? Actuals of the months it contains are replaced.` : `Import "${file.name}"? The datasets it contains will be replaced.`;
+    if (!file || !window.confirm(msg)) return;
     setBusy(true); setErr(""); setRes(null);
     try {
       const fd = new FormData(); fd.append("file", file);
@@ -74,7 +85,8 @@ function ImportCard({ kind, onDone }) {
       {err && <div className="text-[var(--danger)]">{String(err)}</div>}
       {res && (
         <div className="text-[var(--success)] flex items-start gap-1"><CheckCircle size={13} className="mt-0.5" />
-          <span>{Object.entries(res.counts || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}{res.actuals ? ` · ${res.actuals} actuals` : ""}</span>
+          <span>{Object.entries(res.counts || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}{res.actuals ? ` · ${res.actuals} actuals` : ""}
+            {res.periods ? ` · months ${res.periods.join(", ")}` : ""}{res.pax_rows ? ` · ${res.pax_rows} PAX rows` : ""}{res.matched !== undefined ? ` · ${res.matched}/${res.projects} projects matched` : ""}</span>
         </div>
       )}
     </div>

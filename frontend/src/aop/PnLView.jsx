@@ -19,7 +19,13 @@ const DEFAULT_COLS = {
   months: { a_base: false, b_plan: false, af_plan: false, b_draft: true },
 };
 
-export default function PnLView({ unit: unitProp }) {
+const PNL_DRILL = {
+  revenue: "revenue_performance", cute: "cute_analysis", non_cute: "revenue_performance", change_request: "revenue_performance",
+  projects: "project_health", gross_margin: "airport_gm", direct_cost: "airport_gm", tp_opex_ca: "opex_analysis", opex_cost: "opex_analysis",
+  opex_shared: "opex_analysis", tp_opex_cr: "opex_analysis", resource_cost_ca: "resources", enabling_overheads: "overheads_summary",
+};
+
+export default function PnLView({ unit: unitProp, onDrill }) {
   const [filters, setFilters] = useState({ geo: ["All", "India", "International"], tags: ["All"] });
   const [geo, setGeo] = useState("All");
   const [tag, setTag] = useState("All");
@@ -130,10 +136,11 @@ export default function PnLView({ unit: unitProp }) {
             </thead>
             <tbody>
               {rows.map((r) => {
-                const isRev = r.id === "revenue" || tree.parentOf[r.id] === "revenue";
+                const target = onDrill ? (PNL_DRILL[r.id] || (r.id.startsWith("oh_") ? "overheads_summary" : null)) : null;
+                const isRev = onDrill ? !!target : (r.id === "revenue" || tree.parentOf[r.id] === "revenue");
                 return (
                 <tr key={r.id} className={`${r.kind === "total" ? "total" : r.kind === "subtotal" ? "subtotal" : ""} ${r.pct ? "pct" : ""} ${isRev ? "cursor-zoom-in" : ""}`}
-                    onDoubleClick={isRev ? () => setDrill(true) : undefined} data-testid={`pnl-row-${r.id}`}>
+                    onDoubleClick={isRev ? () => (onDrill ? onDrill(target, {}, r.label) : setDrill(true)) : undefined} data-testid={`pnl-row-${r.id}`}>
                   <td className="lbl">
                     <TreeLabel row={r} tree={tree} depth={pinned(r) ? 1 : tree.depth(r.id)} title={isRev ? "Double-click for revenue performance" : undefined} />
                   </td>

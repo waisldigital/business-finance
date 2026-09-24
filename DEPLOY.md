@@ -59,3 +59,17 @@ Storage: `aop_rows` (all datasets, unique `dataset + key`), `aop_actuals` (the s
   an initial password and a Workspace Role (or bulk-upload the employee template with the
   Password and Roles columns). They sign in at `/login` with that email + password and land in `/app`,
   seeing only the sections their role allows.
+
+## Monthly actuals (Admin → Imports)
+
+One upload per source; each replaces only the months it contains and moves the actual cut-off forward.
+
+| File | Feeds |
+| --- | --- |
+| MIS working file (SAP_Revenue, SAP_Expense, Mapping) | Revenue, revenue share, opex, overheads, finance cost / other income — line by line (raw-data drill-downs) |
+| Resource cost file (Final Resource Cost) | Payroll cost by airport / project / department, FTE and headcount |
+| Reporting package (Revenue Analysis, CAPEX Tracker) | Actual billable PAX (CUTE drivers) and the capex tracker |
+| Project health tracker | TCV, customer, sales owner and status on the project master |
+
+Depreciation and tax stay on the AOP phasing (tax = rate × PBT) until an actual is loaded for the month (Data manager → Actuals).
+Bulk upload / download of a dataset is open to admins and to roles given "Upload (bulk)" on that section (Roles).

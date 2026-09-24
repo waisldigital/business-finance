@@ -5,13 +5,18 @@ import {
   ClipboardText, HourglassMedium, CheckCircle, WarningCircle,
 } from "@phosphor-icons/react";
 import DataGrid from "./DataGrid";
+import PivotTable from "./PivotTable";
+import GridSettings from "./GridSettings";
+import ColumnHeader from "./ColumnHeader";
+import { useGridView, arrangeColumns, applyView, cellValue, isMonthCol } from "./gridView";
+import { csvDownload } from "./mis";
 import ColumnManager from "./ColumnManager";
 import UploadDialog from "./UploadDialog";
 import PoDrawer from "./PoDrawer";
 import { download } from "./format";
 
 const PO_COLUMNS = ["po", "old_po", "new_po", "mapped_new_pos", "po_ref", "purchase_order", "dims.po"];
-const PAGE = 200;
+const PAGE = 5000; // datasets up to this size load whole, so sort / filter / pivot work on every row
 
 // Column groups are plan versions (F26 = FY26 forecast, B27 = FY27 budget …); "" = descriptive fields.
 const groupLabel = (g) => {
@@ -23,7 +28,7 @@ const groupLabel = (g) => {
   return `${kind} FY${m[2]}${sub}`;
 };
 
-export default function DatasetWorkspace({ dataset, admin = false, onChanged }) {
+export default function DatasetWorkspace({ dataset, admin = false, onChanged, focusVersion }) {
   const [columns, setColumns] = useState([]);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -37,6 +42,8 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged }) 
   const [po, setPo] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [groups, setGroups] = useState(null);
+  const [view, updateView, resetView] = useGridView(`aop_grid_${dataset.key}_v1`, {});
+  const canUpload = admin || !!dataset.can_upload;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,12 +67,26 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged }) 
   useEffect(() => {
     if (groups === null && allGroups.length) {
       const plan = allGroups.filter(Boolean);
-      setGroups(new Set(["", ...(plan.length ? [plan[plan.length - 1]] : [])]));
+      const want = focusVersion && plan.includes(focusVersion) ? focusVersion : plan[plan.length - 1];
+      setGroups(new Set(["", ...(want ? [want] : [])]));
     }
-  }, [allGroups, groups]);
+  }, [allGroups, groups, focusVersion]);
   const shown = useMemo(() => columns.filter((c) => !groups || groups.has(c.group || "")), [columns, groups]);
+  const hasMonths = useMemo(() => shown.some(isMonthCol), [shown]);
 
-  const canEdit = useCallback((c) => admin || !!c.user_editable, [admin]);
+  // columns as the viewer arranged them; 12M off folds each version's months into one total column
+  const arranged = useMemo(() => arrangeColumns(shown, view), [shown, view]);
+  const visible = useMemo(() => arranged.filter((c) => !c.hiddenByUser), [arranged]);
+  const virtual = useMemo(() => visible.filter((c) => c.virtual), [visible]);
+  const rowsV = useMemo(() => (virtual.length ? rows.map((r) => ({
+    ...r, fields: { ...r.fields, ...Object.fromEntries(virtual.map((c) => [c.key, cellValue(r, c)])) },
+  })) : rows), [rows, virtual]);
+  const filtered = useMemo(() => applyView(rowsV, arranged, view), [rowsV, arranged, view]);
+
+  const canEdit = useCallback((c) => !c.virtual && (admin || !!c.user_editable), [admin]);
+  const downloadView = () => {
+    csvDownload([visible.map((c) => c.label), ...filtered.map((r) => visible.map((c) => cellValue(r, c)))], `${dataset.key}_view.csv`);
+  };
 
   const onCommit = async (edits) => {
     try {
@@ -103,6 +124,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged }) 
           <MagnifyingGlass size={12} className="absolute left-2 top-2 text-[var(--muted)]" />
           <input className="input-sm pl-6 w-56" placeholder="Search key, PO, vendor, AOP code…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="ds-search" />
         </form>
+        <GridSettings cols={arranged} view={view} update={updateView} reset={resetView} hasMonths={hasMonths} align="left" testid="ds-grid" />
         <div className="seg" title="Column groups">
           {allGroups.map((g) => (
             <button key={g || "details"} className={groups?.has(g) ? "on" : ""}
@@ -113,18 +135,23 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged }) 
         </div>
         <div className="flex-1" />
         <span className="text-[11px] text-[var(--muted)] tabular-nums">
-          {total ? `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total.toLocaleString("en-IN")}` : "0 rows"}
+          {total ? (filtered.length !== rows.length ? `${filtered.length.toLocaleString("en-IN")} of ${total.toLocaleString("en-IN")} (filtered)` :
+            `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total.toLocaleString("en-IN")}`) : "0 rows"}
         </span>
         <button className="icon-btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))} title="Previous page"><CaretLeft size={13} /></button>
         <button className="icon-btn" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)} title="Next page"><CaretRight size={13} /></button>
         <button className="icon-btn" onClick={load} title="Reload"><ArrowClockwise size={13} className={loading ? "animate-spin" : ""} /></button>
+        <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
+        <button className="icon-btn" onClick={downloadView} title="Download this view (csv) — filters, sort and columns as shown" data-testid="ds-download-view"><DownloadSimple size={14} />view</button>
+        {canUpload && (
+          <>
+            <button className="icon-btn" onClick={() => setShowUpload(true)} title="Bulk upload (add / modify / replace) — rows matched on the unique line id" data-testid="ds-upload"><UploadSimple size={14} /></button>
+            <button className="icon-btn" onClick={() => doDownload("xlsx")} title="Download all rows with line ids (xlsx) — edit and upload back" data-testid="ds-download"><DownloadSimple size={14} />xlsx</button>
+          </>
+        )}
         {admin && (
           <>
-            <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
-            <button className="icon-btn" onClick={() => setShowCols(true)} title="Manage columns" data-testid="ds-columns"><Columns size={14} /></button>
-            <button className="icon-btn" onClick={() => setShowUpload(true)} title="Upload (add / replace / modify)" data-testid="ds-upload"><UploadSimple size={14} /></button>
-            <button className="icon-btn" onClick={() => doDownload("xlsx")} title="Download all (xlsx)" data-testid="ds-download"><DownloadSimple size={14} />xlsx</button>
-            <button className="icon-btn" onClick={() => doDownload("csv")} title="Download all (csv)"><DownloadSimple size={14} />csv</button>
+            <button className="icon-btn" onClick={() => setShowCols(true)} title="Manage columns (add fields, types, user-editable)" data-testid="ds-columns"><Columns size={14} /></button>
             <button className="icon-btn danger" disabled={!selected.size} onClick={doDelete} title="Delete selected rows"><Trash size={14} />{selected.size || ""}</button>
           </>
         )}
@@ -146,9 +173,14 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged }) 
         )}
       </div>
 
+      {view.pivot > 0 ? (
+        <PivotTable cols={visible} rows={filtered} allRows={rowsV} view={view} update={updateView} levels={Math.min(view.pivot, visible.length)}
+                    testid="ds-pivot" />
+      ) : (
       <DataGrid
-        columns={shown}
-        rows={rows}
+        columns={visible}
+        rows={filtered}
+        renderHeader={(c) => <ColumnHeader col={c} rows={rowsV} view={view} update={updateView} align={c.type === "number" || c.type === "percent" ? "right" : "left"} testid={`ds-h-${c.key}`} />}
         canEdit={canEdit}
         onCommit={onCommit}
         linkColumns={PO_COLUMNS}
@@ -157,9 +189,10 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged }) 
         selected={selected}
         onSelect={setSelected}
       />
+      )}
 
       {showCols && <ColumnManager dataset={dataset} columns={columns} keyFields={dataset.key_fields} onClose={() => setShowCols(false)} onSaved={load} />}
-      {showUpload && <UploadDialog dataset={dataset} keyFields={dataset.key_fields} onClose={() => setShowUpload(false)} onDone={() => { load(); onChanged?.(); }} />}
+      {showUpload && <UploadDialog dataset={dataset} keyFields={dataset.key_fields} admin={admin} onClose={() => setShowUpload(false)} onDone={() => { load(); onChanged?.(); }} />}
       {po && <PoDrawer po={po} onClose={() => setPo(null)} onOpenPo={setPo} />}
     </div>
   );
