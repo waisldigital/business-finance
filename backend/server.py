@@ -1,4 +1,4 @@
-"""CRacker Pro - Business Finance webportal backend."""
+"""WAISL FinSight — Business Finance & FP&A suite (backend)."""
 from dotenv import load_dotenv
 from pathlib import Path
 ROOT_DIR = Path(__file__).parent
@@ -43,14 +43,14 @@ import sap_parser
 from notifications import mailer, tpl_approval_request, tpl_test_email
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("crackerpro")
+logger = logging.getLogger("finsight")
 
 # ---------- DB ----------
 # MONGO_URL is a MongoDB Atlas connection string (mongodb+srv://...) in hosted
 # environments, or mongodb://localhost:27017 for local development.
 mongo_url = os.environ["MONGO_URL"]
 _mongo_kwargs: Dict[str, Any] = {
-    "appname": "crackerpro-backend",
+    "appname": "finsight-backend",
     "serverSelectionTimeoutMS": int(os.environ.get("MONGO_TIMEOUT_MS", "10000")),
 }
 if mongo_url.startswith("mongodb+srv://") or "tls=true" in mongo_url.lower():
@@ -59,7 +59,7 @@ if mongo_url.startswith("mongodb+srv://") or "tls=true" in mongo_url.lower():
 client = AsyncIOMotorClient(mongo_url, **_mongo_kwargs)
 db = client[os.environ.get("DB_NAME", "crackerpro")]
 
-app = FastAPI(title="CRacker Pro API")
+app = FastAPI(title="WAISL FinSight API")
 api = APIRouter(prefix="/api")
 
 get_current_user = make_get_current_user(db)
@@ -2503,7 +2503,7 @@ async def delete_pipeline(pid: str, user: dict = Depends(require_role("admin")))
 # ============================================================
 @api.get("/")
 async def root():
-    return {"app": "CRacker Pro API", "status": "ok"}
+    return {"app": "WAISL FinSight API", "status": "ok"}
 
 
 # ============================================================

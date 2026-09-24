@@ -115,7 +115,7 @@ export default function DashboardPage() {
     <div data-testid="dashboard-page">
       <PageHeader
         title="Finance Dashboard"
-        subtitle="Live overview of the customer order lifecycle"
+        subtitle="Live overview of projects, pipeline, change requests and margins"
         breadcrumb="HOME · DASHBOARD"
         testid="dashboard-header"
       />

@@ -105,8 +105,8 @@ export default function AppLayout({ children, portal = "app" }) {
             </div>
             {!collapsed && (
               <div>
-                <div className="font-display text-lg font-bold tracking-tight">WAISL · COLM</div>
-                <div className="text-[10px] tracking-overline" style={{ color: "rgba(255,255,255,0.5)" }}>Customer Order Lifecycle</div>
+                <div className="font-display text-lg font-bold tracking-tight">WAISL FinSight</div>
+                <div className="text-[10px] tracking-overline" style={{ color: "rgba(255,255,255,0.5)" }}>Business Finance &amp; FP&amp;A</div>
               </div>
             )}
           </div>
@@ -157,7 +157,7 @@ export default function AppLayout({ children, portal = "app" }) {
             <span className={`px-1.5 py-0.5 text-[10px] font-semibold border ${portal === "admin" ? "border-[var(--danger)] text-[var(--danger)]" : "border-[var(--gold)] text-[var(--gold)]"}`} data-testid="portal-badge">
               {portal === "admin" ? "ADMIN PORTAL" : "WORKSPACE"}
             </span>
-            WAISL · Customer Order Lifecycle Management
+            WAISL FinSight · Business Finance &amp; FP&amp;A
           </div>
 
           <div className="flex items-center gap-3">

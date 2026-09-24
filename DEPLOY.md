@@ -1,4 +1,7 @@
-# Deploying CRacker Pro
+# Deploying WAISL FinSight — Business Finance & FP&A
+
+> Formerly CRacker Pro / WAISL COLM. Infrastructure identifiers (Render service `crackerpro-backend`, database `crackerpro`)
+> keep their original names so the live deployment and data are untouched.
 
 | Part     | Host            | Config file            |
 |----------|-----------------|------------------------|

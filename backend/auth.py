@@ -1,4 +1,4 @@
-"""JWT auth utilities for CRacker Pro."""
+"""JWT auth utilities for WAISL FinSight."""
 import os
 import bcrypt
 import jwt
