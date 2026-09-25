@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useCurrency } from "@/lib/currency";
 import { useTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import {
   Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
-  Gear, CaretLeft, CaretRight, Table, Gauge, FileArrowUp, CheckSquareOffset,
+  Gear, CaretDoubleLeft, CaretDoubleRight, CaretDown, Table, Gauge, FileArrowUp, CheckSquareOffset,
   PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
@@ -14,6 +14,7 @@ import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
 import NotificationBell from "./NotificationBell";
 import Popover from "@/components/common/Popover";
 import BrandMark from "@/components/common/BrandMark";
+import Modal from "@/components/common/Modal";
 import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
@@ -59,7 +60,7 @@ export default function AppLayout({ children, portal = "app" }) {
   const { theme, setTheme, themes } = useTheme();
   const { permissions } = usePermissions();
   const navigate = useNavigate();
-  const [showThemes, setShowThemes] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("fs_sidebar_collapsed") === "1");
 
   useEffect(() => {
@@ -85,16 +86,6 @@ export default function AppLayout({ children, portal = "app" }) {
         style={{ backgroundColor: "var(--sidebar)", color: "var(--sidebar-text)" }}
         data-testid="app-sidebar"
       >
-        <button
-          className="sidebar-collapse-btn"
-          onClick={() => setCollapsed((v) => !v)}
-          data-testid="sidebar-collapse-btn"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <CaretRight size={12} weight="bold" /> : <CaretLeft size={12} weight="bold" />}
-        </button>
-
         <div className={`${collapsed ? "px-3 py-5" : "px-6 py-6"} border-b shrink-0`} style={{ borderColor: "rgba(255,255,255,0.1)" }}>
           <div className="flex items-center gap-2">
             <BrandMark size={32} />
@@ -128,63 +119,39 @@ export default function AppLayout({ children, portal = "app" }) {
           ))}
         </nav>
 
-        <div className={`${collapsed ? "px-2 py-3" : "px-4 py-4"} border-t shrink-0`} style={{ borderColor: "rgba(255,255,255,0.1)" }}>
-          {collapsed ? (
-            <button
-              className="btn-ghost w-full flex items-center justify-center"
-              style={{ color: "rgba(255,255,255,0.7)" }}
-              onClick={async () => { await logout(); navigate("/login"); }}
-              title={`Logout (${user?.name || ""})`}
-              data-testid="logout-btn"
-            >
-              <SignOut size={18} weight="bold" />
-            </button>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold truncate" data-testid="sidebar-user-name">{user?.name}</div>
-                <div className="text-[11px] capitalize" style={{ color: "rgba(255,255,255,0.5)" }}>{user?.role}</div>
-              </div>
-              <button className="btn-ghost" style={{ color: "rgba(255,255,255,0.7)" }} onClick={async () => { await logout(); navigate("/login"); }} data-testid="logout-btn">
-                <SignOut size={18} weight="bold" />
-              </button>
+        <div className="border-t shrink-0" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
+          {!collapsed && (
+            <div className="px-4 pt-3 min-w-0">
+              <div className="text-sm font-semibold truncate" data-testid="sidebar-user-name">{user?.name}</div>
+              <div className="text-[11px] capitalize" style={{ color: "rgba(255,255,255,0.5)" }}>{user?.role}</div>
             </div>
           )}
+          <button
+            className={`w-full flex items-center gap-2 text-xs py-2.5 hover:bg-white/5 ${collapsed ? "justify-center" : "px-4"}`}
+            style={{ color: "rgba(255,255,255,0.6)" }}
+            onClick={() => setCollapsed((v) => !v)}
+            data-testid="sidebar-collapse-btn"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <CaretDoubleRight size={14} weight="bold" /> : <><CaretDoubleLeft size={14} weight="bold" /><span>Collapse</span></>}
+          </button>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-12 px-5 border-b border-[var(--border)] bg-[var(--surface)] flex items-center justify-between" data-testid="app-topbar">
-          <div className="flex items-center gap-2 text-xs text-[var(--muted)] tracking-overline">
-            <span className={`px-1.5 py-0.5 text-[10px] font-semibold border ${portal === "admin" ? "border-[var(--danger)] text-[var(--danger)]" : "border-[var(--gold)] text-[var(--gold)]"}`} data-testid="portal-badge">
+        <div className="h-12 px-5 border-b border-[var(--border)] bg-[var(--surface)] flex items-center justify-between gap-3" data-testid="app-topbar">
+          <div className="flex items-center gap-2 text-xs min-w-0">
+            <span className={`px-1.5 py-0.5 text-[10px] font-semibold border shrink-0 tracking-overline ${portal === "admin" ? "border-[var(--danger)] text-[var(--danger)]" : "border-[var(--gold)] text-[var(--gold)]"}`} data-testid="portal-badge">
               {portal === "admin" ? "ADMIN PORTAL" : "WORKSPACE"}
             </span>
-            WAISL FinSight · Business Finance &amp; FP&amp;A
+            <Breadcrumb groups={portal === "admin" ? ADMIN_NAV : USER_NAV} />
           </div>
 
           <div className="flex items-center gap-3">
-            {/* In-app notifications */}
-            <NotificationBell />
-
-            {/* Theme picker */}
-            <Popover open={showThemes} onOpenChange={setShowThemes} panelClassName="mt-2 w-56 bg-[var(--surface)] border border-[var(--border)] z-50 shadow-lg"
-                     panelTestid="theme-menu" button={(open, toggle) => (
-              <button
-                className="btn-secondary text-xs flex items-center gap-1.5"
-                onClick={toggle}
-                data-testid="theme-toggle-btn"
-                title="Change theme"
-              >
-                <Palette size={14} weight="duotone" />
-                <span className="hidden md:inline capitalize">{themes.find((t) => t.key === theme)?.label}</span>
-              </button>
-            )}>
-              <ThemeOptions theme={theme} themes={themes} onPick={(k) => { setTheme(k); setShowThemes(false); }} />
-            </Popover>
-
             {/* Number format: ₹ Crore · ₹ Lakh · $ Million — drives every screen */}
             <div className="flex items-center bg-[var(--surface-2)] border border-[var(--border)] p-0.5" data-testid="currency-toggle">
-              {[["cr", "₹ Crore", "currency-inr-btn"], ["lakh", "₹ Lakh", "currency-lakh-btn"], ["usd", "$ Million", "currency-usd-btn"]].map(([u, label, tid]) => (
+              {[["cr", "₹ Cr", "currency-inr-btn"], ["lakh", "₹ Lakh", "currency-lakh-btn"], ["usd", "$ Mn", "currency-usd-btn"]].map(([u, label, tid]) => (
                 <button key={u}
                   className={`px-3 py-1 text-xs font-semibold transition-colors ${unit === u ? "bg-[var(--surface)] border border-[var(--gold)] text-[var(--gold)]" : "text-[var(--muted)]"}`}
                   onClick={() => setUnit(u)} data-testid={tid}>
@@ -192,8 +159,23 @@ export default function AppLayout({ children, portal = "app" }) {
                 </button>
               ))}
             </div>
+
+            <NotificationBell />
+
+            <UserMenu user={user} theme={theme} themes={themes} setTheme={setTheme} onLogout={() => setConfirmLogout(true)} />
           </div>
         </div>
+        {confirmLogout && (
+          <Modal title="Sign out?" subtitle="WAISL FINSIGHT" size="sm" onClose={() => setConfirmLogout(false)} testid="logout-confirm"
+                 footer={<>
+                   <button className="btn-secondary" onClick={() => setConfirmLogout(false)}>Cancel</button>
+                   <button className="btn-primary" onClick={async () => { setConfirmLogout(false); await logout(); navigate("/login"); }} data-testid="logout-confirm-btn">
+                     <SignOut size={14} weight="bold" className="inline -mt-0.5 mr-1" />Sign out
+                   </button>
+                 </>}>
+            <div className="px-5 py-4 text-sm">You'll need to sign in again to continue. Unsaved edits in open grids are still saving in the background — wait for them to finish first.</div>
+          </Modal>
+        )}
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>
@@ -217,4 +199,68 @@ function ThemeOptions({ theme, themes, onPick }) {
       </div>
     </button>
   ));
+}
+
+// Top-bar breadcrumb: the sidebar group and entry for the current page (deeper pages add "Details")
+function Breadcrumb({ groups }) {
+  const { pathname } = useLocation();
+  let best = null;
+  for (const g of groups) {
+    for (const n of g.items) {
+      const hit = n.end ? pathname === n.to : pathname === n.to || pathname.startsWith(`${n.to}/`);
+      if (hit && (!best || n.to.length > best.n.to.length)) best = { g, n };
+    }
+  }
+  const parts = best ? [best.g.title, best.n.label, ...(pathname.length > best.n.to.length + 1 && !best.n.end ? ["Details"] : [])] : [];
+  return (
+    <nav className="flex items-center gap-1.5 min-w-0 text-[var(--muted)]" aria-label="Breadcrumb" data-testid="topbar-breadcrumb">
+      {parts.map((p, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && <span className="opacity-50">›</span>}
+          <span className={`truncate ${i === parts.length - 1 ? "text-[var(--text)] font-semibold" : ""}`}>{p}</span>
+        </React.Fragment>
+      ))}
+    </nav>
+  );
+}
+
+// Avatar menu: who is signed in, the theme picker and sign out
+function UserMenu({ user, theme, themes, setTheme, onLogout }) {
+  const [showThemes, setShowThemes] = useState(false);
+  const initials = (user?.name || user?.email || "?").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+  return (
+    <Popover panelClassName="mt-2 w-64 bg-[var(--surface)] border border-[var(--border)] z-50 shadow-lg" panelTestid="user-menu"
+             button={(open, toggle) => (
+               <button className={`flex items-center gap-2 pl-1 pr-2 py-1 border ${open ? "border-[var(--gold)]" : "border-[var(--border)]"} bg-[var(--surface)]`}
+                       onClick={toggle} data-testid="user-menu-btn" title={user?.name}>
+                 <span className="w-7 h-7 flex items-center justify-center text-[11px] font-bold text-[#0A1628]" style={{ background: "var(--gold)" }}>{initials}</span>
+                 <span className="hidden lg:block text-xs font-semibold max-w-[140px] truncate">{user?.name}</span>
+                 <CaretDown size={11} className="text-[var(--muted)]" />
+               </button>
+             )}>
+      {(close) => (
+        <>
+          <div className="px-3 py-2.5 border-b border-[var(--border)]">
+            <div className="text-sm font-semibold truncate">{user?.name}</div>
+            <div className="text-[11px] text-[var(--muted)] truncate">{user?.email}</div>
+            <div className="text-[10px] tracking-overline text-[var(--gold)] mt-0.5">{user?.role === "admin" ? "SYSTEM ADMIN" : "WORKSPACE USER"}</div>
+          </div>
+          <button className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-[var(--row-hover)]"
+                  onClick={() => setShowThemes((v) => !v)} data-testid="theme-toggle-btn">
+            <Palette size={14} weight="duotone" /><span className="flex-1">Theme</span>
+            <span className="text-[var(--muted)] capitalize">{themes.find((t) => t.key === theme)?.label}</span>
+          </button>
+          {showThemes && (
+            <div className="border-y border-[var(--border)]" data-testid="theme-menu">
+              <ThemeOptions theme={theme} themes={themes} onPick={(k) => { setTheme(k); setShowThemes(false); }} />
+            </div>
+          )}
+          <button className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-[var(--row-hover)] text-[var(--danger)]"
+                  onClick={() => { close(); onLogout(); }} data-testid="logout-btn">
+            <SignOut size={14} weight="bold" /> Sign out
+          </button>
+        </>
+      )}
+    </Popover>
+  );
 }
