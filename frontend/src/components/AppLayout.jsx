@@ -68,10 +68,10 @@ export default function AppLayout({ children, portal = "app" }) {
   const { permissions } = usePermissions();
   const navigate = useNavigate();
   const [showThemes, setShowThemes] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("cp_sidebar_collapsed") === "1");
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("fs_sidebar_collapsed") === "1");
 
   useEffect(() => {
-    localStorage.setItem("cp_sidebar_collapsed", collapsed ? "1" : "0");
+    localStorage.setItem("fs_sidebar_collapsed", collapsed ? "1" : "0");
   }, [collapsed]);
 
   const asideWidth = collapsed ? "w-16" : "w-64";

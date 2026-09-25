@@ -1,4 +1,4 @@
-"""CRacker Pro backend pytest suite."""
+"""WAISL FinSight core API suite (live server)."""
 import os
 import io
 import time

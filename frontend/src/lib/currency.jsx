@@ -5,16 +5,16 @@ import { formatMoney, setUsdRate } from "@/aop/format";
 const CurrencyContext = createContext(null);
 
 export function CurrencyProvider({ children }) {
-  const [mode, setMode] = useState(() => localStorage.getItem("cp_currency") || "INR");
+  const [mode, setMode] = useState(() => localStorage.getItem("fs_currency") || "INR");
   const [inrPerUsd, setInrPerUsd] = useState(83);
   // ₹ figures shown in Crore or Lakh; one toggle in the header drives every screen (₹ Crore · ₹ Lakh · $ Million)
-  const [scale, setScale] = useState(() => localStorage.getItem("cp_inr_scale") || "cr");
+  const [scale, setScale] = useState(() => localStorage.getItem("fs_inr_scale") || "cr");
   useEffect(() => { setUsdRate(inrPerUsd); }, [inrPerUsd]);
 
   useEffect(() => {
     api.get("/settings").then((r) => {
       if (r.data?.inr_per_usd) setInrPerUsd(Number(r.data.inr_per_usd));
-      if (!localStorage.getItem("cp_currency") && r.data?.default_currency) {
+      if (!localStorage.getItem("fs_currency") && r.data?.default_currency) {
         setMode(r.data.default_currency);
       }
     }).catch(() => {});
@@ -22,7 +22,7 @@ export function CurrencyProvider({ children }) {
 
   const update = (m) => {
     setMode(m);
-    localStorage.setItem("cp_currency", m);
+    localStorage.setItem("fs_currency", m);
   };
 
   // unit for AOP tables: "cr" | "lakh" | "usd"
@@ -30,7 +30,7 @@ export function CurrencyProvider({ children }) {
   const setUnit = (u) => {
     if (u === "usd") return update("USD");
     setScale(u);
-    localStorage.setItem("cp_inr_scale", u);
+    localStorage.setItem("fs_inr_scale", u);
     update("INR");
   };
 

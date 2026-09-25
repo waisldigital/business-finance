@@ -198,7 +198,7 @@ async def on_startup():
     # Admin seed — the two system admins come from the environment only (ADMIN1_*/ADMIN2_*);
     # everyone else gets a login through the employee master.
     await _seed_env_admins()
-    admin_email = (_env_admins()[0]["email"] if _env_admins() else "admin@crackerpro.com")
+    admin_email = (_env_admins()[0]["email"] if _env_admins() else "admin@example.com")
 
     # Seed default approval rule(s) and sample data once — idempotent by name
     default_rules = [
@@ -321,7 +321,7 @@ async def on_startup():
                 "category2": "Digital" if i % 2 == 0 else "Non-Digital",
                 "business_category": "GMR" if i % 2 == 0 else "Non-GMR",
                 "retro_pnl_tagging": "", "ownership_email": "carohitkataria@gmail.com",
-                "stakeholders": ["priya.mehta@crackerpro.com"],
+                "stakeholders": ["priya.mehta@example.com"],
                 "baseline_remarks": "", "finance_remarks": "",
                 "current_stage": stage, "approval_status": "Not Required",
                 "margin_total": margin["margin_total"], "margin_pct": margin["margin_pct"],
@@ -362,7 +362,7 @@ async def on_startup():
         pipe_seeds = [
             {"opportunity_title": "BIAL Smart Gate Expansion Phase 2",
              "current_stage": "Active Discussion", "expected_revenue": 85000000,
-             "bd_owner": "priya.mehta@crackerpro.com", "business_category": "GMR",
+             "bd_owner": "priya.mehta@example.com", "business_category": "GMR",
              "priority": "High", "solution_scope": "Extend airside gate solution to 12 additional gates",
              "expected_timeline": "Q3 FY27", "industry": "Aviation", "source": "Repeat"},
             {"opportunity_title": "Hyderabad Airport Retail Kiosk Rollout",
@@ -373,11 +373,11 @@ async def on_startup():
             {"opportunity_title": "Calicut Ops Support Renewal",
              "current_stage": "Evaluation/Negotiation", "expected_revenue": 15000000,
              "negotiated_value": 14200000, "estimated_margin_pct": 18.5,
-             "bd_owner": "priya.mehta@crackerpro.com", "business_category": "GMR",
+             "bd_owner": "priya.mehta@example.com", "business_category": "GMR",
              "priority": "High", "industry": "Aviation Services", "source": "Repeat"},
             {"opportunity_title": "Greenfield Cargo Terminal IT Stack",
              "current_stage": "Prospecting", "expected_revenue": 180000000,
-             "bd_owner": "priya.mehta@crackerpro.com", "business_category": "Non-GMR",
+             "bd_owner": "priya.mehta@example.com", "business_category": "Non-GMR",
              "priority": "High", "industry": "Cargo", "source": "Cold"},
         ]
         now = now_iso()

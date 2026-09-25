@@ -24,8 +24,8 @@ export function AuthProvider({ children }) {
     setError("");
     try {
       const { data } = await api.post("/auth/login", { email, password });
-      if (data.access_token) localStorage.setItem("cp_token", data.access_token);
-      if (data.refresh_token) localStorage.setItem("cp_refresh", data.refresh_token);
+      if (data.access_token) localStorage.setItem("fs_token", data.access_token);
+      if (data.refresh_token) localStorage.setItem("fs_refresh", data.refresh_token);
       setUser(data.user);
       return data.user || true;
     } catch (e) {
@@ -36,8 +36,8 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch {}
-    localStorage.removeItem("cp_token");
-    localStorage.removeItem("cp_refresh");
+    localStorage.removeItem("fs_token");
+    localStorage.removeItem("fs_refresh");
     setUser(false);
   };
 

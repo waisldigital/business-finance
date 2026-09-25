@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-LIVE_SUITES = ["test_core.py", "test_crackerpro.py", "test_phase2.py", "test_phase3_settings.py", "test_pipeline_iter6.py",
+LIVE_SUITES = ["test_core.py", "test_phase2.py", "test_phase3_settings.py", "test_pipeline_iter6.py",
                "test_pipeline_iter7.py", "test_sap_iter3.py", "test_sap_iter5.py"]
 collect_ignore = [] if os.environ.get("REACT_APP_BACKEND_URL") else LIVE_SUITES
 

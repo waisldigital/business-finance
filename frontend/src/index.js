@@ -1,3 +1,4 @@
+import "@/lib/storageKeys"; // first: move cp_* browser storage to fs_* before anything reads it
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "@/index.css";

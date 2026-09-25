@@ -3,7 +3,7 @@
 // viewer, per screen and table, by header text (localStorage) and re-applied whenever the table re-renders.
 import { useEffect } from "react";
 
-const STORE = "cp_col_widths_v1";
+const STORE = "fs_col_widths_v1";
 let seq = 0;
 
 function load() {
