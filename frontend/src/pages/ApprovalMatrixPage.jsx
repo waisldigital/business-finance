@@ -3,7 +3,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { Plus, X, Trash } from "@phosphor-icons/react";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency } from "@/lib/format";
+import { formatMoney } from "@/aop/format";
 
 const STAGES = ["", "Deal P&L", "Customer PO", "Operations", "Closure"];
 const ROLES = ["", "admin", "finance", "leadership", "approver"];
@@ -13,7 +13,7 @@ export default function ApprovalMatrixPage({ embedded = false }) {
   const [rows, setRows] = useState([]);
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState(null);
-  const { mode, inrPerUsd } = useCurrency();
+  const { unit } = useCurrency();
 
   const load = async () => {
     const { data } = await api.get("/approvals/rules");
@@ -57,8 +57,8 @@ export default function ApprovalMatrixPage({ embedded = false }) {
                   <td className="font-medium">{r.name}</td>
                   <td>{r.target_stage || "Any"}</td>
                   <td>{r.business_category || "Any"}</td>
-                  <td className="num">{r.min_revenue ? formatCurrency(r.min_revenue, mode, inrPerUsd) : "—"}</td>
-                  <td className="num">{r.max_revenue ? formatCurrency(r.max_revenue, mode, inrPerUsd) : "—"}</td>
+                  <td className="num">{r.min_revenue ? formatMoney(r.min_revenue, unit) : "—"}</td>
+                  <td className="num">{r.max_revenue ? formatMoney(r.max_revenue, unit) : "—"}</td>
                   <td className="num">
                     {r.min_margin_pct != null ? `≥${r.min_margin_pct}%` : ""}
                     {r.max_margin_pct != null ? ` ≤${r.max_margin_pct}%` : ""}

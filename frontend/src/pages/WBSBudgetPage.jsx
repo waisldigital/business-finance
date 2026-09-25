@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import api, { formatApiErrorDetail, API as API_BASE } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency } from "@/lib/format";
+import { formatMoney } from "@/aop/format";
 import { useAuth } from "@/lib/auth";
 import {
   Stack, MagnifyingGlass, FunnelSimple, UploadSimple, DownloadSimple,
@@ -49,7 +49,7 @@ const BUDGET_COLUMNS = [
 export default function WBSBudgetPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const { mode, inrPerUsd } = useCurrency();
+  const { mode, inrPerUsd, unit } = useCurrency();
   const [tab, setTab] = useState("find");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -152,10 +152,10 @@ export default function WBSBudgetPage() {
           <StatChip label="WBS" value={stats.count} icon={<Stack size={12} weight="duotone" className="text-[var(--gold)]" />} testid="chip-wbs-count" />
           {tab === "budget" && (
             <>
-              <StatChip label="Original Budget" value={formatCurrency(stats.ob, mode, inrPerUsd)} testid="chip-original-budget" />
-              <StatChip label="Total PO" value={formatCurrency(stats.tp, mode, inrPerUsd)} testid="chip-total-po" />
-              <StatChip label="Open PO" value={formatCurrency(stats.op, mode, inrPerUsd)} testid="chip-open-po" />
-              <StatChip label="Balance" value={formatCurrency(stats.bb, mode, inrPerUsd)} testid="chip-balance" />
+              <StatChip label="Original Budget" value={formatMoney(stats.ob, unit)} testid="chip-original-budget" />
+              <StatChip label="Total PO" value={formatMoney(stats.tp, unit)} testid="chip-total-po" />
+              <StatChip label="Open PO" value={formatMoney(stats.op, unit)} testid="chip-open-po" />
+              <StatChip label="Balance" value={formatMoney(stats.bb, unit)} testid="chip-balance" />
             </>
           )}
           <div className="flex-1 min-w-[200px]" />
@@ -274,8 +274,8 @@ function BudgetTable({ rows, loading, mode, inrPerUsd }) {
               <td key={c.key} className={c.num ? "num font-mono text-xs" : (c.key === "wbs_element" || c.key === "project_definition" ? "font-mono text-xs" : "")}>
                 {c.num
                   ? (r.currency === "USD"
-                      ? formatCurrency(Number(r[c.key] || 0), mode, inrPerUsd)
-                      : formatCurrency(Number(r[c.key] || 0), mode, inrPerUsd))
+                      ? formatMoney(Number(r[c.key] || 0), unit)
+                      : formatMoney(Number(r[c.key] || 0), unit))
                   : (r[c.key] || "—")}
               </td>
             ))}

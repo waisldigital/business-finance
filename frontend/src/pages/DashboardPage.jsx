@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber } from "@/aop/format";
 import { useNavigate } from "react-router-dom";
 import { ArrowUpRight, TrendUp, Warning, Receipt, Buildings, Truck, FunnelSimple } from "@phosphor-icons/react";
 import {
@@ -50,7 +50,7 @@ const CHART_PALETTE = [
 const STAGE_COLORS = ["#E07A3C", "#FFC000", "#7BB661", "#5C2B84", "#7B3F00"];
 
 export default function DashboardPage() {
-  const { mode, inrPerUsd } = useCurrency();
+  const { unit } = useCurrency();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
 
@@ -194,15 +194,15 @@ export default function DashboardPage() {
           />
           <KpiTile
             label="Total PO Value"
-            value={formatCurrency(totals.total_po_value, mode, inrPerUsd)}
-            sub={`Revenue ${formatCurrency(totals.total_revenue, mode, inrPerUsd)}`}
+            value={formatMoney(totals.total_po_value, unit)}
+            sub={`Revenue ${formatMoney(totals.total_revenue, unit)}`}
             icon={TrendUp}
             onClick={() => navigate("/app/projects")}
             testid="kpi-total-po"
           />
           <KpiTile
             label="Total Margin"
-            value={formatCurrency(totals.total_margin, mode, inrPerUsd)}
+            value={formatMoney(totals.total_margin, unit)}
             sub={`${totals.margin_pct.toFixed(1)}% blended margin`}
             icon={Receipt}
             accent
@@ -222,13 +222,13 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <KpiTile
             label="Revenue"
-            value={formatCurrency(recognized_unbilled.recognized, mode, inrPerUsd)}
-            sub={`Billed ${formatCurrency(recognized_unbilled.billed, mode, inrPerUsd)}`}
+            value={formatMoney(recognized_unbilled.recognized, unit)}
+            sub={`Billed ${formatMoney(recognized_unbilled.billed, unit)}`}
             testid="kpi-recognized"
           />
           <KpiTile
             label="Recognized but Unbilled"
-            value={formatCurrency(recognized_unbilled.unbilled, mode, inrPerUsd)}
+            value={formatMoney(recognized_unbilled.unbilled, unit)}
             sub="Working capital exposure"
             accent
             testid="kpi-unbilled"
@@ -300,7 +300,7 @@ export default function DashboardPage() {
                 {top_customers.map((c) => (
                   <tr key={c.customer_id}>
                     <td>{c.customer_name}</td>
-                    <td className="num">{formatCurrency(c.po_value, mode, inrPerUsd)}</td>
+                    <td className="num">{formatMoney(c.po_value, unit)}</td>
                     <td className="num">{c.count}</td>
                   </tr>
                 ))}
@@ -338,7 +338,7 @@ export default function DashboardPage() {
                     {vendor_exposure.map((_, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} />)}
                   </Pie>
                   <Tooltip
-                    formatter={(v, n) => [formatCurrency(v, mode, inrPerUsd), n]}
+                    formatter={(v, n) => [formatMoney(v, unit), n]}
                     contentStyle={{ borderRadius: 4, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12 }}
                   />
                 </PieChart>
@@ -383,7 +383,7 @@ export default function DashboardPage() {
                     </td>
                     <td><span className="badge flag-delayed">Delayed</span></td>
                     <td className="text-[var(--danger)]">{m.due_date}</td>
-                    <td className="num">{formatCurrency(m.value, mode, inrPerUsd)}</td>
+                    <td className="num">{formatMoney(m.value, unit)}</td>
                     <td className="num text-[var(--danger)]">{m.days_overdue}d</td>
                   </tr>
                 ))}
@@ -412,7 +412,7 @@ export default function DashboardPage() {
                     </td>
                     <td><span className="badge flag-low-margin">Low Margin</span></td>
                     <td className="num text-[var(--danger)]">{(p.margin_pct || 0).toFixed(1)}%</td>
-                    <td className="num">{formatCurrency(p.po_value, mode, inrPerUsd)}</td>
+                    <td className="num">{formatMoney(p.po_value, unit)}</td>
                   </tr>
                 ))}
                 {low_margin_projects.length === 0 && (

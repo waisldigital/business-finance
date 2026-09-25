@@ -5,7 +5,7 @@ import PageHeader from "@/components/PageHeader";
 import StageTracker, { STAGES } from "@/components/StageTracker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
+import { formatMoney, formatDate, formatDateTime } from "@/aop/format";
 import { ArrowLeft, ArrowRight, Plus, Trash, PencilSimple, X, UploadSimple, FileXls, ArrowCounterClockwise, AirplaneTakeoff } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
 import AirplaneButton from "@/components/AirplaneButton";
@@ -16,7 +16,7 @@ const TABS = ["Overview", "Revenue", "Cost", "Milestones", "Documents", "Queries
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { mode, inrPerUsd } = useCurrency();
+  const { mode, inrPerUsd, unit } = useCurrency();
   const { user } = useAuth();
 
   const [project, setProject] = useState(null);
@@ -119,10 +119,10 @@ export default function ProjectDetailPage() {
 
       {/* Quick stats */}
       <div className="px-8 py-5 grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Stat label="PO Value" value={formatCurrency(project.po_value, mode, inrPerUsd)} />
-        <Stat label="Revenue" value={formatCurrency(project.revenue_total, mode, inrPerUsd)} onClick={() => setTab("Revenue")} testid="stat-revenue" />
-        <Stat label="Cost" value={formatCurrency(project.cost_total, mode, inrPerUsd)} onClick={() => setTab("Cost")} testid="stat-cost" />
-        <Stat label="Margin" value={formatCurrency(project.margin_total, mode, inrPerUsd)} accent />
+        <Stat label="PO Value" value={formatMoney(project.po_value, unit)} />
+        <Stat label="Revenue" value={formatMoney(project.revenue_total, unit)} onClick={() => setTab("Revenue")} testid="stat-revenue" />
+        <Stat label="Cost" value={formatMoney(project.cost_total, unit)} onClick={() => setTab("Cost")} testid="stat-cost" />
+        <Stat label="Margin" value={formatMoney(project.margin_total, unit)} accent />
         <Stat label="Deal Margin %" value={`${(project.margin_pct || 0).toFixed(1)}%`} accent={project.margin_pct >= 15} danger={project.margin_pct < 15} />
       </div>
 
@@ -300,7 +300,7 @@ function RevenueTab({ projectId, rows, reload, mode, inrPerUsd, project }) {
               <td>{formatDate(r.recognition_date)}</td>
               <td>{formatDate(r.billing_date)}</td>
               <td><StatusBadge status={r.is_billed ? "Approved" : "Pending"} /></td>
-              <td className="num">{formatCurrency(r.amount, mode, inrPerUsd)}</td>
+              <td className="num">{formatMoney(r.amount, unit)}</td>
               <td><button className="btn-ghost" onClick={async () => { await api.delete(`/revenue/${r.id}`); reload(); }}><Trash size={14} /></button></td>
             </tr>
           ))}
@@ -333,7 +333,7 @@ function CostTab({ projectId, rows, reload, mode, inrPerUsd, project }) {
               <td>{r.description || "—"}</td>
               <td>{formatDate(r.expense_date)}</td>
               <td>{r.category || "—"}</td>
-              <td className="num">{formatCurrency(r.amount, mode, inrPerUsd)}</td>
+              <td className="num">{formatMoney(r.amount, unit)}</td>
               <td><button className="btn-ghost" onClick={async () => { await api.delete(`/cost/${r.id}`); reload(); }}><Trash size={14} /></button></td>
             </tr>
           ))}
@@ -509,7 +509,7 @@ function Milestones({ project, mode, inrPerUsd }) {
               <tr key={i}>
                 <td>{m.milestone_name}</td>
                 <td>{formatDate(m.due_date)}</td>
-                <td className="num">{formatCurrency(m.value, mode, inrPerUsd)}</td>
+                <td className="num">{formatMoney(m.value, unit)}</td>
                 <td><StatusBadge status={m.is_billed ? "Approved" : "Pending"} /></td>
               </tr>
             ))}

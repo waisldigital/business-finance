@@ -6,7 +6,7 @@ const inr0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 export const UNITS = {
   cr: { label: "₹ Cr", div: 1e7, digits: 0 },
   lakh: { label: "₹ Lakh", div: 1e5, digits: 0 },
-  usd: { label: "$ Mn", div: 1e6 * 83, digits: 0 },
+  usd: { label: "$ Mn", div: 1e6 * 83, digits: 0 }, // 83 is only the fallback until Settings' rate loads
   inr: { label: "₹", div: 1, digits: 0 },
 };
 
@@ -24,6 +24,42 @@ export function fmtAmount(v, unit = "cr") {
   if (Math.abs(n) < 0.5) return n === 0 ? "–" : "0";
   const s = new Intl.NumberFormat("en-IN", { minimumFractionDigits: u.digits, maximumFractionDigits: u.digits }).format(Math.abs(n));
   return n < 0 ? `(${s})` : s;
+}
+
+/**
+ * A money amount in the unit picked in the header (₹ Crore · ₹ Lakh · $ Million): ₹ Crore and $ Mn with two
+ * decimals, ₹ Lakh whole; negatives in brackets; $ uses the admin-set INR per USD rate (Settings).
+ */
+const MONEY = { cr: { sym: "₹", suffix: " Cr", digits: 2 }, lakh: { sym: "₹", suffix: " L", digits: 0 }, usd: { sym: "$", suffix: " Mn", digits: 2 } };
+export function formatMoney(value, unit = "cr") {
+  if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "—";
+  const m = MONEY[unit] || MONEY.cr;
+  const n = Number(value) / unitDiv(unit in MONEY ? unit : "cr");
+  const s = new Intl.NumberFormat("en-IN", { minimumFractionDigits: m.digits, maximumFractionDigits: m.digits }).format(Math.abs(n));
+  const out = `${m.sym}${s}${m.suffix}`;
+  return n < 0 && Number(s.replace(/,/g, "")) !== 0 ? `(${out})` : out;
+}
+
+export function formatNumber(n) {
+  return new Intl.NumberFormat("en-IN").format(Math.round(Number(n || 0)));
+}
+
+export function formatDate(d) {
+  if (!d) return "—";
+  try {
+    return new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "2-digit" });
+  } catch {
+    return d;
+  }
+}
+
+export function formatDateTime(d) {
+  if (!d) return "—";
+  try {
+    return new Date(d).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return d;
+  }
 }
 
 export function fmtPct(v) {

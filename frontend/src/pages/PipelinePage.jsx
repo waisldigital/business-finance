@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatMoney, formatDate } from "@/aop/format";
 import { Plus, MagnifyingGlass, PencilSimple, CheckCircle, XCircle, Trophy, HourglassMedium, Warning } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
 import PipelineWizardModal, { PIPELINE_STAGES } from "@/components/PipelineWizardModal";
@@ -45,7 +45,7 @@ const COLORS = ["#E07A3C", "#FFC000", "#5C2B84", "#3D8B7A", "#7B3F00"];
 
 export default function PipelinePage() {
   const { user } = useAuth();
-  const { mode, inrPerUsd } = useCurrency();
+  const { unit } = useCurrency();
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState(null);
   const [customers, setCustomers] = useState([]);
@@ -108,8 +108,8 @@ export default function PipelinePage() {
         {summary && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard label="Open Opportunities" value={summary.total_opportunities} icon={<Trophy size={16} weight="duotone" className="text-[var(--gold)]" />} />
-            <KpiCard label="Total Pipeline Value" value={formatCurrency(summary.total_value, mode, inrPerUsd)} />
-            <KpiCard label="Won Value" value={formatCurrency(summary.won_value, mode, inrPerUsd)} accent />
+            <KpiCard label="Total Pipeline Value" value={formatMoney(summary.total_value, unit)} />
+            <KpiCard label="Won Value" value={formatMoney(summary.won_value, unit)} accent />
             <KpiCard label="Awaiting Finance Handoff" value={summary.pending_handoff} icon={<HourglassMedium size={16} weight="duotone" className="text-[var(--warning)]" />} danger={summary.pending_handoff > 0} />
           </div>
         )}
@@ -129,7 +129,7 @@ export default function PipelinePage() {
                 <XAxis type="number" stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis type="category" dataKey="stage" width={160} stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
                 <Tooltip
-                  formatter={(v, n) => n === "count" ? [v, "Count"] : [formatCurrency(v, mode, inrPerUsd), "Value"]}
+                  formatter={(v, n) => n === "count" ? [v, "Count"] : [formatMoney(v, unit), "Value"]}
                   contentStyle={{ borderRadius: 4, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12 }}
                   cursor={{ fill: "var(--surface-2)" }}
                 />
@@ -225,8 +225,8 @@ export default function PipelinePage() {
                     {r.ceo_visibility && <span className="badge flag-low-margin" title="CEO Visibility">CEO</span>}
                     {r.opportunity_category === "Change Request" && <span className="badge badge-neutral" title="Change Request">CR</span>}
                   </td>
-                  <td className="num">{formatCurrency(r.expected_revenue, mode, inrPerUsd)}</td>
-                  <td className="num">{formatCurrency(r.negotiated_value || r.proposal_value, mode, inrPerUsd)}</td>
+                  <td className="num">{formatMoney(r.expected_revenue, unit)}</td>
+                  <td className="num">{formatMoney(r.negotiated_value || r.proposal_value, unit)}</td>
                   <td><span className={`badge ${outcomeChipClass(r.outcome)}`}>{r.outcome}</span></td>
                   <td>
                     <div className="flex items-center gap-2">

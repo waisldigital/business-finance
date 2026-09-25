@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { Plus, Trash, X, DownloadSimple } from "@phosphor-icons/react";
-import { formatCurrency } from "@/lib/format";
+import { formatMoney } from "@/aop/format";
 import { useCurrency } from "@/lib/currency";
 import { useNavigate } from "react-router-dom";
 
@@ -90,7 +90,7 @@ const ENTITIES = {
 
 export default function MasterPage({ entityKey }) {
   const meta = ENTITIES[entityKey];
-  const { mode, inrPerUsd } = useCurrency();
+  const { unit } = useCurrency();
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [show, setShow] = useState(false);
@@ -152,7 +152,7 @@ export default function MasterPage({ entityKey }) {
                   >
                     {meta.columns.map((c) => (
                       <td key={c.key} className={c.type === "currency" ? "num" : ""}>
-                        {c.type === "currency" ? formatCurrency(r[c.key], mode, inrPerUsd) : r[c.key] || "—"}
+                        {c.type === "currency" ? formatMoney(r[c.key], unit) : r[c.key] || "—"}
                       </td>
                     ))}
                     <td className="text-right" onClick={(e) => e.stopPropagation()}>

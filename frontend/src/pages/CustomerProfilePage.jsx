@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatMoney, formatDate } from "@/aop/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ArrowLeft, EnvelopeSimple, Phone, Buildings, WarningOctagon } from "@phosphor-icons/react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
@@ -11,7 +11,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export default function CustomerProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { mode, inrPerUsd } = useCurrency();
+  const { unit } = useCurrency();
   const [data, setData] = useState(null);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export default function CustomerProfilePage() {
           </div>
           <div className="tile p-5">
             <div className="text-[10px] tracking-overline text-[var(--muted)]">SAP Outstanding</div>
-            <div className="font-mono font-semibold text-2xl mt-1 text-[var(--gold)]">{formatCurrency(customer.balance_outstanding_sap, mode, inrPerUsd)}</div>
+            <div className="font-mono font-semibold text-2xl mt-1 text-[var(--gold)]">{formatMoney(customer.balance_outstanding_sap, unit)}</div>
             <div className="text-xs text-[var(--muted)] mt-1">Sync from SAP master</div>
             {(customer.industry || customer.sector) && (
               <div className="mt-3 pt-3 border-t border-[var(--border-soft)] text-xs">
@@ -97,9 +97,9 @@ export default function CustomerProfilePage() {
         {/* Totals */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <Stat label="Projects" value={totals.project_count} />
-          <Stat label="Total PO" value={formatCurrency(totals.total_po, mode, inrPerUsd)} />
-          <Stat label="Revenue" value={formatCurrency(totals.total_revenue, mode, inrPerUsd)} />
-          <Stat label="Margin" value={formatCurrency(totals.total_margin, mode, inrPerUsd)} accent />
+          <Stat label="Total PO" value={formatMoney(totals.total_po, unit)} />
+          <Stat label="Revenue" value={formatMoney(totals.total_revenue, unit)} />
+          <Stat label="Margin" value={formatMoney(totals.total_margin, unit)} accent />
           <Stat label="Margin %" value={`${(totals.margin_pct || 0).toFixed(1)}%`}
                 accent={totals.margin_pct >= 15}
                 danger={totals.margin_pct < 15} />
@@ -111,9 +111,9 @@ export default function CustomerProfilePage() {
             <div className="text-[10px] tracking-overline text-[var(--muted)]">Billing Position</div>
             <div className="font-display text-lg font-bold mb-3">Recognized vs Billed vs Unbilled</div>
             <div className="space-y-2">
-              <Row label="Recognized" value={formatCurrency(billing.recognized, mode, inrPerUsd)} />
-              <Row label="Billed" value={formatCurrency(billing.billed, mode, inrPerUsd)} />
-              <Row label="Unbilled" value={formatCurrency(billing.unbilled, mode, inrPerUsd)} accent />
+              <Row label="Recognized" value={formatMoney(billing.recognized, unit)} />
+              <Row label="Billed" value={formatMoney(billing.billed, unit)} />
+              <Row label="Unbilled" value={formatMoney(billing.unbilled, unit)} accent />
             </div>
           </div>
 
@@ -125,7 +125,7 @@ export default function CustomerProfilePage() {
                 <CartesianGrid strokeDasharray="2 4" stroke="#E5E5E0" />
                 <XAxis dataKey="bucket" stroke="#5E5E5A" fontSize={11} />
                 <YAxis stroke="#5E5E5A" fontSize={11} />
-                <Tooltip formatter={(v) => formatCurrency(v, mode, inrPerUsd)} contentStyle={{ borderRadius: 2, borderColor: "#E5E5E0", fontSize: 12 }} />
+                <Tooltip formatter={(v) => formatMoney(v, unit)} contentStyle={{ borderRadius: 2, borderColor: "#E5E5E0", fontSize: 12 }} />
                 <Bar dataKey="amount">
                   {ageing_buckets.map((b, i) => (
                     <Cell key={i} fill={b.bucket === "90+" ? "#991B1B" : b.bucket === "61-90" ? "#B45309" : "#A67C00"} />
@@ -159,7 +159,7 @@ export default function CustomerProfilePage() {
                   <td className="font-mono text-xs">{p.wbs_element || "—"}</td>
                   <td><StatusBadge status={p.current_stage} /></td>
                   <td><StatusBadge status={p.approval_status} /></td>
-                  <td className="num">{formatCurrency(p.po_value, mode, inrPerUsd)}</td>
+                  <td className="num">{formatMoney(p.po_value, unit)}</td>
                   <td className={`num ${(p.margin_pct || 0) < 15 ? "text-[var(--danger)]" : ""}`}>{(p.margin_pct || 0).toFixed(1)}%</td>
                   <td>{formatDate(p.start_date)}</td>
                   <td>{formatDate(p.end_date)}</td>

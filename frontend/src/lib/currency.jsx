@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import api from "@/lib/api";
-import { formatCurrency as fmt } from "@/lib/format";
-import { setUsdRate } from "@/aop/format";
+import { formatMoney, setUsdRate } from "@/aop/format";
 
 const CurrencyContext = createContext(null);
 
@@ -35,8 +34,8 @@ export function CurrencyProvider({ children }) {
     update("INR");
   };
 
-  // Convenience: format value in current mode with admin rate
-  const format = (value) => fmt(value, mode, inrPerUsd, scale);
+  // Convenience: a money amount in the selected unit (admin-set rate for $)
+  const format = (value) => formatMoney(value, unit);
 
   return (
     <CurrencyContext.Provider value={{ mode, setMode: update, inrPerUsd, setInrPerUsd, format, unit, setUnit }}>

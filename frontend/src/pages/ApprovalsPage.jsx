@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/aop/format";
 import { Check, X } from "@phosphor-icons/react";
 
 export default function ApprovalsPage() {
