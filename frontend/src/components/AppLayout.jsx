@@ -6,8 +6,8 @@ import { useTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import {
   Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
-  Gear, CaretLeft, CaretRight, Table, SlidersHorizontal, Gauge, FileArrowUp, CheckSquareOffset,
-  PresentationChart, Stamp,
+  Gear, CaretLeft, CaretRight, Table, Gauge, FileArrowUp, CheckSquareOffset,
+  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
 import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
@@ -39,14 +39,14 @@ const ADMIN_NAV = [
     { to: "/admin/aop/approvals", label: "AOP approvals", icon: CheckSquareOffset, testid: "sidebar-admin-aop-approvals" },
     { to: "/admin/aop/pnl",       label: "P&L check",     icon: Table,           testid: "sidebar-admin-pnl" },
     { to: "/admin/aop/reports",   label: "AOP reports",   icon: PresentationChart, testid: "sidebar-admin-reports" },
-    { to: "/admin/aop/settings",  label: "Plan settings", icon: SlidersHorizontal, testid: "sidebar-admin-plan" },
+    { to: "/admin/aop/settings",  label: "Plan settings", icon: GearSix,         testid: "sidebar-admin-plan" },
   ]},
   { title: "Administration", items: [
     { to: "/admin/approvals", label: "Project approvals", icon: GavelIcon,             testid: "sidebar-approvals" },
     { to: "/admin/employees", label: "Users & employees", icon: UserCircle,            testid: "sidebar-employees" },
     { to: "/admin/suppliers", label: "Suppliers",         icon: Truck,                 testid: "sidebar-suppliers" },
     { to: "/admin/uploads",   label: "Excel upload",      icon: UploadSimple,          testid: "sidebar-uploads" },
-    { to: "/admin/audit",     label: "Audit trail",       icon: ClockCounterClockwise, testid: "sidebar-audit" },
+    { to: "/admin/audit",     label: "Audit trail",       icon: ListMagnifyingGlass,   testid: "sidebar-audit" },
     { to: "/admin/settings",  label: "Roles & settings",  icon: Gear,                  testid: "sidebar-settings" },
   ]},
 ];
@@ -113,7 +113,10 @@ export default function AppLayout({ children, portal = "app" }) {
               <div className={`nav-section-label px-4 py-1.5 ${gi ? "mt-3" : ""} text-[10px] tracking-overline`} style={{ color: "rgba(255,255,255,0.4)" }}>{g.title}</div>
               {g.items.map((n) => (
                 <NavLink key={n.to} to={n.to} end={!!n.end} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} data-testid={n.testid} title={collapsed ? n.label : undefined}>
-                  <n.icon size={17} weight="duotone" />
+                  <span className="relative inline-flex shrink-0">
+                    <n.icon size={17} weight="duotone" />
+                    {n.confidential && <LockSimple size={9} weight="fill" className="absolute -bottom-1 -right-1 text-[var(--gold)]" aria-label="Confidential" />}
+                  </span>
                   <span className="nav-label">{n.label}</span>
                   {n.approvals && inbox.count > 0 && (
                     <span className="ml-auto text-[10px] font-bold px-1.5 min-w-[18px] text-center text-black" style={{ background: "var(--gold)" }}

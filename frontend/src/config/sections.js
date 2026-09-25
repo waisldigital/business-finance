@@ -4,21 +4,21 @@
 //   path      — where the section lives                  landing — order tried when picking a user's home page
 //   group     — sidebar group                            confidential — shown with a lock in the sidebar
 import {
-  ChartLineUp, FunnelSimple, FolderSimple, ArrowsClockwise, UsersThree, Stack, PresentationChart, SlidersHorizontal,
-  TrendUp, Receipt, Buildings, LockKey, HardDrives,
+  SquaresFour, FunnelSimple, FolderSimple, GitPullRequest, UsersThree, Stack, PresentationChart, SlidersHorizontal,
+  TrendUp, Receipt, Buildings, UsersFour, HardDrives,
 } from "@phosphor-icons/react";
 
 export const GROUPS = { workspace: "Workspace", aop: "Annual Operating Plan" };
 
 export const SECTIONS = [
   { key: "dashboard", label: "Dashboard", path: "/app/dashboard", group: "workspace", landing: 1,
-    nav: { label: "Dashboard", icon: ChartLineUp, testid: "sidebar-dashboard" } },
+    nav: { label: "Dashboard", icon: SquaresFour, testid: "sidebar-dashboard" } },
   { key: "pipeline", label: "Pipeline", path: "/app/pipeline", group: "workspace", landing: 10,
     nav: { label: "Pipeline", icon: FunnelSimple, testid: "sidebar-pipeline" } },
   { key: "projects", label: "Projects", path: "/app/projects", group: "workspace", landing: 11,
     nav: { label: "Projects", icon: FolderSimple, testid: "sidebar-projects" } },
   { key: "change_requests", label: "Change Requests", path: "/app/change-requests", group: "workspace", landing: 12,
-    nav: { label: "Change Requests", icon: ArrowsClockwise, testid: "sidebar-change-requests" } },
+    nav: { label: "Change Requests", icon: GitPullRequest, testid: "sidebar-change-requests" } },
   { key: "customer_profile", label: "Customer Profile", path: "/app/customers", group: "workspace", landing: 13,
     nav: { label: "Customer Profile", icon: UsersThree, testid: "sidebar-customers" } },
   { key: "wbs_budget", label: "WBS and Budget", path: "/app/wbs-budget", group: "workspace", landing: 14,
@@ -35,7 +35,7 @@ export const SECTIONS = [
   { key: "aop_overheads", label: "AOP · Overheads", path: "/app/aop/overheads", group: "aop", landing: 6,
     nav: { label: "Overheads", icon: Buildings, testid: "sidebar-aop-overheads" } },
   { key: "aop_payroll", label: "AOP · Payroll (confidential)", path: "/app/aop/payroll", group: "aop", landing: 7, confidential: true,
-    nav: { label: "Payroll", icon: LockKey, testid: "sidebar-aop-payroll" } },
+    nav: { label: "Payroll", icon: UsersFour, testid: "sidebar-aop-payroll" } },
   { key: "aop_capex", label: "AOP · Capex", path: "/app/aop/capex", group: "aop", landing: 8,
     nav: { label: "Capex", icon: HardDrives, testid: "sidebar-aop-capex" } },
   { key: "aop_reports", label: "AOP · Reports", path: "/app/aop/reports", group: "aop", landing: 9 },
