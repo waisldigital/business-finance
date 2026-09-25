@@ -26,10 +26,14 @@ export default function NotificationBell() {
     } catch {}
   }, []);
 
+  // poll the unread count while the tab is visible; catch up at once when it becomes visible again
   useEffect(() => {
-    loadCount();
-    const t = setInterval(loadCount, POLL_MS);
-    return () => clearInterval(t);
+    const tick = () => { if (document.visibilityState !== "hidden") loadCount(); };
+    tick();
+    const t = setInterval(tick, POLL_MS);
+    const onVis = () => { if (document.visibilityState === "visible") loadCount(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); };
   }, [loadCount]);
 
   useEffect(() => {
