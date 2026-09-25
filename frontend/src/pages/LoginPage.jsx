@@ -7,19 +7,20 @@ import AirplaneButton from "@/components/AirplaneButton";
 export default function LoginPage() {
   const { login, error, user } = useAuth();
   const navigate = useNavigate();
+  const search = React.useRef(window.location.search); // ?next= as it was when the page opened
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
-    if (user && user.id) navigate(nextPath(window.location.search, user) || homeFor(user), { replace: true });
+    if (user && user.id) navigate(nextPath(search.current, user) || homeFor(user), { replace: true });
   }, [user, navigate]);
 
   const doLogin = async () => {
     setBusy(true);
     const ok = await login(email, password);
     setBusy(false);
-    if (ok) navigate(nextPath(window.location.search, ok) || homeFor(ok), { replace: true });
+    if (ok) navigate(nextPath(search.current, ok) || homeFor(ok), { replace: true });
   };
 
   const onSubmit = (e) => {

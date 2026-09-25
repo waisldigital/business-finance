@@ -49,3 +49,21 @@ def test_cr_notification_links_point_at_the_workspace():
     import pathlib
     src = (pathlib.Path(__file__).parent.parent / "server.py").read_text()
     assert 'link=f"/change-requests/' not in src and src.count('link=f"/app/change-requests/{cid}"') == 4
+
+
+def test_cr_approver_inbox_open_and_decide(client, make_user):
+    import asyncio
+    import server
+    approver = make_user({"dashboard": {"can_view": True}})  # no Change Requests section
+    email = client.get("/api/auth/me", headers=approver).json()["email"]
+    cr = {"id": "cr-inbox-1", "cr_number": "CR-T-1", "cr_name": "Kiosks", "wbs_element": "WSIN-1", "status": "wbs_approved",
+          "wbs_approved": True, "approver_emails": [email], "po_value": 100.0, "estimated_margin_pct": 30.0,
+          "created_at": "2026-01-01T00:00:00"}
+    asyncio.get_event_loop().run_until_complete(server.db.change_requests.insert_one(cr))
+    inbox = client.get("/api/approvals/inbox", headers=approver).json()
+    assert [c["id"] for c in inbox["change_requests"]] == ["cr-inbox-1"] and inbox["count"] == 1
+    assert client.get("/api/change-requests/cr-inbox-1", headers=approver).status_code == 200
+    assert client.get("/api/change-requests", headers=approver).status_code == 403  # the list stays section-gated
+    r = client.post("/api/change-requests/cr-inbox-1/approve", headers=approver, json={"comment": "ok for FY27"})
+    assert r.status_code == 200 and r.json()["status"] == "approved"
+    assert client.get("/api/approvals/inbox", headers=approver).json()["count"] == 0
