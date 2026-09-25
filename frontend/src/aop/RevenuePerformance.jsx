@@ -25,7 +25,7 @@ export default function RevenuePerformance({ unit, geo, tag, initialMonth, embed
     setErr("");
     api.get("/aop/mis/revenue", { params: { geo: g, tag: t } }).then((r) => setData(r.data)).catch((e) => setErr(e.response?.data?.detail || e.message));
   };
-  useEffect(load, [g, t]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [g, t]);
 
   const rows = useMemo(() => data?.rows || [], [data]);
   const tree = useTree(rows, { defaultOpen: false });

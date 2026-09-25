@@ -6,7 +6,7 @@ import StageTracker, { STAGES } from "@/components/StageTracker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney, formatDate, formatDateTime } from "@/aop/format";
-import { ArrowLeft, ArrowRight, Plus, Trash, PencilSimple, X, UploadSimple, FileXls, ArrowCounterClockwise, AirplaneTakeoff } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, Plus, Trash, PencilSimple, X, FileXls, ArrowCounterClockwise } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
 import AirplaneButton from "@/components/AirplaneButton";
 import { useAuth } from "@/lib/auth";
@@ -359,7 +359,7 @@ function SapBulkUpload({ kind, projectId, project, reload }) {
     try {
       const { data } = await api.get(`/projects/${projectId}/sap-last-import?kind=${kind}`);
       setLastBatch(data?.has_batch ? data : null);
-    } catch (_) { setLastBatch(null); }
+    } catch { setLastBatch(null); }
   }, [projectId, kind]);
 
   React.useEffect(() => { loadLast(); }, [loadLast]);

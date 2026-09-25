@@ -6,7 +6,7 @@ import { formatMoney } from "@/aop/format";
 import { useAuth } from "@/lib/auth";
 import {
   Stack, MagnifyingGlass, FunnelSimple, UploadSimple, DownloadSimple,
-  Plus, X, Warning, CaretDown, Check,
+  X, Warning, CaretDown, Check,
 } from "@phosphor-icons/react";
 
 // 4 filter columns + colour modulation (hue shift)

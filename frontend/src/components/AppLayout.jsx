@@ -6,9 +6,9 @@ import { useTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import {
   ChartLineUp, FolderSimple, Database, UploadSimple, GavelIcon,
-  ShieldCheck, ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
-  Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, IdentificationBadge,
-  Table, ChartBar, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
+  ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
+  Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, 
+  Table, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
   PresentationChart, Stamp,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";

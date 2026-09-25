@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatMoney, formatDate } from "@/aop/format";
+import { formatMoney } from "@/aop/format";
 import { Plus, MagnifyingGlass, PencilSimple, CheckCircle, XCircle, Trophy, HourglassMedium, Warning } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
 import PipelineWizardModal, { PIPELINE_STAGES } from "@/components/PipelineWizardModal";

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { X, CheckCircle, Warning, CaretLeft, CaretRight } from "@phosphor-icons/react";
+import { X, Warning, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import AirplaneButton from "./AirplaneButton";
 
 const CURRENCIES = ["USD", "INR", "AED", "AUD", "CNY", "EUR", "GBP", "JPY", "RUB", "SAR", "SGD"];

@@ -16,14 +16,14 @@ export default function NotificationBell() {
     try {
       const { data } = await api.get("/notifications/in-app/count");
       setCount(data.unread || 0);
-    } catch (_) {}
+    } catch {}
   }, []);
 
   const loadList = useCallback(async () => {
     try {
       const { data } = await api.get("/notifications/in-app", { params: { limit: 20 } });
       setItems(data || []);
-    } catch (_) {}
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function NotificationBell() {
         await api.post(`/notifications/in-app/${n.id}/read`);
         setCount((c) => Math.max(0, c - 1));
         setItems((arr) => arr.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
-      } catch (_) {}
+      } catch {}
     }
     if (n.link) {
       setOpen(false);
@@ -64,7 +64,7 @@ export default function NotificationBell() {
       await api.post("/notifications/in-app/mark-all-read");
       setCount(0);
       setItems((arr) => arr.map((x) => ({ ...x, read: true })));
-    } catch (_) {}
+    } catch {}
   };
 
   return (

@@ -10,7 +10,6 @@ import {
   LineChart, Line, CartesianGrid, Legend, PieChart, Pie, Cell,
 } from "recharts";
 
-// eslint-disable-next-line no-unused-vars
 function KpiTile({ label, value, sub, icon: Icon, onClick, accent, testid }) {
   return (
     <div

@@ -69,7 +69,7 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
         ]);
         setCustomers(c.data || []);
         setEmployees(e.data || []);
-      } catch (_) {}
+      } catch {}
     })();
   }, []);
 
@@ -123,7 +123,7 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
           approver_role: chosen.approver_role,
           approver_rule_name: chosen.name,
         } : { approver_emails: [], approver_role: null, approver_rule_name: null });
-      } catch (_) {}
+      } catch {}
     })();
   }, [form.po_value, marginPct]);
 
