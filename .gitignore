@@ -140,3 +140,6 @@ credentials.json
 
 # Env templates are safe to commit
 !.env.example
+
+# Uploaded files (stored in GridFS in production; local disk only in development)
+backend/uploads/
