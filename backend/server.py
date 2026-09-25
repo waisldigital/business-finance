@@ -28,11 +28,12 @@ from models import (
     ApprovalRuleIn, ApprovalRuleOut, ApprovalActionIn, ApprovalRequestOut,
     AuditLogOut, UploadLogOut, gen_id, now_iso, STAGES,
     PipelineIn, PipelineOut, PipelineStageIn, PipelineHandoffAction, PIPELINE_STAGES,
-    RoleIn, RoleOut, WORKSPACE_SECTIONS,
+    RoleIn, RoleOut,
     WBSElementIn, WBSElementOut,
     ChangeRequestIn, ChangeRequestOut, CRAttachmentOut, CR_AIRPORTS,
     InAppNotificationOut,
 )
+from permissions import allows, make_require_section, normalize_role_permissions, resolve_permissions
 from services import (
     can_transition, write_audit, compute_margin, find_matching_rule, create_approval_request,
 )
@@ -104,6 +105,29 @@ async def _seed_env_admins() -> None:
             await db.users.update_one({"email": u["email"]}, {"$set": {
                 "is_permanent_admin": False, "password_hash": hash_password(_secrets.token_urlsafe(32))}})
             logger.warning("Revoked hard-coded permanent admin %s (password scrambled)", u["email"])
+
+
+require_section = make_require_section(db, get_current_user)
+# the customer list is a lookup on the project, pipeline and CR forms as well as the customer screens
+CUSTOMER_LOOKUP = ("customer_profile", "projects", "pipeline", "change_requests", "dashboard")
+
+
+# bulk upload / export entity → the workspace section that owns it (anything else is admin-only)
+UPLOAD_SECTIONS = {"project": "projects", "revenue": "projects", "cost": "projects", "sap-transactions": "projects",
+                   "customer": "customer_profile"}
+
+
+async def check_section(user: dict, sections, action: str = "view"):
+    if not allows(await resolve_permissions(db, user), sections, action):
+        raise HTTPException(403, "Your role doesn't give access to this section")
+
+
+async def check_upload_entity(user: dict, entity: str, action: str):
+    sec = UPLOAD_SECTIONS.get(entity)
+    if sec is None and user.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+    if sec:
+        await check_section(user, sec, action)
 
 
 def require_role(*roles):
@@ -550,13 +574,7 @@ async def create_role(payload: RoleIn, admin: dict = Depends(require_role("admin
     doc["is_system"] = False
     doc["created_at"] = now_iso()
     doc["updated_at"] = now_iso()
-    # Coerce permissions to dict-of-dicts (Pydantic SectionPermission -> dict)
-    perms: Dict[str, Any] = {}
-    for k, v in (payload.permissions or {}).items():
-        if k in WORKSPACE_SECTIONS:
-            perms[k] = {"can_view": bool(v.can_view) or bool(v.can_upload), "can_edit": bool(v.can_edit),
-                        "can_upload": bool(v.can_upload)}
-    doc["permissions"] = perms
+    doc["permissions"] = normalize_role_permissions(payload.permissions)
     await db.roles.insert_one(doc)
     await write_audit(db, entity_type="role", entity_id=doc["id"], action="create", user=admin,
                       field_changes={"name": payload.name})
@@ -572,12 +590,7 @@ async def update_role(rid: str, payload: RoleIn, admin: dict = Depends(require_r
     if existing.get("is_system"):
         raise HTTPException(400, "System role cannot be edited")
     updates = payload.model_dump()
-    perms: Dict[str, Any] = {}
-    for k, v in (payload.permissions or {}).items():
-        if k in WORKSPACE_SECTIONS:
-            perms[k] = {"can_view": bool(v.can_view) or bool(v.can_upload), "can_edit": bool(v.can_edit),
-                        "can_upload": bool(v.can_upload)}
-    updates["permissions"] = perms
+    updates["permissions"] = normalize_role_permissions(payload.permissions)
     updates["updated_at"] = now_iso()
     await db.roles.update_one({"id": rid}, {"$set": updates})
     await write_audit(db, entity_type="role", entity_id=rid, action="update", user=admin)
@@ -602,41 +615,20 @@ async def delete_role(rid: str, admin: dict = Depends(require_role("admin"))):
 @api.get("/me/permissions")
 async def my_permissions(user: dict = Depends(get_current_user)):
     """Returns the workspace permissions for the current user."""
-    # Admin role bypasses all checks
-    is_admin = user.get("role") == "admin"
-    all_perms = {s: {"can_view": True, "can_edit": True, "can_delete": is_admin} for s in WORKSPACE_SECTIONS}
-    if is_admin:
-        return {"is_admin": True, "is_permanent_admin": bool(user.get("is_permanent_admin")), "permissions": all_perms}
-
-    perms = {s: {"can_view": False, "can_edit": False, "can_delete": False} for s in WORKSPACE_SECTIONS}
-    role_id = user.get("role_id")
-    if role_id:
-        role = await db.roles.find_one({"id": role_id}, {"_id": 0})
-        if role:
-            for s, p in (role.get("permissions") or {}).items():
-                if s in WORKSPACE_SECTIONS:
-                    perms[s] = {
-                        "can_view": bool(p.get("can_view")),
-                        "can_edit": bool(p.get("can_edit")),
-                        "can_upload": bool(p.get("can_upload")),
-                        "can_delete": False,  # only admin can delete
-                    }
-    else:
-        # No role assigned → default: can view dashboard only
-        perms["dashboard"] = {"can_view": True, "can_edit": False, "can_delete": False}
-    return {"is_admin": False, "is_permanent_admin": False, "permissions": perms}
+    r = await resolve_permissions(db, user)
+    return {"is_admin": r["is_admin"], "is_permanent_admin": r["is_permanent_admin"], "permissions": r["permissions"]}
 
 
 # ============================================================
 # CUSTOMERS
 # ============================================================
 @api.get("/customers", response_model=List[CustomerOut])
-async def list_customers(_: dict = Depends(get_current_user)):
+async def list_customers(_: dict = Depends(require_section(CUSTOMER_LOOKUP))):
     return await db.customers.find({}, {"_id": 0}).to_list(2000)
 
 
 @api.post("/customers", response_model=CustomerOut)
-async def create_customer(payload: CustomerIn, user: dict = Depends(get_current_user)):
+async def create_customer(payload: CustomerIn, user: dict = Depends(require_section(("customer_profile", "projects", "pipeline"), "edit"))):
     doc = payload.model_dump()
     doc["id"] = gen_id()
     doc["created_at"] = now_iso()
@@ -647,7 +639,7 @@ async def create_customer(payload: CustomerIn, user: dict = Depends(get_current_
 
 
 @api.put("/customers/{cid}", response_model=CustomerOut)
-async def update_customer(cid: str, payload: CustomerIn, user: dict = Depends(get_current_user)):
+async def update_customer(cid: str, payload: CustomerIn, user: dict = Depends(require_section("customer_profile", "edit"))):
     existing = await db.customers.find_one({"id": cid})
     if not existing:
         raise HTTPException(404, "Not found")
@@ -753,7 +745,7 @@ async def _sync_employee_to_user(emp: Dict[str, Any], password: Optional[str], w
 
 
 @api.get("/employees", response_model=List[EmployeeOut])
-async def list_employees(_: dict = Depends(get_current_user)):
+async def list_employees(_: dict = Depends(require_section("change_requests"))):
     emps = await db.employees.find({}, {"_id": 0}).to_list(2000)
     return [await _enrich_employee(e) for e in emps]
 
@@ -820,7 +812,7 @@ EMPLOYEE_BRD_COLUMNS = [
 
 
 @api.get("/employees/template")
-async def employees_template(_: dict = Depends(get_current_user)):
+async def employees_template(_: dict = Depends(require_role("admin"))):
     """Download a blank employee Excel template aligned with BRD columns + Password + Roles."""
     from openpyxl import Workbook
     wb = Workbook()
@@ -1039,12 +1031,12 @@ def _coerce_wbs_value(field: str, val: Any) -> Any:
 
 
 @api.get("/wbs", response_model=List[WBSElementOut])
-async def list_wbs(_: dict = Depends(get_current_user)):
+async def list_wbs(_: dict = Depends(require_section("wbs_budget"))):
     return await db.wbs_elements.find({}, {"_id": 0}).to_list(20000)
 
 
 @api.get("/wbs/template")
-async def wbs_template(_: dict = Depends(get_current_user)):
+async def wbs_template(_: dict = Depends(require_section("wbs_budget"))):
     """Download a blank WBS Excel template (20 BRD columns)."""
     from openpyxl import Workbook
     wb = Workbook()
@@ -1182,12 +1174,12 @@ async def wbs_bulk_upload(
 # SUPPLIERS
 # ============================================================
 @api.get("/suppliers", response_model=List[SupplierOut])
-async def list_suppliers(_: dict = Depends(get_current_user)):
+async def list_suppliers(_: dict = Depends(require_role("admin"))):
     return await db.suppliers.find({}, {"_id": 0}).to_list(2000)
 
 
 @api.post("/suppliers", response_model=SupplierOut)
-async def create_supplier(payload: SupplierIn, user: dict = Depends(get_current_user)):
+async def create_supplier(payload: SupplierIn, user: dict = Depends(require_role("admin"))):
     doc = payload.model_dump()
     doc["id"] = gen_id()
     doc["created_at"] = now_iso()
@@ -1198,7 +1190,7 @@ async def create_supplier(payload: SupplierIn, user: dict = Depends(get_current_
 
 
 @api.put("/suppliers/{sid}", response_model=SupplierOut)
-async def update_supplier(sid: str, payload: SupplierIn, user: dict = Depends(get_current_user)):
+async def update_supplier(sid: str, payload: SupplierIn, user: dict = Depends(require_role("admin"))):
     existing = await db.suppliers.find_one({"id": sid})
     if not existing:
         raise HTTPException(404, "Not found")
@@ -1223,7 +1215,7 @@ async def list_projects(
     stage: Optional[str] = None,
     customer_id: Optional[str] = None,
     search: Optional[str] = None,
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_section("projects")),
 ):
     q: Dict[str, Any] = {}
     if stage:
@@ -1241,7 +1233,7 @@ async def list_projects(
 
 
 @api.get("/projects/{pid}", response_model=ProjectOut)
-async def get_project(pid: str, _: dict = Depends(get_current_user)):
+async def get_project(pid: str, _: dict = Depends(require_section("projects"))):
     doc = await db.projects.find_one({"id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Not found")
@@ -1249,7 +1241,7 @@ async def get_project(pid: str, _: dict = Depends(get_current_user)):
 
 
 @api.post("/projects/parse-pdf")
-async def parse_project_pdf(file: UploadFile = File(...), _: dict = Depends(get_current_user)):
+async def parse_project_pdf(file: UploadFile = File(...), _: dict = Depends(require_section("projects", "edit"))):
     """Parse a PO PDF and return extracted fields WITHOUT saving anything.
     Used by the New/Edit Project modal so the user can preview and confirm
     before fields are applied to the form."""
@@ -1273,7 +1265,7 @@ async def parse_project_pdf(file: UploadFile = File(...), _: dict = Depends(get_
 async def parse_project_excel(
     file: UploadFile = File(...),
     wbs: Optional[str] = Query(None, description="WBS Element to look up in the Project Master sheet"),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_section("projects", "edit")),
 ):
     """Parse the unified SAP transactions workbook and return fields suitable
     for pre-filling the New/Edit Project modal.
@@ -1324,7 +1316,7 @@ async def parse_project_excel(
 
 
 @api.post("/projects", response_model=ProjectOut)
-async def create_project(payload: ProjectIn, user: dict = Depends(get_current_user)):
+async def create_project(payload: ProjectIn, user: dict = Depends(require_section("projects", "edit"))):
     doc = payload.model_dump()
     doc["id"] = gen_id()
     margin = compute_margin(doc.get("po_value", 0), doc.get("revenue_total", 0), doc.get("cost_total", 0))
@@ -1348,7 +1340,7 @@ async def create_project(payload: ProjectIn, user: dict = Depends(get_current_us
 
 
 @api.put("/projects/{pid}", response_model=ProjectOut)
-async def update_project(pid: str, payload: ProjectIn, user: dict = Depends(get_current_user)):
+async def update_project(pid: str, payload: ProjectIn, user: dict = Depends(require_section("projects", "edit"))):
     existing = await db.projects.find_one({"id": pid})
     if not existing:
         raise HTTPException(404, "Not found")
@@ -1364,7 +1356,7 @@ async def update_project(pid: str, payload: ProjectIn, user: dict = Depends(get_
 
 
 @api.post("/projects/{pid}/transition", response_model=ProjectOut)
-async def transition_project(pid: str, payload: StageTransitionIn, user: dict = Depends(get_current_user)):
+async def transition_project(pid: str, payload: StageTransitionIn, user: dict = Depends(require_section("projects", "edit"))):
     project = await db.projects.find_one({"id": pid}, {"_id": 0})
     if not project:
         raise HTTPException(404, "Not found")
@@ -1423,12 +1415,12 @@ async def delete_project(pid: str, user: dict = Depends(require_role("admin"))):
 # REVENUE & COST LINES
 # ============================================================
 @api.get("/projects/{pid}/revenue", response_model=List[RevenueLineOut])
-async def list_revenue(pid: str, _: dict = Depends(get_current_user)):
+async def list_revenue(pid: str, _: dict = Depends(require_section("projects"))):
     return await db.revenue_lines.find({"project_id": pid}, {"_id": 0}).to_list(1000)
 
 
 @api.post("/projects/{pid}/revenue", response_model=RevenueLineOut)
-async def add_revenue(pid: str, payload: RevenueLineIn, user: dict = Depends(get_current_user)):
+async def add_revenue(pid: str, payload: RevenueLineIn, user: dict = Depends(require_section("projects", "edit"))):
     doc = payload.model_dump()
     doc["project_id"] = pid
     doc["id"] = gen_id()
@@ -1440,19 +1432,19 @@ async def add_revenue(pid: str, payload: RevenueLineIn, user: dict = Depends(get
 
 
 @api.delete("/revenue/{rid}")
-async def delete_revenue(rid: str, user: dict = Depends(get_current_user)):
+async def delete_revenue(rid: str, user: dict = Depends(require_section("projects", "edit"))):
     await db.revenue_lines.delete_one({"id": rid})
     await write_audit(db, entity_type="revenue_line", entity_id=rid, action="delete", user=user)
     return {"ok": True}
 
 
 @api.get("/projects/{pid}/cost", response_model=List[CostLineOut])
-async def list_cost(pid: str, _: dict = Depends(get_current_user)):
+async def list_cost(pid: str, _: dict = Depends(require_section("projects"))):
     return await db.cost_lines.find({"project_id": pid}, {"_id": 0}).to_list(1000)
 
 
 @api.post("/projects/{pid}/cost", response_model=CostLineOut)
-async def add_cost(pid: str, payload: CostLineIn, user: dict = Depends(get_current_user)):
+async def add_cost(pid: str, payload: CostLineIn, user: dict = Depends(require_section("projects", "edit"))):
     doc = payload.model_dump()
     doc["project_id"] = pid
     doc["id"] = gen_id()
@@ -1464,7 +1456,7 @@ async def add_cost(pid: str, payload: CostLineIn, user: dict = Depends(get_curre
 
 
 @api.delete("/cost/{cid}")
-async def delete_cost(cid: str, user: dict = Depends(get_current_user)):
+async def delete_cost(cid: str, user: dict = Depends(require_section("projects", "edit"))):
     await db.cost_lines.delete_one({"id": cid})
     await write_audit(db, entity_type="cost_line", entity_id=cid, action="delete", user=user)
     return {"ok": True}
@@ -1566,7 +1558,7 @@ async def dashboard_summary(
     business_category: Optional[str] = Query(None, description="GMR | Non-GMR"),
     date_from: Optional[str] = Query(None, description="YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="YYYY-MM-DD"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("dashboard")),
 ):
     cust_filter = [c for c in (customer_ids or "").split(",") if c]
     proj_filter = [p for p in (project_ids or "").split(",") if p]
@@ -1754,8 +1746,13 @@ async def list_audit(
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
     limit: int = Query(200, le=500),
-    _: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ):
+    # the full trail is admin-only; a project's own history is open to anyone who can view projects
+    if user.get("role") != "admin":
+        if entity_type != "project" or not entity_id:
+            raise HTTPException(403, "Admin only")
+        await check_section(user, "projects")
     q: Dict[str, Any] = {}
     if entity_type:
         q["entity_type"] = entity_type
@@ -1769,7 +1766,8 @@ async def list_audit(
 # EXCEL UPLOAD ENGINE
 # ============================================================
 @api.get("/uploads/template/{entity}")
-async def download_template(entity: str, _: dict = Depends(get_current_user)):
+async def download_template(entity: str, user: dict = Depends(get_current_user)):
+    await check_upload_entity(user, entity, "view")
     if entity == "sap-transactions":
         data = sap_parser.build_template_xlsx()
         return StreamingResponse(io.BytesIO(data),
@@ -1784,7 +1782,8 @@ async def download_template(entity: str, _: dict = Depends(get_current_user)):
 
 
 @api.get("/uploads/export/{entity}")
-async def export_master(entity: str, _: dict = Depends(get_current_user)):
+async def export_master(entity: str, user: dict = Depends(get_current_user)):
+    await check_upload_entity(user, entity, "view")
     if entity not in SCHEMAS:
         raise HTTPException(404, "Unknown entity")
     coll_map = {
@@ -1803,6 +1802,7 @@ async def export_master(entity: str, _: dict = Depends(get_current_user)):
 
 @api.post("/uploads/{entity}")
 async def upload_excel(entity: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    await check_upload_entity(user, entity, "edit")
     if entity not in SCHEMAS:
         raise HTTPException(404, "Unknown entity")
     contents = await file.read()
@@ -1856,7 +1856,7 @@ async def upload_excel(entity: str, file: UploadFile = File(...), user: dict = D
 
 
 @api.get("/uploads/logs", response_model=List[UploadLogOut])
-async def upload_logs(_: dict = Depends(get_current_user)):
+async def upload_logs(_: dict = Depends(require_role("admin"))):
     return await db.upload_logs.find({}, {"_id": 0}).sort("uploaded_at", -1).to_list(200)
 
 
@@ -1866,7 +1866,7 @@ async def project_sap_upload(
     pid: str,
     kind: str = Query(..., regex="^(revenue|cost)$"),
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("projects", "edit")),
 ):
     """Import revenue OR cost lines from the unified SAP workbook for a single
     project. Rows are matched to the project's WBS Element (or any prefix of it)
@@ -1926,7 +1926,7 @@ async def project_sap_upload(
 
 
 @api.get("/projects/{pid}/sap-last-import")
-async def project_sap_last_import(pid: str, kind: str = Query(..., regex="^(revenue|cost)$"), _: dict = Depends(get_current_user)):
+async def project_sap_last_import(pid: str, kind: str = Query(..., regex="^(revenue|cost)$"), _: dict = Depends(require_section("projects"))):
     """Most recent SAP import batch for this project+kind (used to show the
     'Undo last import' chip)."""
     log = await db.upload_logs.find_one(
@@ -1955,7 +1955,7 @@ async def project_sap_last_import(pid: str, kind: str = Query(..., regex="^(reve
 
 
 @api.post("/projects/{pid}/sap-undo-last")
-async def project_sap_undo_last(pid: str, kind: str = Query(..., regex="^(revenue|cost)$"), user: dict = Depends(get_current_user)):
+async def project_sap_undo_last(pid: str, kind: str = Query(..., regex="^(revenue|cost)$"), user: dict = Depends(require_section("projects", "edit"))):
     """Reverse the most recent SAP import batch for this project+kind."""
     project = await db.projects.find_one({"id": pid}, {"_id": 0})
     if not project:
@@ -1993,13 +1993,13 @@ class ReplyCreate(_BM):
 
 
 @api.get("/projects/{pid}/queries")
-async def list_queries(pid: str, _: dict = Depends(get_current_user)):
+async def list_queries(pid: str, _: dict = Depends(require_section("projects"))):
     rows = await db.finance_queries.find({"project_id": pid}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return rows
 
 
 @api.post("/projects/{pid}/queries")
-async def create_query(pid: str, payload: QueryCreate, user: dict = Depends(get_current_user)):
+async def create_query(pid: str, payload: QueryCreate, user: dict = Depends(require_section("projects", "edit"))):
     project = await db.projects.find_one({"id": pid}, {"_id": 0})
     if not project:
         raise HTTPException(404, "Project not found")
@@ -2024,7 +2024,7 @@ async def create_query(pid: str, payload: QueryCreate, user: dict = Depends(get_
 
 
 @api.post("/queries/{qid}/replies")
-async def reply_query(qid: str, payload: ReplyCreate, user: dict = Depends(get_current_user)):
+async def reply_query(qid: str, payload: ReplyCreate, user: dict = Depends(require_section("projects", "edit"))):
     q = await db.finance_queries.find_one({"id": qid})
     if not q:
         raise HTTPException(404, "Not found")
@@ -2045,7 +2045,7 @@ async def reply_query(qid: str, payload: ReplyCreate, user: dict = Depends(get_c
 
 @api.patch("/queries/{qid}/status")
 async def set_query_status(qid: str, status: str = Query(..., regex="^(Open|Closed)$"),
-                            user: dict = Depends(get_current_user)):
+                            user: dict = Depends(require_section("projects", "edit"))):
     q = await db.finance_queries.find_one({"id": qid})
     if not q:
         raise HTTPException(404, "Not found")
@@ -2059,7 +2059,7 @@ async def set_query_status(qid: str, status: str = Query(..., regex="^(Open|Clos
 # CUSTOMER PROFILE
 # ============================================================
 @api.get("/customers/{cid}/profile")
-async def customer_profile(cid: str, _: dict = Depends(get_current_user)):
+async def customer_profile(cid: str, _: dict = Depends(require_section("customer_profile"))):
     cust = await db.customers.find_one({"id": cid}, {"_id": 0})
     if not cust:
         raise HTTPException(404, "Customer not found")
@@ -2137,7 +2137,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @api.get("/projects/{pid}/documents")
-async def list_documents(pid: str, _: dict = Depends(get_current_user)):
+async def list_documents(pid: str, _: dict = Depends(require_section("projects"))):
     docs = await db.documents.find({"project_id": pid}, {"_id": 0, "storage_path": 0}).sort("uploaded_at", -1).to_list(500)
     return docs
 
@@ -2149,7 +2149,7 @@ async def upload_document(
     name: str = Query(..., min_length=1, description="Document display name (required)"),
     parse: bool = Query(False),
     apply_extracted: bool = Query(False),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("projects", "edit")),
 ):
     project = await db.projects.find_one({"id": pid}, {"_id": 0})
     if not project:
@@ -2216,7 +2216,7 @@ async def upload_document(
 
 
 @api.get("/documents/{did}/download")
-async def download_document(did: str, _: dict = Depends(get_current_user)):
+async def download_document(did: str, _: dict = Depends(require_section("projects"))):
     d = await db.documents.find_one({"id": did})
     if not d:
         raise HTTPException(404, "Not found")
@@ -2231,7 +2231,7 @@ async def download_document(did: str, _: dict = Depends(get_current_user)):
 
 
 @api.delete("/documents/{did}")
-async def delete_document(did: str, user: dict = Depends(get_current_user)):
+async def delete_document(did: str, user: dict = Depends(require_section("projects", "edit"))):
     d = await db.documents.find_one({"id": did})
     if not d:
         raise HTTPException(404, "Not found")
@@ -2252,7 +2252,7 @@ async def list_pipeline(
     stage: Optional[str] = None,
     outcome: Optional[str] = None,
     search: Optional[str] = None,
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_section("pipeline")),
 ):
     q: Dict[str, Any] = {}
     if stage:
@@ -2270,7 +2270,7 @@ async def list_pipeline(
 
 
 @api.get("/pipeline/summary")
-async def pipeline_summary(_: dict = Depends(get_current_user)):
+async def pipeline_summary(_: dict = Depends(require_section("pipeline"))):
     rows = await db.pipelines.find({}, {"_id": 0}).to_list(2000)
     by_stage = {s: {"count": 0, "value": 0.0} for s in PIPELINE_STAGES}
     total_value = 0.0
@@ -2298,7 +2298,7 @@ async def pipeline_summary(_: dict = Depends(get_current_user)):
 
 
 @api.get("/pipeline/{pid}", response_model=PipelineOut)
-async def get_pipeline(pid: str, _: dict = Depends(get_current_user)):
+async def get_pipeline(pid: str, _: dict = Depends(require_section(("pipeline", "projects")))):
     row = await db.pipelines.find_one({"id": pid}, {"_id": 0})
     if not row:
         raise HTTPException(404, "Opportunity not found")
@@ -2306,7 +2306,7 @@ async def get_pipeline(pid: str, _: dict = Depends(get_current_user)):
 
 
 @api.post("/pipeline", response_model=PipelineOut)
-async def create_pipeline(payload: PipelineIn, user: dict = Depends(get_current_user)):
+async def create_pipeline(payload: PipelineIn, user: dict = Depends(require_section("pipeline", "edit"))):
     doc = payload.model_dump()
     doc["id"] = gen_id()
     # Auto-generate opportunity_id (e.g. OPP-2026-000123)
@@ -2333,7 +2333,7 @@ async def create_pipeline(payload: PipelineIn, user: dict = Depends(get_current_
 
 
 @api.put("/pipeline/{pid}", response_model=PipelineOut)
-async def update_pipeline(pid: str, payload: PipelineIn, user: dict = Depends(get_current_user)):
+async def update_pipeline(pid: str, payload: PipelineIn, user: dict = Depends(require_section("pipeline", "edit"))):
     existing = await db.pipelines.find_one({"id": pid})
     if not existing:
         raise HTTPException(404, "Opportunity not found")
@@ -2345,7 +2345,7 @@ async def update_pipeline(pid: str, payload: PipelineIn, user: dict = Depends(ge
 
 
 @api.post("/pipeline/{pid}/advance", response_model=PipelineOut)
-async def advance_pipeline(pid: str, payload: PipelineStageIn, user: dict = Depends(get_current_user)):
+async def advance_pipeline(pid: str, payload: PipelineStageIn, user: dict = Depends(require_section("pipeline", "edit"))):
     existing = await db.pipelines.find_one({"id": pid})
     if not existing:
         raise HTTPException(404, "Opportunity not found")
@@ -2364,7 +2364,7 @@ async def close_pipeline(
     pid: str,
     outcome: str = Query(..., description="Won, Lost, or Deferred"),
     reason: Optional[str] = Query("", description="Win/Loss/Deferred reason"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("pipeline", "edit")),
 ):
     if outcome not in ("Won", "Lost", "Deferred"):
         raise HTTPException(400, "outcome must be 'Won', 'Lost', or 'Deferred'")
@@ -2701,7 +2701,7 @@ async def list_change_requests(
     airport: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("change_requests")),
 ):
     q: Dict[str, Any] = {}
     if status:
@@ -2722,7 +2722,7 @@ async def list_change_requests(
 async def cr_metrics(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("change_requests")),
 ):
     q: Dict[str, Any] = {}
     if date_from:
@@ -2761,11 +2761,14 @@ async def get_change_request(cid: str, user: dict = Depends(get_current_user)):
     doc = await db.change_requests.find_one({"id": cid}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Change request not found")
+    # the CR's approvers can open it from their approvals inbox without the Change Requests section
+    if (user.get("email") or "").lower() not in [e.lower() for e in (doc.get("approver_emails") or [])]:
+        await check_section(user, "change_requests")
     return await _enrich_cr(doc)
 
 
 @api.post("/change-requests", response_model=ChangeRequestOut)
-async def create_change_request(payload: ChangeRequestIn, user: dict = Depends(get_current_user)):
+async def create_change_request(payload: ChangeRequestIn, user: dict = Depends(require_section("change_requests", "edit"))):
     """Create a CR in DRAFT status. Submission happens via /submit endpoint."""
     doc = payload.model_dump()
     # Compute cost/margin and resolve approver
@@ -2789,7 +2792,7 @@ async def create_change_request(payload: ChangeRequestIn, user: dict = Depends(g
 
 
 @api.put("/change-requests/{cid}", response_model=ChangeRequestOut)
-async def update_change_request(cid: str, payload: ChangeRequestIn, user: dict = Depends(get_current_user)):
+async def update_change_request(cid: str, payload: ChangeRequestIn, user: dict = Depends(require_section("change_requests", "edit"))):
     existing = await db.change_requests.find_one({"id": cid})
     if not existing:
         raise HTTPException(404, "Not found")
@@ -2810,7 +2813,7 @@ async def update_change_request(cid: str, payload: ChangeRequestIn, user: dict =
 
 
 @api.post("/change-requests/{cid}/submit", response_model=ChangeRequestOut)
-async def submit_change_request(cid: str, user: dict = Depends(get_current_user)):
+async def submit_change_request(cid: str, user: dict = Depends(require_section("change_requests", "edit"))):
     existing = await db.change_requests.find_one({"id": cid})
     if not existing:
         raise HTTPException(404, "Not found")
@@ -2969,7 +2972,7 @@ async def delete_change_request(cid: str, user: dict = Depends(require_role("adm
 
 # ---------- CR Attachments ----------
 @api.get("/change-requests/{cid}/attachments", response_model=List[CRAttachmentOut])
-async def list_cr_attachments(cid: str, user: dict = Depends(get_current_user)):
+async def list_cr_attachments(cid: str, user: dict = Depends(require_section("change_requests"))):
     return await db.cr_attachments.find({"cr_id": cid}, {"_id": 0, "cr_id": 0}).sort("uploaded_at", -1).to_list(200)
 
 
@@ -2978,7 +2981,7 @@ async def upload_cr_attachment(
     cid: str,
     file: UploadFile = File(...),
     kind: str = Query("other", description="customer_po | vendor_cost | resource_cost | other"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_section("change_requests", "edit")),
 ):
     if kind not in ("customer_po", "vendor_cost", "resource_cost", "other"):
         raise HTTPException(400, "Invalid kind")
@@ -3007,7 +3010,7 @@ async def upload_cr_attachment(
 
 
 @api.get("/change-requests/{cid}/attachments/{att_id}")
-async def download_cr_attachment(cid: str, att_id: str, user: dict = Depends(get_current_user)):
+async def download_cr_attachment(cid: str, att_id: str, user: dict = Depends(require_section("change_requests"))):
     rec = await db.cr_attachments.find_one({"id": att_id, "cr_id": cid}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Attachment not found")
@@ -3020,7 +3023,7 @@ async def download_cr_attachment(cid: str, att_id: str, user: dict = Depends(get
 
 
 @api.delete("/change-requests/{cid}/attachments/{att_id}")
-async def delete_cr_attachment(cid: str, att_id: str, user: dict = Depends(get_current_user)):
+async def delete_cr_attachment(cid: str, att_id: str, user: dict = Depends(require_section("change_requests", "edit"))):
     rec = await db.cr_attachments.find_one({"id": att_id, "cr_id": cid}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Attachment not found")
