@@ -136,3 +136,19 @@ def test_budget_fx_rate():
     assert fx_rate(data, "GBP", ["FY28", "FY27"]) is None
     keys = [c["key"] for c in budget_input_columns("B28")]
     assert keys == ["b28_currency", "b28_qty", "b28_unit_price", "b28_fx", "B28__annual", "b28_dept_remarks", "b28_fin_remarks"]
+
+
+def test_wide_fy_layout():
+    from aop.datasets import widen_cute, widen_drivers, wide_columns, version_months, CUTE_LEAD
+    rows = widen_cute([{"airport": "DIAL", "pax_type": "Domestic", "fy": "FY26", "F26__2026-01": 5.0, "B26__total": 60.0},
+                       {"airport": "DIAL", "pax_type": "Domestic", "fy": "FY27", "B27__2026-04": 7.0}])
+    assert len(rows) == 1 and "fy" not in rows[0] and rows[0]["B27__2026-04"] == 7.0 and rows[0]["F26__2026-01"] == 5.0
+    keys = [c["key"] for c in wide_columns(rows, CUTE_LEAD)]
+    assert keys.index("B26__total") < keys.index("F26__2026-01") < keys.index("B27__2026-04")
+    d = widen_drivers([{"airport": "DIAL", "pax_type": "Domestic", "fy": "FY26", "metric": "PAX", "m01": 1},
+                       {"airport": "DIAL", "pax_type": "Domestic", "fy": "FY27", "metric": "PAX", "m01": 2},
+                       {"airport": "DIAL", "pax_type": "Domestic", "fy": "FY27", "metric": "PAX Actual", "m05": 3}], "FY26")
+    assert len(d) == 1 and d[0]["F26__2025-04"] == 1 and d[0]["B27__2026-04"] == 2 and d[0]["A27__2026-08"] == 3
+    assert version_months(d[0], "A27")[4] == 3 and version_months(d[0], "B28") is None
+    h = widen_drivers([{"airport": "DIAL", "pax_type": "Domestic", "fy": "FY24", "metric": "PAX", "m01": 9}], "FY26")
+    assert h[0]["A24__2023-04"] == 9

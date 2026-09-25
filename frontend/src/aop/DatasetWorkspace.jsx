@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/api";
 import {
   MagnifyingGlass, CaretLeft, CaretRight, Columns, UploadSimple, DownloadSimple, Trash, ArrowClockwise,
@@ -67,8 +67,9 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   useEffect(() => {
     if (groups === null && allGroups.length) {
       const plan = allGroups.filter(Boolean);
-      const want = focusVersion && plan.includes(focusVersion) ? focusVersion : plan[plan.length - 1];
-      setGroups(new Set(["", ...(want ? [want] : [])]));
+      // every FY side by side (each folds to one total column until 12M is switched on); the report data panel
+      // opens on the draft year's budget
+      setGroups(new Set(["", ...(focusVersion && plan.includes(focusVersion) ? [focusVersion] : plan)]));
     }
   }, [allGroups, groups, focusVersion]);
   const shown = useMemo(() => columns.filter((c) => !groups || groups.has(c.group || "")), [columns, groups]);
@@ -85,32 +86,85 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
 
   // a folded FY total (12M off) is editable when its months are: the value is phased evenly over the months
   const monthsOf = useCallback((v) => columns.filter((c) => isMonthCol(c) && c.key.startsWith(`${v}__`)), [columns]);
-  const canEdit = useCallback((c) => (c.virtual ? monthsOf(c.version).some((m) => admin || !!m.user_editable)
+  // actual months come from the single actual source and are never typed over
+  const canEdit = useCallback((c) => (c.actual ? false : c.virtual ? monthsOf(c.version).some((m) => !m.actual && (admin || !!m.user_editable))
     : admin || !!c.user_editable), [admin, monthsOf]);
   const downloadView = () => {
     csvDownload([visible.map((c) => c.label), ...filtered.map((r) => visible.map((c) => cellValue(r, c)))], `${dataset.key}_view.csv`);
   };
 
-  const onCommit = async (raw) => {
-    const edits = raw.flatMap((e) => {
-      const v = /^(.+)__sum$/.exec(e.field)?.[1];
-      if (!v) return [e];
-      const ms = monthsOf(v);
-      const n = e.value === null || e.value === "" ? null : Number(String(e.value).replace(/,/g, ""));
-      return ms.map((m) => ({ key: e.key, field: m.key, value: n === null || Number.isNaN(n) ? null : Math.round((n / ms.length) * 100) / 100 }));
-    });
+  // ---- background saving: edits show at once, are batched and saved behind the scenes; only the touched lines
+  // are re-read afterwards (to pick up server-side totals / phasing), never the whole dataset
+  const queue = useRef([]);
+  const timer = useRef(null);
+  const inFlight = useRef(false);
+  const changedCb = useRef(onChanged);
+  changedCb.current = onChanged;
+  const [saving, setSaving] = useState(0);
+  const colType = useMemo(() => Object.fromEntries(columns.map((c) => [c.key, c.type])), [columns]);
+  const asValue = (field, v) => {
+    if (v === null || v === undefined || v === "") return null;
+    if (!["number", "money", "percent"].includes(colType[field]) && !isMonthCol({ key: field })) return v;
+    const t = String(v).replace(/[,₹\s]/g, "");
+    const pct = t.endsWith("%");
+    const n = Number(t.replace(/%$/, "").replace(/^\((.*)\)$/, "-$1"));
+    return Number.isNaN(n) ? v : pct ? n / 100 : n;
+  };
+
+  const flush = useCallback(async () => {
+    if (inFlight.current || !queue.current.length) return;
+    inFlight.current = true;
+    const batch = Object.values(Object.fromEntries(queue.current.map((e) => [`${e.key}\u0001${e.field}`, e]))); // last edit wins
+    queue.current = [];
     try {
-      const { data } = await api.patch(`/aop/datasets/${dataset.key}/rows`, edits);
+      const { data } = await api.patch(`/aop/datasets/${dataset.key}/rows`, batch);
       const parts = [];
       if (data.applied) parts.push(`${data.applied} saved`);
       if (data.queued) parts.push(`${data.queued} sent for approval`);
       if (data.rejected?.length) parts.push(`${data.rejected.length} not allowed (${data.rejected[0].reason})`);
       setMsg({ tone: data.rejected?.length ? "warn" : "ok", text: parts.join(" · ") || "No change" });
-      await load();
-      onChanged?.();
+      const keys = [...new Set(batch.map((e) => e.key))];
+      if (!queue.current.some((e) => keys.includes(e.key))) { // don't overwrite lines the user is still editing
+        const { data: fresh } = await api.get(`/aop/datasets/${dataset.key}/rows`, { params: { keys: keys.join("\u0001"), limit: keys.length } });
+        const byKey = Object.fromEntries(fresh.rows.map((r) => [r.key, r]));
+        setRows((rs) => rs.map((r) => byKey[r.key] || r));
+      }
+      changedCb.current?.();
     } catch (e) {
-      setMsg({ tone: "err", text: e.response?.data?.detail || e.message });
+      queue.current = [...batch, ...queue.current]; // keep the edits; they go with the next save
+      setMsg({ tone: "err", text: `Not saved yet — ${e.response?.data?.detail || e.message}. Retrying…` });
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => flush(), 4000);
+    } finally {
+      inFlight.current = false;
+      setSaving(queue.current.length);
+      if (queue.current.length) { clearTimeout(timer.current); timer.current = setTimeout(() => flush(), 300); }
     }
+  }, [dataset.key]);
+
+  useEffect(() => {
+    const warn = (e) => { if (queue.current.length || inFlight.current) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => { window.removeEventListener("beforeunload", warn); clearTimeout(timer.current); flush(); };
+  }, [flush]);
+
+  const onCommit = (raw) => {
+    const edits = raw.flatMap((e) => {
+      const v = /^(.+)__sum$/.exec(e.field)?.[1];
+      if (!v) return [{ ...e, value: asValue(e.field, e.value) }];
+      const ms = monthsOf(v);
+      const n = asValue(`${v}__2000-01`, e.value);
+      return ms.map((m) => ({ key: e.key, field: m.key, value: typeof n === "number" ? Math.round((n / ms.length) * 100) / 100 : null }));
+    });
+    if (!edits.length) return;
+    // show the new values straight away
+    const byKey = {};
+    edits.forEach((e) => { (byKey[e.key] = byKey[e.key] || {})[e.field] = e.value; });
+    setRows((rs) => rs.map((r) => (byKey[r.key] ? { ...r, fields: { ...r.fields, ...byKey[r.key] } } : r)));
+    queue.current.push(...edits);
+    setSaving(queue.current.length);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => flush(), 600);
   };
 
   const doDownload = async (fmt) => {
@@ -176,6 +230,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
         )}
         {admin && <span className="flex items-center gap-1"><ClipboardText size={12} /> Admin: every cell is editable · paste blocks from Excel · Ctrl+C copies selection</span>}
         <span className="flex items-center gap-1"><HourglassMedium size={11} className="text-[var(--warning)]" /> pending approval</span>
+        {saving > 0 && <span className="flex items-center gap-1 text-[var(--gold)]" data-testid="ds-saving"><HourglassMedium size={11} />Saving {saving} change{saving > 1 ? "s" : ""} in the background…</span>}
         {msg && (
           <span className={`flex items-center gap-1 ml-auto ${msg.tone === "err" ? "text-[var(--danger)]" : msg.tone === "warn" ? "text-[var(--warning)]" : "text-[var(--success)]"}`}>
             {msg.tone === "ok" ? <CheckCircle size={12} /> : <WarningCircle size={12} />}{String(msg.text)}

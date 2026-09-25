@@ -13,7 +13,7 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional
 
-from .datasets import norm, vkey
+from .datasets import norm, version_months, vkey
 from .mis import MEASURES, N, OH_BLOCKS, Vec, engines, measure_labels, measures_of, months_meta, vsum, zero
 from .actuals_import import OPEX_CATEGORIES, opex_category
 from .periods import fy_months
@@ -261,17 +261,15 @@ def cute_analysis(data, actuals, cfg, flt: Filters) -> Dict[str, Any]:
     def ok(a):
         return flt.tag_ok(a)
 
-    for r in data.get("rev_cute", []):
-        a, t, fy = r.get("airport"), r.get("pax_type") or "Combined", r.get("fy")
+    for r in data.get("rev_cute", []):  # one line per airport / passenger type, each FY in its own columns
+        a, t = r.get("airport"), r.get("pax_type") or "Combined"
         if not ok(a):
             continue
-        if fy == plan:
-            for p in pm_:
-                rev[(a, t)]["b_plan"][p] += _n(r.get(vkey(B, p)))
-        if fy == base:
-            for p in bm:
-                if p not in cut_b:
-                    rev[(a, t)]["a_base"][p] += _n(r.get(vkey(F, p)))
+        for p in pm_:
+            rev[(a, t)]["b_plan"][p] += _n(r.get(vkey(B, p)))
+        for p in bm:
+            if p not in cut_b:
+                rev[(a, t)]["a_base"][p] += _n(r.get(vkey(F, p)))
     for x in actuals:
         if x["domain"] != "rev_cute":
             continue
@@ -284,16 +282,17 @@ def cute_analysis(data, actuals, cfg, flt: Filters) -> Dict[str, Any]:
         elif x["period"] in act_p:
             rev[(a, t)]["af_plan"][x["period"]] += x["amount"]
     for r in data.get("rev_cute_drivers", []):
-        a, t, fy, metric = r.get("airport"), r.get("pax_type") or "Combined", r.get("fy"), norm(r.get("metric"))
+        a, t, metric = r.get("airport"), r.get("pax_type") or "Combined", norm(r.get("metric"))
         if not ok(a):
             continue
-        vals = [_n(r.get(f"m{i:02d}")) for i in range(1, 13)]
         target = pax if "pax" in metric else rate if "rate" in metric else None
         if target is None:
             continue
-        m = ("af_plan" if fy == plan else "a_base") if "actual" in metric else ("b_plan" if fy == plan else "a_base" if fy == base else None)
-        if m:
-            target[(a, t)][m] = vals
+        # the base year's actual (else its forecast), the plan year's budget and actual
+        for m, vers in (("a_base", ("A" + base[2:], "F" + base[2:])), ("b_plan", (B,)), ("af_plan", ("A" + plan[2:],))):
+            vals = next((v for v in (version_months(r, x) for x in vers) if v), None)
+            if vals:
+                target[(a, t)][m] = vals
 
     def months_of(m):
         return bm if m == "a_base" else pm_

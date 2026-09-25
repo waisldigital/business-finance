@@ -25,12 +25,13 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 import openpyxl
 
-from .datasets import ACTUALS, AOP_SECTIONS, SPECS, build_key, coerce, column, norm, slug
+from .datasets import (ACTUALS, AOP_SECTIONS, CUTE_LEAD, DRIVER_LEAD, SPECS, VERSION_KEY, build_key, coerce, column, norm,
+                       slug, wide_columns, widen_cute, widen_drivers)
 from .importer import Result, import_aop_workbook, import_opex_workbook
 from .actuals_import import (import_mis_working, import_project_health, import_reporting_package, import_resource_cost,
                              pax_driver_key)
 from .periods import shift_fy
-from .periods import fy_months
+from .periods import fy_months, fy_of_period as fy_of, period_label
 from .opex import INPUT_FIELDS as TRACKER_INPUTS, forecast_line
 from .plan import build_draft, default_drivers
 from . import reports as rep
@@ -92,6 +93,21 @@ def fx_rate(data: Dict[str, List[Dict[str, Any]]], currency: Any, fys: List[str]
     return None
 
 
+# datasets whose lines show their booked actuals (read-only A<yy> months from the single actual source)
+def _cute_match(f: Dict[str, Any], d: Dict[str, Any]) -> int:
+    if norm(d.get("tag")) != norm(f.get("airport")):
+        return 0
+    return 2 if norm(d.get("pax_type") or "combined") == norm(f.get("pax_type") or "combined") else 1
+
+
+def _noncute_match(f: Dict[str, Any], d: Dict[str, Any]) -> int:
+    ok = norm(d.get("stream")) == norm(f.get("stream")) and norm(d.get("tag")) == norm(f.get("location") or f.get("tag"))
+    return 2 if ok else 0
+
+
+ACTUAL_LINKS = {"rev_cute": (["rev_cute"], _cute_match), "rev_noncute": (["rev_noncute", "rev_share"], _noncute_match)}
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -102,6 +118,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
 
     # ------------------------------------------------------------------ access
     async def perms_for(user: dict) -> Dict[str, Any]:
+        if not cache.get("wide"):
+            await get_config()  # runs the one-time data-layout migration before anything reads the rows
         if user.get("role") == "admin":
             return {"admin": True, "sections": {s: {"can_view": True, "can_edit": True, "can_upload": True} for s in AOP_SECTIONS},
                     "tags": [], "departments": None, "dept_scope": "all"}
@@ -158,7 +176,40 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             cfg.pop("_id", None)
         for k, v in DEFAULT_CONFIG.items():
             cfg.setdefault(k, v)
+        if not cache.get("wide") and not cfg.get("wide_fy_layout"):
+            cache["wide"] = True
+            await migrate_wide(cfg)
+            cfg["wide_fy_layout"] = True
         return cfg
+
+    async def migrate_wide(cfg: Dict[str, Any]):
+        """One-time: CUTE revenue / drivers stored one line per FY → one line per airport (and metric), FY in columns."""
+        for ds, widen, lead, editable in (("rev_cute", widen_cute, CUTE_LEAD, False),
+                                          ("rev_cute_drivers", lambda rs: widen_drivers(rs, cfg["base_fy"]), DRIVER_LEAD, True)):
+            docs = [d async for d in db.aop_rows.find({"dataset": ds}, {"_id": 0}).sort("seq", 1)]
+            if not any("fy" in (d.get("fields") or {}) for d in docs):
+                continue
+            wide = widen([d.get("fields") or {} for d in docs])
+            await db.aop_rows.delete_many({"dataset": ds})
+            spec = SPECS[ds]
+            new = [{"dataset": ds, "key": build_key(spec, f), "seq": i, "fields": f, "updated_at": now_iso(), "updated_by": "migration"}
+                   for i, f in enumerate(wide, start=1)]
+            if new:
+                await db.aop_rows.insert_many(new)
+            await db.aop_dataset_meta.update_one({"dataset": ds}, {"$set": {"columns": wide_columns(wide, lead, editable),
+                                                                            "updated_at": now_iso()}}, upsert=True)
+        await db.aop_config.update_one({"id": "aop"}, {"$set": {"wide_fy_layout": True}}, upsert=True)
+        await db.aop_config.update_one({"id": "aop"}, {"$inc": {"data_version": 1}})
+
+    async def refresh_wide_meta(ds: str):
+        """Add version columns that rows carry but the column list doesn't (e.g. actual PAX months from a package)."""
+        lead, editable = (DRIVER_LEAD, True) if ds == "rev_cute_drivers" else (CUTE_LEAD, False)
+        rows = [d.get("fields") or {} async for d in db.aop_rows.find({"dataset": ds}, {"_id": 0, "fields": 1})]
+        stored = {c["key"]: c for c in await columns_for(ds)}
+        fresh = wide_columns(rows, lead, editable)
+        keys = [c["key"] for c in fresh] + [k for k in stored if k not in {c["key"] for c in fresh}]
+        cols = [stored.get(k) or next(c for c in fresh if c["key"] == k) for k in keys]
+        await db.aop_dataset_meta.update_one({"dataset": ds}, {"$set": {"columns": cols, "updated_at": now_iso()}}, upsert=True)
 
     async def bump_version():
         await db.aop_config.update_one({"id": "aop"}, {"$inc": {"data_version": 1}}, upsert=True)
@@ -205,15 +256,55 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if dataset in BUDGET_INPUT_DATASETS:
             extra += [c for c in budget_input_columns(T) if c["key"] not in have]
         if monthly:
-            extra += [column(f"{T}__{q}", f"{T} {q}", "number", editable=True, group=T)
+            extra += [column(f"{T}__{q}", f"{T} {period_label(q)}", "number", editable=True, group=T)
                       for q in fy_months("FY" + T[1:]) if f"{T}__{q}" not in have]
+        booked = await actual_months(dataset)
+        if booked:  # read-only actual months, placed before the first column of a later version
+            have_now = {c["key"] for c in cols + extra}
+            acts = [column(f"A{fy_of(p)[2:]}__{p}", f"A{fy_of(p)[2:]} {period_label(p)}", "number", group=f"A{fy_of(p)[2:]}") | {"actual": True}
+                    for p in booked if f"A{fy_of(p)[2:]}__{p}" not in have_now]
+            for a in acts:
+                yy = int(a["group"][1:])
+                allc = cols
+                pos = next((i for i, c in enumerate(allc) if VERSION_KEY.match(c["key"]) and
+                            (int(VERSION_KEY.match(c["key"]).group(1)[1:3]) > yy or
+                             (int(VERSION_KEY.match(c["key"]).group(1)[1:3]) == yy and c["key"][0] == "F"))), len(allc))
+                cols = allc[:pos] + [a] + allc[pos:]
         admin_only = {f"{T.lower()}_fin_remarks", f"{T.lower()}_fx"}
         out = []
         for c in cols + extra:
+            if c.get("actual"):
+                out.append(c)
+                continue
             if (c["key"].startswith(f"{T}__") or c["key"] in BUDGET_KEYS(T)) and c["key"] not in admin_only and not c.get("user_editable"):
                 c = {**c, "user_editable": True}
             out.append(c)
         return out
+
+    async def actual_months(dataset: str, docs: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+        """Booked months (base and plan year) behind a dataset's lines; with docs, adds A<yy>__<month> to each line's fields.
+        An actual goes to the line that matches it best (same airport and passenger type, else the airport's line)."""
+        if dataset not in ACTUAL_LINKS:
+            return []
+        cfg = await get_config()
+        domains, match = ACTUAL_LINKS[dataset]
+        months = fy_months(cfg["base_fy"]) + fy_months(cfg["plan_fy"])
+        acts = [a async for a in db.aop_actuals.find({"domain": {"$in": domains}, "period": {"$in": months}},
+                                                     {"_id": 0, "period": 1, "amount": 1, "dims": 1})]
+        if docs is not None:
+            for a in acts:
+                d = a.get("dims") or {}
+                best, score = None, 0
+                for doc in docs:
+                    sc = match(doc.get("fields") or {}, d)
+                    if sc > score:
+                        best, score = doc, sc
+                        if sc == 2:
+                            break
+                if best is not None:
+                    k = f"A{fy_of(a['period'])[2:]}__{a['period']}"
+                    best["fields"][k] = round((best["fields"].get(k) or 0) + float(a.get("amount") or 0), 2)
+        return sorted({a["period"] for a in acts})
 
     def ensure_ds(dataset: str):
         if dataset != ACTUALS and dataset not in SPECS:
@@ -453,13 +544,15 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
 
     @r.get("/datasets/{dataset}/rows")
     async def rows(dataset: str, q: Optional[str] = None, limit: int = Query(200, le=5000), offset: int = 0,
-                   filter_field: Optional[str] = None, filter_value: Optional[str] = None,
+                   filter_field: Optional[str] = None, filter_value: Optional[str] = None, keys: Optional[str] = None,
                    user: dict = Depends(get_current_user)):
         ensure_ds(dataset)
         if not await can(user, dataset):
             raise HTTPException(403, "Not allowed")
         filters = {filter_field: filter_value} if filter_field else {}
         mq = match_query(dataset, q, filters)
+        if keys:  # just these lines (the grid re-reads what it saved)
+            mq["uid" if dataset == ACTUALS else "key"] = {"$in": [k for k in keys.split("\x01") if k]}
         p = await perms_for(user)
         if dataset == ACTUALS:
             total = await db.aop_actuals.count_documents(mq)
@@ -485,6 +578,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         for d in docs:
             if d["key"] in pending:
                 d["pending"] = pending[d["key"]]
+        if dataset in ACTUAL_LINKS and docs:
+            await actual_months(dataset, docs)
         return {"total": total, "rows": docs}
 
     @r.patch("/datasets/{dataset}/rows")
@@ -505,8 +600,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         for e in edits[:5000]:
             key, fld = str(e.get("key") or ""), str(e.get("field") or "")
             col = cols.get(fld)
-            if not col:
-                rejected.append({"key": key, "field": fld, "reason": "unknown column"}); continue
+            if not col or col.get("actual"):
+                rejected.append({"key": key, "field": fld, "reason": "unknown column" if not col else "actuals come from the actual source"}); continue
             if not p["admin"] and not col.get("user_editable"):
                 rejected.append({"key": key, "field": fld, "reason": "column is not editable"}); continue
             if spec and fld in spec.key_fields:
@@ -588,7 +683,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         for i, raw in enumerate(incoming, start=2):
             fields = {}
             for k, v in raw.items():
-                if k in ("key", "_key"):
+                if k in ("key", "_key") or (cols.get(k) or {}).get("actual"):
                     continue
                 col = cols.get(k)
                 fields[k] = coerce(col["type"], v) if col else (v if v != "" else None)
@@ -732,7 +827,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if not (await can(user, dataset, "upload") or (dataset != ACTUALS and await can(user, dataset, "view"))):
             raise HTTPException(403, "Not allowed")
         ensure_ds(dataset)
-        cols = [c for c in await columns_with_draft(dataset)]
+        cols = [c for c in await columns_with_draft(dataset) if not c.get("actual")]
         spec = SPECS.get(dataset)
         if spec and spec.auto_prefix and "line_id" not in {c["key"] for c in cols}:
             cols = [column("line_id", "line_id")] + cols
@@ -917,6 +1012,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             await db.aop_rows.update_one({"dataset": "rev_cute_drivers", "key": key},
                                          {"$set": {"fields": fields, "updated_at": now_iso(), "updated_by": user.get("email")},
                                           "$setOnInsert": {"seq": 9000}}, upsert=True)
+        if pax:
+            await refresh_wide_meta("rev_cute_drivers")
         if res.datasets:
             await write_result(res, user)
         await bump_version()

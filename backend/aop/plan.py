@@ -82,24 +82,13 @@ def build_draft(rows: Dict[str, List[Tuple[str, Dict[str, Any]]]], actuals: List
     d = Draft(src_fy, target_fy, overwrite)
     g = drivers
 
-    # ---- CUTE: one new row per airport / passenger type for the target year
+    # ---- CUTE: the target year's months on the same airport / passenger-type line
     cute_by_loc: Dict[str, Tuple[float, float]] = defaultdict(lambda: (0.0, 0.0))
-    existing = {k for k, _ in rows.get("rev_cute", [])}
     for key, r in rows.get("rev_cute", []):
-        if r.get("fy") != src_fy:
+        if r.get("fy") not in (None, src_fy) or not any(vkey(d.SB, p) in r or vkey(d.S, p) in r for p, _ in d.pairs):
             continue
         src_total = sum(d.source(r, p) for p, _ in d.pairs)
-        new = {k: r.get(k) for k in ("airport", "pax_type", "stream", "geo", "tag")}
-        new["fy"] = target_fy
-        new.update({vkey(d.T, q): round(d.source(r, p) * (1 + g["cute_growth"]), 2) for p, q in d.pairs})
-        nkey = f"{new['airport']}|{new['pax_type']}|{target_fy}"
-        if nkey in existing:
-            if overwrite:
-                d.updates["rev_cute"][nkey] = {k: v for k, v in new.items() if k.startswith(d.T)}
-                d.counts["rev_cute"] += 1
-        else:
-            d.new_rows["rev_cute"].append(new)
-            d.counts["rev_cute"] += 1
+        d.set_months("rev_cute", key, r, 1 + g["cute_growth"])
         a, b = cute_by_loc[norm(r.get("airport"))]
         cute_by_loc[norm(r.get("airport"))] = (a + src_total, b + src_total * (1 + g["cute_growth"]))
 

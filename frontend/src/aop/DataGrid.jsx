@@ -20,7 +20,6 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
   const [active, setActive] = useState({ r: 0, c: 0 });
   const [anchor, setAnchor] = useState(null);
   const [editing, setEditing] = useState(null); // {r, c, value}
-  const [busy, setBusy] = useState(false);
   const wrapRef = useRef(null);
   const dragging = useRef(false);
 
@@ -37,11 +36,11 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
   const value = (r, c) => rows[r]?.fields?.[cols[c]?.key];
   const editable = useCallback((c) => !!cols[c] && canEdit(cols[c]), [cols, canEdit]);
 
-  const commit = useCallback(async (edits) => {
+  // edits are handed over and saved in the background — the grid never waits, so typing stays smooth
+  const commit = useCallback((edits) => {
     const ok = edits.filter((e) => e.field && e.key);
     if (!ok.length || !onCommit) return;
-    setBusy(true);
-    try { await onCommit(ok); } finally { setBusy(false); }
+    onCommit(ok);
   }, [onCommit]);
 
   const move = (dr, dc, extend) => {
@@ -64,12 +63,12 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
     setEditing({ r: active.r, c: active.c, value: initial !== undefined ? initial : (cur ?? "") });
   };
 
-  const finishEdit = async (dr = 0, dc = 0) => {
+  const finishEdit = (dr = 0, dc = 0) => {
     if (!editing) return;
     const { r, c, value: v } = editing;
     setEditing(null);
     const old = value(r, c);
-    if (String(old ?? "") !== String(v ?? "")) await commit([{ key: rows[r].key, field: cols[c].key, value: v }]);
+    if (String(old ?? "") !== String(v ?? "")) commit([{ key: rows[r].key, field: cols[c].key, value: v }]);
     wrapRef.current?.focus({ preventScroll: true });
     if (dr || dc) move(dr, dc, false);
   };
@@ -106,7 +105,7 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
     e.preventDefault();
   };
 
-  const onPaste = async (e) => {
+  const onPaste = (e) => {
     if (editing) return;
     e.preventDefault();
     const matrix = parseTSV(e.clipboardData.getData("text/plain"));
@@ -124,14 +123,13 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
       setAnchor({ r: active.r, c: active.c });
       setActive({ r: Math.min(rows.length - 1, active.r + matrix.length - 1), c: Math.min(cols.length - 1, active.c + Math.max(...matrix.map((l) => l.length)) - 1) });
     }
-    await commit(edits);
+    commit(edits);
   };
 
   const allSelected = selectable && rows.length > 0 && rows.every((r) => selected?.has(r.key));
 
   return (
     <div className="relative border border-[var(--border)] bg-[var(--surface)]" data-testid={testid}>
-      {busy && <div className="absolute top-1 right-2 z-30 text-[10px] tracking-overline text-[var(--gold)]">Saving…</div>}
       <div
         ref={wrapRef}
         tabIndex={0}

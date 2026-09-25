@@ -308,8 +308,6 @@ def import_reporting_package(path, plan_fy: str) -> Result:
                         if str(flags[i] or "").strip().lower() == "act" and to_period(dates[i])
                         and fy_of_period(to_period(dates[i])) == plan_fy]
             months = {p: j for j, p in enumerate(sorted({p for _, p in act_cols}), start=1)}
-            from .periods import fy_months
-            idx = {p: j for j, p in enumerate(fy_months(plan_fy), start=1)}
             for r in rows[sb + 3:]:
                 loc, typ = txt(r[1]), txt(r[2])
                 if not loc or not typ:
@@ -318,9 +316,9 @@ def import_reporting_package(path, plan_fy: str) -> Result:
                     continue
                 if typ == "Combined":
                     continue
-                f = {"airport": loc, "pax_type": typ, "fy": plan_fy, "metric": "PAX Actual"}
+                f = {"airport": loc, "pax_type": typ, "metric": "PAX"}  # actual PAX = the A<yy> months of the PAX line
                 for i, p in act_cols:
-                    f[f"m{idx[p]:02d}"] = num(r[i])
+                    f[f"A{plan_fy[2:]}__{p}"] = num(r[i])
                 pax_rows.append(f)
             res.meta["pax_months"] = sorted(months)
     cap_rows: List[Dict[str, Any]] = []
@@ -382,4 +380,4 @@ def import_project_health(path) -> Dict[str, Dict[str, Any]]:
 
 
 def pax_driver_key(f: Dict[str, Any]) -> str:
-    return re.sub(r"\s+", " ", f"{f['airport']}|{f['pax_type']}|{f['fy']}|{f['metric']}")
+    return re.sub(r"\s+", " ", f"{f['airport']}|{f['pax_type']}|{f['metric']}")

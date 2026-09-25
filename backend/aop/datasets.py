@@ -53,13 +53,14 @@ class DatasetSpec:
 SPECS: Dict[str, DatasetSpec] = {s.key: s for s in [
     # ---------- Revenue ----------
     DatasetSpec("rev_cute", "CUTE revenue", "aop_revenue", "Revenue",
-                key_fields=["airport", "pax_type", "fy"],
-                description="CUTE revenue per airport / passenger type (PAX × rate).",
+                key_fields=["airport", "pax_type"],
+                description="CUTE revenue per airport / passenger type (PAX × rate) — one line, every FY in columns.",
                 versions=["F26", "B27", "B28"]),
     DatasetSpec("rev_cute_drivers", "CUTE drivers (PAX & rate)", "aop_revenue", "Revenue",
-                key_fields=["airport", "pax_type", "fy", "metric"],
-                description="Monthly PAX counts and rate per PAX that drive CUTE revenue.",
-                versions=["A", "F26", "B27", "B28"]),
+                key_fields=["airport", "pax_type", "metric"],
+                description="Monthly PAX and rate per PAX by airport — one line per metric, every FY in columns "
+                            "(A = actual, F = forecast, B = budget).",
+                versions=["A27", "F26", "B27", "B28"]),
     DatasetSpec("rev_noncute", "Non-CUTE & revenue share", "aop_revenue", "Revenue",
                 key_fields=["stream", "location"],
                 description="Non-CUTE revenue by location and the airport revenue-share cost.",
@@ -185,3 +186,99 @@ def column(key: str, label: str, ctype: str = "text", *, editable: bool = False,
            width: Optional[int] = None, hidden: bool = False) -> Dict[str, Any]:
     return {"key": key, "label": label, "type": ctype, "user_editable": editable, "group": group,
             "width": width, "hidden": hidden, "custom": False}
+
+
+# ---------------------------------------------------------------------------------------------- wide FY layout
+# CUTE revenue and drivers keep one line per airport / passenger type (and metric); each FY is a set of monthly
+# columns keyed by version (A = actual, F = forecast, B = budget), e.g. F26__2026-01, B27__2026-04, A27__2026-05.
+VERSION_KEY = re.compile(r"^([ABF]\d{2}[AT]?)__(\d{4}-\d{2}|total|annual)$")
+
+
+def _fy_months(fy: str) -> List[str]:
+    y = 2000 + int(fy[2:])
+    return [f"{y - 1}-{m:02d}" for m in range(4, 13)] + [f"{y}-{m:02d}" for m in range(1, 4)]
+
+
+def driver_metric(metric: Any) -> str:
+    m = str(metric or "").strip()
+    return "PAX" if "pax" in m.lower() else ("Rate (INR)" if "rate" in m.lower() else m)
+
+
+def driver_version(fy: str, metric: Any, base_fy: str) -> str:
+    """Long-format driver (fy, metric) → version: "PAX Actual" and years before the base year → A<yy>; the base
+    year's plan metric is its actual / forecast (F<yy>); later years are budgets (B<yy>)."""
+    yy = fy[2:]
+    if "actual" in str(metric or "").lower() or fy < base_fy:  # earlier years are history (actuals)
+        return "A" + yy
+    return ("F" if fy == base_fy else "B") + yy
+
+
+def widen_cute(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out: Dict[tuple, Dict[str, Any]] = {}
+    for r in rows:
+        k = (str(r.get("airport") or "").strip(), str(r.get("pax_type") or "Combined").strip())
+        cur = out.setdefault(k, {})
+        for f, v in r.items():
+            if f in ("fy", "_key"):
+                continue
+            if f not in cur or cur[f] in (None, "") or VERSION_KEY.match(f):
+                cur[f] = v
+    for (a, t), f in out.items():
+        f["airport"], f["pax_type"] = a, t
+    return list(out.values())
+
+
+def widen_drivers(rows: List[Dict[str, Any]], base_fy: str) -> List[Dict[str, Any]]:
+    """Long drivers (fy, metric, m01..m12 or <V>__<period>) → one row per airport / passenger type / metric."""
+    out: Dict[tuple, Dict[str, Any]] = {}
+    for r in rows:
+        metric = driver_metric(r.get("metric"))
+        k = (str(r.get("airport") or "").strip(), str(r.get("pax_type") or "Combined").strip(), metric)
+        cur = out.setdefault(k, {"airport": k[0], "pax_type": k[1], "metric": metric})
+        fy = r.get("fy")
+        if fy:
+            ver = driver_version(fy, r.get("metric"), base_fy)
+            for i, p in enumerate(_fy_months(fy), start=1):
+                v = r.get(f"m{i:02d}")
+                if v not in (None, ""):
+                    cur[vkey(ver, p)] = v
+        for f, v in r.items():
+            if VERSION_KEY.match(f):
+                cur[f] = v
+    return list(out.values())
+
+
+def wide_columns(rows: List[Dict[str, Any]], lead: List[Dict[str, Any]], editable: bool = False) -> List[Dict[str, Any]]:
+    """Descriptive columns, then each FY's columns: budget, actual, forecast (B, A, F)."""
+    from .periods import period_label
+    vers: Dict[str, set] = {}
+    for r in rows:
+        for f in r:
+            m = VERSION_KEY.match(f)
+            if m:
+                vers.setdefault(m.group(1), set()).add(m.group(2))
+    order = sorted(vers, key=lambda v: (int(v[1:3]), "BAF".index(v[0]), v))
+    cols = list(lead)
+    for v in order:
+        ps = vers[v]
+        for extra in ("total", "annual"):
+            if extra in ps:
+                cols.append(column(vkey(v, extra), f"FY'{v[1:3]} {v[0]} {extra}", "number", group=v, editable=editable))
+        for p in sorted(x for x in ps if x[0].isdigit()):
+            cols.append(column(vkey(v, p), f"{v} {period_label(p)}", "number", group=v,
+                               editable=editable and not v.startswith("A")))
+    return cols
+
+
+CUTE_LEAD = [column("airport", "Airport"), column("pax_type", "Passenger"), column("stream", "Stream"),
+             column("geo", "Geo"), column("tag", "Reporting tag")]
+DRIVER_LEAD = [column("airport", "Airport"), column("pax_type", "Passenger"), column("metric", "Metric")]
+
+
+def version_months(row: Dict[str, Any], version: str) -> Optional[List[float]]:
+    """A wide row's 12 months for a version (FY order), or None when the row has none of them."""
+    fy = "FY" + version[1:3]
+    keys = [vkey(version, p) for p in _fy_months(fy)]
+    if not any(k in row for k in keys):
+        return None
+    return [float(row.get(k) or 0.0) if isinstance(row.get(k), (int, float)) else 0.0 for k in keys]

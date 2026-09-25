@@ -19,7 +19,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import openpyxl
 
-from .datasets import SPECS, build_key, column, slug, vkey
+from .datasets import (CUTE_LEAD, DRIVER_LEAD, SPECS, build_key, column, slug, vkey, wide_columns, widen_cute,
+                       widen_drivers)
 from .periods import fy_months, fy_of_period, period_label, to_iso_date, to_period
 
 Row = Tuple[Any, ...]
@@ -354,19 +355,14 @@ def _import_cute(book, res, base, plan, cutoff, F, B, BB):
             for i, p in zip(mcols, periods):
                 f[vkey("V", p)] = num(r[i])
             drivers.append(f)
-    months_b = fy_months(base)
-    cols = [column("airport", "Airport"), column("pax_type", "Passenger"), column("fy", "FY"),
-            column("stream", "Stream"), column("geo", "Geo"), column("tag", "Reporting tag"),
-            column(vkey(BB, "total"), f"{BB} total", "number")] + \
-        plan_columns({F: [p for p in months_b if p > cutoff], B: fy_months(plan)})
-    res.add("rev_cute", rev, cols)
-    months_lbl = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
-    for d in drivers:  # store drivers FY-relative (m01 = April) so every FY shares one column set
+    # one line per airport / passenger type: the base year's forecast, the plan year's budget … side by side
+    rev = widen_cute(rev)
+    res.add("rev_cute", rev, wide_columns(rev, CUTE_LEAD))
+    for d in drivers:  # the sheet's months → FY-relative m01..m12, then one line per metric with FY columns
         for i, p in enumerate(fy_months(d["fy"])):
             d[f"m{i + 1:02d}"] = d.pop(vkey("V", p), 0)
-    dcols = [column("airport", "Airport"), column("pax_type", "Passenger"), column("fy", "FY"), column("metric", "Metric")] + \
-        [column(f"m{i + 1:02d}", months_lbl[i], "number", editable=True) for i in range(12)]
-    res.add("rev_cute_drivers", drivers, dcols)
+    drivers = widen_drivers(drivers, base)
+    res.add("rev_cute_drivers", drivers, wide_columns(drivers, DRIVER_LEAD, editable=True))
 
 
 # ---------------- Non-CUTE & rev share ----------------

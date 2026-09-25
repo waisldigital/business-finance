@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from .datasets import norm
+from .datasets import norm, version_months
 from .periods import fy_months, period_label
 from .pnl import OH_BLOCKS, Filters, PnLEngine, Series, _id
 
@@ -325,23 +325,20 @@ def revenue_performance(data, actuals, cfg, flt: Filters) -> Dict[str, Any]:
 def _pax(data, cfg, flt: Filters) -> List[Dict[str, Any]]:
     """Billable PAX from the CUTE drivers: <fy> PAX = plan (actual/forecast for the base year); rows whose metric
     mentions "actual" hold actual PAX for the current year."""
-    fy_to_measure = {cfg["base_fy"]: "a_base", cfg["plan_fy"]: "b_plan", cfg["draft_fy"]: "b_draft"}
+    yy = {k: cfg[k][2:] for k in ("base_fy", "plan_fy", "draft_fy")}
+    wanted = (("a_base", ("A" + yy["base_fy"], "F" + yy["base_fy"])), ("b_plan", ("B" + yy["plan_fy"],)),
+              ("af_plan", ("A" + yy["plan_fy"],)), ("b_draft", ("B" + yy["draft_fy"],)))
     out: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    for r in data.get("rev_cute_drivers", []):
-        metric = norm(r.get("metric"))
-        if "pax" not in metric or not flt.tag_ok(r.get("airport")):
+    for r in data.get("rev_cute_drivers", []):  # one PAX line per airport / passenger type, each FY in columns
+        if "pax" not in norm(r.get("metric")) or not flt.tag_ok(r.get("airport")):
             continue
-        fy = str(r.get("fy") or "")
-        if "actual" in metric:
-            m = "af_plan" if fy == cfg["plan_fy"] else "a_base" if fy == cfg["base_fy"] else None
-        else:
-            m = fy_to_measure.get(fy)
-        if not m:
-            continue
-        vals = [float(r.get(f"m{i:02d}") or 0.0) for i in range(1, 13)]
-        e = out.setdefault((r.get("airport"), r.get("pax_type") or "Combined"),
-                           {"airport": r.get("airport"), "pax_type": r.get("pax_type") or "Combined", "measures": {}})
-        e["measures"][m] = vals
+        for m, vers in wanted:
+            vals = next((v for v in (version_months(r, x) for x in vers) if v), None)
+            if not vals:
+                continue
+            e = out.setdefault((r.get("airport"), r.get("pax_type") or "Combined"),
+                               {"airport": r.get("airport"), "pax_type": r.get("pax_type") or "Combined", "measures": {}})
+            e["measures"][m] = vals
     return list(out.values())
 
 
