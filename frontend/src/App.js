@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth, homeFor } from "@/lib/auth";
@@ -7,31 +7,33 @@ import { ThemeProvider } from "@/lib/theme";
 import { PermissionsProvider, usePermissions } from "@/lib/permissions";
 import AppLayout from "@/components/AppLayout";
 import LoginPage from "@/pages/LoginPage";
-import DashboardPage from "@/pages/DashboardPage";
-import ProjectsPage from "@/pages/ProjectsPage";
-import ProjectDetailPage from "@/pages/ProjectDetailPage";
-import MasterPage from "@/pages/MasterPage";
-import CustomerProfilePage from "@/pages/CustomerProfilePage";
-import UploadsPage from "@/pages/UploadsPage";
-import ApprovalsPage from "@/pages/ApprovalsPage";
-import MyApprovalsPage from "@/pages/MyApprovalsPage";
-import CRLinkPage from "@/pages/CRLinkPage";
-import AuditPage from "@/pages/AuditPage";
-import SettingsPage from "@/pages/SettingsPage";
-import PipelinePage from "@/pages/PipelinePage";
-import ChangeRequestsPage from "@/pages/ChangeRequestsPage";
-import WBSBudgetPage from "@/pages/WBSBudgetPage";
-import EmployeesPage from "@/pages/EmployeesPage";
-import PnLPage from "@/pages/aop/PnLPage";
-import AopSectionPage from "@/pages/aop/AopSectionPage";
-import MyChangesPage from "@/pages/aop/MyChangesPage";
-import AopReportsPage from "@/pages/aop/AopReportsPage";
-import AdminHome from "@/pages/admin/AdminHome";
-import AdminDataPage from "@/pages/admin/AdminDataPage";
-import AdminImportsPage from "@/pages/admin/AdminImportsPage";
-import AdminAopApprovals from "@/pages/admin/AdminAopApprovals";
-import AdminPlanSettings from "@/pages/admin/AdminPlanSettings";
 import { SECTIONS, LANDING, AOP_SECTION_KEYS } from "@/config/sections";
+
+// every screen is its own chunk, loaded on first visit (charts, grids and forms stay out of the first load)
+const DashboardPage = lazy(() => import("@/pages/DashboardPage"));
+const ProjectsPage = lazy(() => import("@/pages/ProjectsPage"));
+const ProjectDetailPage = lazy(() => import("@/pages/ProjectDetailPage"));
+const MasterPage = lazy(() => import("@/pages/MasterPage"));
+const CustomerProfilePage = lazy(() => import("@/pages/CustomerProfilePage"));
+const UploadsPage = lazy(() => import("@/pages/UploadsPage"));
+const ApprovalsPage = lazy(() => import("@/pages/ApprovalsPage"));
+const MyApprovalsPage = lazy(() => import("@/pages/MyApprovalsPage"));
+const CRLinkPage = lazy(() => import("@/pages/CRLinkPage"));
+const AuditPage = lazy(() => import("@/pages/AuditPage"));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage"));
+const PipelinePage = lazy(() => import("@/pages/PipelinePage"));
+const ChangeRequestsPage = lazy(() => import("@/pages/ChangeRequestsPage"));
+const WBSBudgetPage = lazy(() => import("@/pages/WBSBudgetPage"));
+const EmployeesPage = lazy(() => import("@/pages/EmployeesPage"));
+const PnLPage = lazy(() => import("@/pages/aop/PnLPage"));
+const AopSectionPage = lazy(() => import("@/pages/aop/AopSectionPage"));
+const MyChangesPage = lazy(() => import("@/pages/aop/MyChangesPage"));
+const AopReportsPage = lazy(() => import("@/pages/aop/AopReportsPage"));
+const AdminHome = lazy(() => import("@/pages/admin/AdminHome"));
+const AdminDataPage = lazy(() => import("@/pages/admin/AdminDataPage"));
+const AdminImportsPage = lazy(() => import("@/pages/admin/AdminImportsPage"));
+const AdminAopApprovals = lazy(() => import("@/pages/admin/AdminAopApprovals"));
+const AdminPlanSettings = lazy(() => import("@/pages/admin/AdminPlanSettings"));
 
 // the page each workspace section opens (sections sharing a path share its page and its route guard)
 const SECTION_PAGES = {
@@ -125,6 +127,7 @@ function App() {
           <ThemeProvider>
             <CurrencyProvider>
               <PermissionsProvider>
+                <Suspense fallback={<Loading />}>
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/" element={<RootRedirect />} />
@@ -168,6 +171,7 @@ function App() {
                   ))}
                   <Route path="*" element={<RootRedirect />} />
                 </Routes>
+                </Suspense>
               </PermissionsProvider>
             </CurrencyProvider>
           </ThemeProvider>
