@@ -49,3 +49,18 @@ def test_cors_is_explicit(app):
     assert not re.fullmatch(rx, "https://evil-app.vercel.app")
     o, rx = server.cors_settings({"CORS_ORIGINS": "*,https://a.example", "CORS_ORIGIN_REGEX": r"https://.*\.vercel\.app"})
     assert o == ["https://a.example"] and rx == server.PREVIEW_REGEX
+
+
+def test_refresh_returns_new_tokens(client):
+    from conftest import ADMIN_EMAIL, ADMIN_PASSWORD
+    r = client.post("/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}).json()
+    assert r["refresh_token"]
+    client.cookies.clear()
+    fresh = client.post("/api/auth/refresh", json={"refresh_token": r["refresh_token"]})
+    assert fresh.status_code == 200 and fresh.json()["access_token"]
+    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {fresh.json()['access_token']}"})
+    assert me.status_code == 200
+    # an access token is not accepted as a refresh token, and vice versa
+    assert client.post("/api/auth/refresh", json={"refresh_token": r["access_token"]}).status_code == 401
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {r['refresh_token']}"}).status_code == 401
+    assert client.post("/api/auth/refresh", json={}).status_code == 401

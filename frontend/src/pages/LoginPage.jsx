@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth, homeFor } from "@/lib/auth";
+import { useAuth, homeFor, nextPath } from "@/lib/auth";
 import { ChartLineUp, Lock, EnvelopeSimple, Target, Receipt, ShieldCheck } from "@phosphor-icons/react";
 import AirplaneButton from "@/components/AirplaneButton";
 
@@ -12,14 +12,14 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
-    if (user && user.id) navigate(homeFor(user), { replace: true });
+    if (user && user.id) navigate(nextPath(window.location.search, user) || homeFor(user), { replace: true });
   }, [user, navigate]);
 
   const doLogin = async () => {
     setBusy(true);
     const ok = await login(email, password);
     setBusy(false);
-    if (ok) navigate(homeFor(ok), { replace: true });
+    if (ok) navigate(nextPath(window.location.search, ok) || homeFor(ok), { replace: true });
   };
 
   const onSubmit = (e) => {

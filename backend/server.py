@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, UploadFile, File, Query, Body
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -451,7 +451,7 @@ async def login(payload: LoginInput, request: Request, response: Response):
     set_auth_cookies(response, access, refresh)
     user.pop("password_hash", None)
     user.pop("_id", None)
-    return {"user": user, "access_token": access}
+    return {"user": user, "access_token": access, "refresh_token": refresh}
 
 
 @api.post("/auth/logout")
@@ -466,20 +466,22 @@ async def me(user: dict = Depends(get_current_user)):
 
 
 @api.post("/auth/refresh")
-async def refresh_token(request: Request, response: Response):
-    token = request.cookies.get("refresh_token")
+async def refresh_token(request: Request, response: Response, payload: Optional[Dict[str, Any]] = Body(None)):
+    """New tokens from a refresh token — sent in the body by the web app (its API is cross-site, so the cookie
+    may not travel), or as the refresh_token cookie."""
+    token = (payload or {}).get("refresh_token") or request.cookies.get("refresh_token")
     if not token:
         raise HTTPException(status_code=401, detail="No refresh token")
-    payload = decode_token(token)
-    if payload.get("type") != "refresh":
+    claims = decode_token(token)
+    if claims.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid token type")
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
-    if not user:
+    user = await db.users.find_one({"id": claims["sub"]}, {"_id": 0, "password_hash": 0})
+    if not user or not user.get("is_active", True):
         raise HTTPException(status_code=401, detail="User not found")
     access = create_access_token(user["id"], user["email"], user["role"])
     new_refresh = create_refresh_token(user["id"])
     set_auth_cookies(response, access, new_refresh)
-    return {"ok": True}
+    return {"ok": True, "access_token": access, "refresh_token": new_refresh}
 
 
 # ============================================================

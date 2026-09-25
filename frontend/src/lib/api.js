@@ -14,15 +14,48 @@ instance.interceptors.request.use((cfg) => {
   return cfg;
 });
 
+// Session expiry: on a 401, refresh the session once (concurrent 401s share one refresh) and retry the
+// request; if that fails, sign out and go to the login page, which returns here afterwards (?next=).
+let refreshing = null;
+const isAuthCall = (url = "") => /\/auth\/(login|refresh|logout)/.test(url);
+
+async function refreshSession() {
+  const refresh_token = localStorage.getItem("cp_refresh");
+  const { data } = await axios.post(`${API}/auth/refresh`, refresh_token ? { refresh_token } : {}, { withCredentials: true });
+  if (!data?.access_token) throw new Error("no token");
+  localStorage.setItem("cp_token", data.access_token);
+  if (data.refresh_token) localStorage.setItem("cp_refresh", data.refresh_token);
+  return data.access_token;
+}
+
+export function sessionExpired() {
+  localStorage.removeItem("cp_token");
+  localStorage.removeItem("cp_refresh");
+  const { pathname, search } = window.location;
+  if (!pathname.startsWith("/login")) {
+    window.location.assign(`/login?next=${encodeURIComponent(pathname + search)}`);
+  }
+}
+
 instance.interceptors.response.use(
   (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      const path = window.location.pathname;
-      if (!path.startsWith("/login")) {
-        localStorage.removeItem("cp_token");
+  async (err) => {
+    const cfg = err.config || {};
+    if (err.response?.status !== 401 || isAuthCall(cfg.url)) return Promise.reject(err);
+    const hadSession = !!localStorage.getItem("cp_token") || !!localStorage.getItem("cp_refresh");
+    if (!hadSession) return Promise.reject(err); // never signed in: let the caller handle it (login screen)
+    if (!cfg._retried) {
+      cfg._retried = true;
+      try {
+        refreshing = refreshing || refreshSession().finally(() => { refreshing = null; });
+        const token = await refreshing;
+        cfg.headers = { ...(cfg.headers || {}), Authorization: `Bearer ${token}` };
+        return instance(cfg);
+      } catch {
+        /* fall through: the session is over */
       }
     }
+    sessionExpired();
     return Promise.reject(err);
   }
 );
