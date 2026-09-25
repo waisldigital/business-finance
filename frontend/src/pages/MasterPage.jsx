@@ -5,6 +5,7 @@ import { Plus, Trash, X, DownloadSimple } from "@phosphor-icons/react";
 import { formatMoney } from "@/aop/format";
 import { useCurrency } from "@/lib/currency";
 import { useNavigate } from "react-router-dom";
+import Modal from "@/components/common/Modal";
 
 const ENTITIES = {
   customers: {
@@ -168,12 +169,12 @@ export default function MasterPage({ entityKey }) {
         </div>
       </div>
 
-      {show && <Modal meta={meta} entity={editing} onClose={() => setShow(false)} onSaved={() => { setShow(false); load(); }} />}
+      {show && <MasterFormModal meta={meta} entity={editing} onClose={() => setShow(false)} onSaved={() => { setShow(false); load(); }} />}
     </div>
   );
 }
 
-function Modal({ meta, entity, onClose, onSaved }) {
+function MasterFormModal({ meta, entity, onClose, onSaved }) {
   const [form, setForm] = useState(entity || meta.fields.reduce((a, f) => { a[f.key] = f.type === "number" ? 0 : ""; return a; }, {}));
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -191,37 +192,35 @@ function Modal({ meta, entity, onClose, onSaved }) {
     } finally { setBusy(false); }
   };
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" data-testid="master-modal">
-      <form onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="p-5 border-b border-[var(--border)] flex justify-between items-center">
-          <h3 className="font-display text-lg font-bold">{entity ? "Edit" : "New"} {meta.label.replace(/s$/, "")}</h3>
-          <button type="button" className="btn-ghost" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="p-5 space-y-3">
-          {meta.fields.map((f) => (
-            <div key={f.key}>
-              <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">{f.label}{f.required && " *"}</label>
-              {f.textarea ? (
-                <textarea className="input" rows={2} value={form[f.key] || ""} onChange={(e) => set(f.key, e.target.value)} />
-              ) : (
-                <input
-                  type={f.type === "number" ? "number" : "text"}
-                  required={!!f.required}
-                  className="input"
-                  value={form[f.key] ?? ""}
-                  onChange={(e) => set(f.key, e.target.value)}
-                  data-testid={`master-field-${f.key}`}
-                />
-              )}
-            </div>
-          ))}
-          {err && <div className="text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] p-2 border border-[color-mix(in_srgb,var(--danger)_30%,transparent)]">{err}</div>}
-        </div>
-        <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy} data-testid="master-modal-submit">{busy ? "Saving…" : "Save"}</button>
-        </div>
-      </form>
-    </div>
+    <Modal onClose={onClose} testid="master-modal" as="form" onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="p-5 border-b border-[var(--border)] flex justify-between items-center">
+        <h3 className="font-display text-lg font-bold">{entity ? "Edit" : "New"} {meta.label.replace(/s$/, "")}</h3>
+        <button type="button" className="btn-ghost" onClick={onClose}><X size={16} /></button>
+      </div>
+      <div className="p-5 space-y-3">
+        {meta.fields.map((f) => (
+          <div key={f.key}>
+            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">{f.label}{f.required && " *"}</label>
+            {f.textarea ? (
+              <textarea className="input" rows={2} value={form[f.key] || ""} onChange={(e) => set(f.key, e.target.value)} />
+            ) : (
+              <input
+                type={f.type === "number" ? "number" : "text"}
+                required={!!f.required}
+                className="input"
+                value={form[f.key] ?? ""}
+                onChange={(e) => set(f.key, e.target.value)}
+                data-testid={`master-field-${f.key}`}
+              />
+            )}
+          </div>
+        ))}
+        {err && <div className="text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] p-2 border border-[color-mix(in_srgb,var(--danger)_30%,transparent)]">{err}</div>}
+      </div>
+      <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy} data-testid="master-modal-submit">{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
   );
 }

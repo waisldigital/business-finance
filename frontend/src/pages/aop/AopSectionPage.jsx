@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import DatasetWorkspace from "@/aop/DatasetWorkspace";
 import CapexSummary from "@/aop/CapexSummary";
 import { SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives } from "@phosphor-icons/react";
@@ -40,7 +40,7 @@ export default function AopSectionPage({ section }) {
 
   return (
     <div data-testid={`aop-section-${section}`}>
-      <Header icon={meta.icon} title={meta.title} subtitle={meta.subtitle} />
+      <PageHeader compact icon={meta.icon} title={meta.title} subtitle={meta.subtitle} />
       <div className="px-3 pt-2 flex items-center gap-1 border-b border-[var(--border)] bg-[var(--surface)] overflow-x-auto">
         {tabs.map((d) => (
           <button key={d.key} onClick={() => setParams({ ds: d.key })} data-testid={`tab-${d.key}`}

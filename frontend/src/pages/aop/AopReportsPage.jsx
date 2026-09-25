@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { useCurrency } from "@/lib/currency";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import { PresentationChart, Stack, CaretUp, CaretDown, X, EyeSlash, ArrowLeft, Database } from "@phosphor-icons/react";
 import { Popover } from "@/aop/MisCommon";
 import DatasetWorkspace from "@/aop/DatasetWorkspace";
@@ -73,7 +73,7 @@ export default function AopReportsPage({ admin = false }) {
 
   return (
     <div data-testid="aop-reports-page">
-      <Header icon={PresentationChart} title="AOP reports"
+      <PageHeader compact icon={PresentationChart} title="AOP reports"
               subtitle="MIS and AOP report formats on the single actual source — pick one or more formats; each opens as its own page below"
               actions={<>
                 <Popover icon={<Stack size={14} />} label={<span className="text-[11px]">Formats · {selected.length}</span>} testid="format-picker" width="w-80">

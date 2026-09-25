@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import Popover from "@/components/common/Popover";
 import { Bell, Check } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { useNavigate } from "react-router-dom";
@@ -9,7 +10,6 @@ export default function NotificationBell() {
   const [count, setCount] = useState(0);
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
   const navigate = useNavigate();
 
   const loadCount = useCallback(async () => {
@@ -36,15 +36,6 @@ export default function NotificationBell() {
     if (open) loadList();
   }, [open, loadList]);
 
-  // Click outside closes
-  useEffect(() => {
-    const h = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-
   const openLink = async (n) => {
     if (!n.read) {
       try {
@@ -68,10 +59,11 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className="relative" ref={ref}>
+    <Popover open={open} onOpenChange={setOpen} panelClassName="mt-2 w-[380px] bg-[var(--surface)] border border-[var(--border)] z-[70] shadow-xl"
+             panelTestid="notif-dropdown" button={(isOpen, toggle) => (
       <button
         className="btn-secondary text-xs flex items-center gap-1.5 relative"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         data-testid="notif-bell-btn"
         title="Notifications"
       >
@@ -86,38 +78,35 @@ export default function NotificationBell() {
           </span>
         )}
       </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-[380px] bg-[var(--surface)] border border-[var(--border)] z-[70] shadow-xl" data-testid="notif-dropdown">
-          <div className="px-3 py-2 border-b border-[var(--border)] flex justify-between items-center">
-            <div className="text-[10px] tracking-overline text-[var(--muted)]">Notifications</div>
-            {count > 0 && (
-              <button className="btn-ghost text-[11px] flex items-center gap-1" onClick={markAllRead} data-testid="notif-mark-all-read">
-                <Check size={12} /> Mark all read
-              </button>
-            )}
-          </div>
-          <div className="max-h-[400px] overflow-y-auto">
-            {items.length === 0 && (
-              <div className="px-3 py-8 text-center text-xs text-[var(--muted)]">No notifications</div>
-            )}
-            {items.map((n) => (
-              <button
-                key={n.id}
-                className={`w-full text-left px-3 py-2 border-b border-[var(--border)] hover:bg-[var(--row-hover)] ${n.read ? "opacity-60" : ""}`}
-                onClick={() => openLink(n)}
-                data-testid={`notif-item-${n.id}`}
-              >
-                <div className="flex justify-between gap-2">
-                  <div className="text-sm font-medium truncate">{n.title}</div>
-                  {!n.read && <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: "var(--gold)" }} />}
-                </div>
-                {n.body && <div className="text-[11px] text-[var(--muted)] mt-0.5 line-clamp-2">{n.body}</div>}
-                <div className="text-[10px] text-[var(--muted)] mt-1">{(n.created_at || "").replace("T", " ").slice(0, 16)}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    )}>
+      <div className="px-3 py-2 border-b border-[var(--border)] flex justify-between items-center">
+        <div className="text-[10px] tracking-overline text-[var(--muted)]">Notifications</div>
+        {count > 0 && (
+          <button className="btn-ghost text-[11px] flex items-center gap-1" onClick={markAllRead} data-testid="notif-mark-all-read">
+            <Check size={12} /> Mark all read
+          </button>
+        )}
+      </div>
+      <div className="max-h-[400px] overflow-y-auto">
+        {items.length === 0 && (
+          <div className="px-3 py-8 text-center text-xs text-[var(--muted)]">No notifications</div>
+        )}
+        {items.map((n) => (
+          <button
+            key={n.id}
+            className={`w-full text-left px-3 py-2 border-b border-[var(--border)] hover:bg-[var(--row-hover)] ${n.read ? "opacity-60" : ""}`}
+            onClick={() => openLink(n)}
+            data-testid={`notif-item-${n.id}`}
+          >
+            <div className="flex justify-between gap-2">
+              <div className="text-sm font-medium truncate">{n.title}</div>
+              {!n.read && <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: "var(--gold)" }} />}
+            </div>
+            {n.body && <div className="text-[11px] text-[var(--muted)] mt-0.5 line-clamp-2">{n.body}</div>}
+            <div className="text-[10px] text-[var(--muted)] mt-1">{(n.created_at || "").replace("T", " ").slice(0, 16)}</div>
+          </button>
+        ))}
+      </div>
+    </Popover>
   );
 }

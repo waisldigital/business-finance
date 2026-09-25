@@ -7,6 +7,7 @@ import { formatMoney, formatDate } from "@/aop/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ArrowLeft, EnvelopeSimple, Phone, Buildings, WarningOctagon } from "@phosphor-icons/react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import StatTile from "@/components/common/StatTile";
 
 export default function CustomerProfilePage() {
   const { id } = useParams();
@@ -96,11 +97,11 @@ export default function CustomerProfilePage() {
 
         {/* Totals */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Stat label="Projects" value={totals.project_count} />
-          <Stat label="Total PO" value={formatMoney(totals.total_po, unit)} />
-          <Stat label="Revenue" value={formatMoney(totals.total_revenue, unit)} />
-          <Stat label="Margin" value={formatMoney(totals.total_margin, unit)} accent />
-          <Stat label="Margin %" value={`${(totals.margin_pct || 0).toFixed(1)}%`}
+          <StatTile label="Projects" value={totals.project_count} />
+          <StatTile label="Total PO" value={formatMoney(totals.total_po, unit)} />
+          <StatTile label="Revenue" value={formatMoney(totals.total_revenue, unit)} />
+          <StatTile label="Margin" value={formatMoney(totals.total_margin, unit)} accent />
+          <StatTile label="Margin %" value={`${(totals.margin_pct || 0).toFixed(1)}%`}
                 accent={totals.margin_pct >= 15}
                 danger={totals.margin_pct < 15} />
         </div>
@@ -190,14 +191,6 @@ export default function CustomerProfilePage() {
   );
 }
 
-function Stat({ label, value, accent, danger }) {
-  return (
-    <div className="tile p-4">
-      <div className="text-[10px] tracking-overline text-[var(--muted)]">{label}</div>
-      <div className={`font-mono font-semibold text-xl mt-1 ${accent ? "text-[var(--gold)]" : danger ? "text-[var(--danger)]" : "text-[var(--text)]"}`}>{value}</div>
-    </div>
-  );
-}
 
 function Row({ label, value, accent }) {
   return (

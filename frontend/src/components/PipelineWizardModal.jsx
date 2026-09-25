@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { X, Warning, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import AirplaneButton from "./AirplaneButton";
+import Modal from "@/components/common/Modal";
 
 const CURRENCIES = ["USD", "INR", "AED", "AUD", "CNY", "EUR", "GBP", "JPY", "RUB", "SAR", "SGD"];
 const SOLUTION_LINES = [
@@ -323,8 +324,8 @@ export default function PipelineWizardModal({ opportunity, customers, onClose, o
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" data-testid="pipeline-wizard-modal">
-      <div className="bg-[var(--surface)] w-full max-w-5xl max-h-[94vh] overflow-y-auto border border-[var(--border)]">
+    <>
+      <Modal onClose={onClose} testid="pipeline-wizard-modal" className="bg-[var(--surface)] w-full max-w-5xl max-h-[94vh] overflow-y-auto border border-[var(--border)]">
         <div className="flex items-center justify-between p-5 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
           <div>
             <div className="text-[10px] tracking-overline text-[var(--muted)]">{opportunity ? "EDIT" : "NEW"} OPPORTUNITY</div>
@@ -446,7 +447,7 @@ export default function PipelineWizardModal({ opportunity, customers, onClose, o
             </div>
           </div>
         </div>
-      </div>
+      </Modal>
 
       {validationPopup && (
         <ValidationPopup
@@ -455,37 +456,35 @@ export default function PipelineWizardModal({ opportunity, customers, onClose, o
           onClose={() => setValidationPopup(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 
 function ValidationPopup({ stageIdx, nextIdx, missing, onProceed, onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-4" data-testid="stage-validation-popup">
-      <div className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-md">
-        <div className="p-5 border-b border-[var(--border)]">
-          <div className="text-[10px] tracking-overline text-[var(--muted)]">STAGE MOVEMENT CHECKLIST</div>
-          <h3 className="font-display text-lg font-bold">Moving to {STAGE_DEFS[nextIdx].label}</h3>
-        </div>
-        <div className="p-5 space-y-3 text-sm">
-          <p className="text-[var(--muted)]">
-            The following fields on <span className="font-semibold text-[var(--text)]">{STAGE_DEFS[stageIdx].label}</span> are still empty.
-            You can proceed anyway — validation is informational.
-          </p>
-          <ul className="space-y-1.5 max-h-56 overflow-auto">
-            {missing.map((m) => (
-              <li key={m} className="flex items-center gap-2 text-[var(--text)]">
-                <span className="inline-block w-3 h-3 border border-[var(--gold)] rounded-sm" /> {m}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose} data-testid="validation-cancel">Stay & Fill</button>
-          <button className="btn-primary" onClick={onProceed} data-testid="validation-proceed">Proceed Anyway</button>
-        </div>
+    <Modal onClose={onClose} testid="stage-validation-popup" z="z-[70]" className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-md">
+      <div className="p-5 border-b border-[var(--border)]">
+        <div className="text-[10px] tracking-overline text-[var(--muted)]">STAGE MOVEMENT CHECKLIST</div>
+        <h3 className="font-display text-lg font-bold">Moving to {STAGE_DEFS[nextIdx].label}</h3>
       </div>
-    </div>
+      <div className="p-5 space-y-3 text-sm">
+        <p className="text-[var(--muted)]">
+          The following fields on <span className="font-semibold text-[var(--text)]">{STAGE_DEFS[stageIdx].label}</span> are still empty.
+          You can proceed anyway — validation is informational.
+        </p>
+        <ul className="space-y-1.5 max-h-56 overflow-auto">
+          {missing.map((m) => (
+            <li key={m} className="flex items-center gap-2 text-[var(--text)]">
+              <span className="inline-block w-3 h-3 border border-[var(--gold)] rounded-sm" /> {m}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
+        <button className="btn-secondary" onClick={onClose} data-testid="validation-cancel">Stay & Fill</button>
+        <button className="btn-primary" onClick={onProceed} data-testid="validation-proceed">Proceed Anyway</button>
+      </div>
+    </Modal>
   );
 }
 

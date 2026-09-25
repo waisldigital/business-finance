@@ -2,13 +2,8 @@ import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { X, Receipt, ArrowRight, Package, Truck, FileText } from "@phosphor-icons/react";
 import { fmtAmount, fmtCell } from "./format";
+import StatTile from "@/components/common/StatTile";
 
-const Tile = ({ label, value, tone }) => (
-  <div className="border border-[var(--border)] px-2.5 py-1.5">
-    <div className="text-[10px] tracking-overline text-[var(--muted)]">{label}</div>
-    <div className={`text-sm font-semibold tabular-nums ${tone || ""}`}>{value}</div>
-  </div>
-);
 
 export default function PoDrawer({ po, onClose, onOpenPo }) {
   const [data, setData] = useState(null);
@@ -44,10 +39,10 @@ export default function PoDrawer({ po, onClose, onOpenPo }) {
                 {s.wbs?.map((w) => <span key={w} className="chip font-mono">{w}</span>)}
               </div>
               <div className="grid grid-cols-4 gap-2">
-                <Tile label="PO value (₹ L)" value={L(s.po_value)} />
-                <Tile label="GRN done (₹ L)" value={L(s.grn_amount)} tone="text-[var(--success)]" />
-                <Tile label="Pending GRN (₹ L)" value={L(s.pending_grn)} tone="text-[var(--warning)]" />
-                <Tile label="Invoiced (₹ L)" value={L(s.invoiced)} />
+                <StatTile size="sm" label="PO value (₹ L)" value={L(s.po_value)} />
+                <StatTile size="sm" label="GRN done (₹ L)" value={L(s.grn_amount)} tone="text-[var(--success)]" />
+                <StatTile size="sm" label="Pending GRN (₹ L)" value={L(s.pending_grn)} tone="text-[var(--warning)]" />
+                <StatTile size="sm" label="Invoiced (₹ L)" value={L(s.invoiced)} />
               </div>
 
               {!!data.tracker.length && (

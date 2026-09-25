@@ -4,6 +4,7 @@ import PageHeader from "@/components/PageHeader";
 import { Plus, X, Trash } from "@phosphor-icons/react";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney } from "@/aop/format";
+import Modal from "@/components/common/Modal";
 
 const STAGES = ["", "Deal P&L", "Customer PO", "Operations", "Closure"];
 const ROLES = ["", "admin", "finance", "leadership", "approver"];
@@ -115,65 +116,63 @@ function RuleModal({ rule, onClose, onSaved }) {
     finally { setBusy(false); }
   };
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="rule-modal">
-        <div className="p-5 border-b flex justify-between items-center"><h3 className="font-display text-lg font-bold">{isEdit ? "Edit" : "New"} Approval Rule</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
-        <div className="p-5 grid grid-cols-2 gap-3">
-          <div className="col-span-2">
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Name *</label>
-            <input className="input" required value={form.name} onChange={(e) => set("name", e.target.value)} data-testid="rule-name" />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Target Stage</label>
-            <select className="input" value={form.target_stage || ""} onChange={(e) => set("target_stage", e.target.value)}>
-              {STAGES.map((s) => <option key={s} value={s}>{s || "Any"}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Business Category</label>
-            <select className="input" value={form.business_category || "Any"} onChange={(e) => set("business_category", e.target.value)}>
-              {BIZ.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Min Revenue (₹)</label>
-            <input type="number" className="input font-mono" value={form.min_revenue ?? ""} onChange={(e) => set("min_revenue", e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Max Revenue (₹)</label>
-            <input type="number" className="input font-mono" value={form.max_revenue ?? ""} onChange={(e) => set("max_revenue", e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Min Margin %</label>
-            <input type="number" className="input font-mono" value={form.min_margin_pct ?? ""} onChange={(e) => set("min_margin_pct", e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Max Margin %</label>
-            <input type="number" className="input font-mono" value={form.max_margin_pct ?? ""} onChange={(e) => set("max_margin_pct", e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Approver Role</label>
-            <select className="input" value={form.approver_role || ""} onChange={(e) => set("approver_role", e.target.value)}>
-              {ROLES.map((r) => <option key={r} value={r} className="capitalize">{r || "—"}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Status</label>
-            <select className="input" value={form.is_active ? "1" : "0"} onChange={(e) => set("is_active", e.target.value === "1")}>
-              <option value="1">Active</option><option value="0">Off</option>
-            </select>
-          </div>
-          <div className="col-span-2">
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Approver Emails (comma separated)</label>
-            <input className="input" value={emailsRaw} onChange={(e) => setEmailsRaw(e.target.value)} data-testid="rule-emails" />
-          </div>
-          {err && <div className="col-span-2 text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] p-2 border border-[color-mix(in_srgb,var(--danger)_30%,transparent)]">{err}</div>}
+    <Modal onClose={onClose} as="form" onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-2xl max-h-[90vh] overflow-y-auto" panelTestid="rule-modal">
+      <div className="p-5 border-b flex justify-between items-center"><h3 className="font-display text-lg font-bold">{isEdit ? "Edit" : "New"} Approval Rule</h3><button type="button" onClick={onClose}><X size={16} /></button></div>
+      <div className="p-5 grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Name *</label>
+          <input className="input" required value={form.name} onChange={(e) => set("name", e.target.value)} data-testid="rule-name" />
         </div>
-        <div className="p-5 border-t flex justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy} data-testid="rule-modal-submit">{busy ? "Saving…" : "Save"}</button>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Target Stage</label>
+          <select className="input" value={form.target_stage || ""} onChange={(e) => set("target_stage", e.target.value)}>
+            {STAGES.map((s) => <option key={s} value={s}>{s || "Any"}</option>)}
+          </select>
         </div>
-      </form>
-    </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Business Category</label>
+          <select className="input" value={form.business_category || "Any"} onChange={(e) => set("business_category", e.target.value)}>
+            {BIZ.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Min Revenue (₹)</label>
+          <input type="number" className="input font-mono" value={form.min_revenue ?? ""} onChange={(e) => set("min_revenue", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Max Revenue (₹)</label>
+          <input type="number" className="input font-mono" value={form.max_revenue ?? ""} onChange={(e) => set("max_revenue", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Min Margin %</label>
+          <input type="number" className="input font-mono" value={form.min_margin_pct ?? ""} onChange={(e) => set("min_margin_pct", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Max Margin %</label>
+          <input type="number" className="input font-mono" value={form.max_margin_pct ?? ""} onChange={(e) => set("max_margin_pct", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Approver Role</label>
+          <select className="input" value={form.approver_role || ""} onChange={(e) => set("approver_role", e.target.value)}>
+            {ROLES.map((r) => <option key={r} value={r} className="capitalize">{r || "—"}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Status</label>
+          <select className="input" value={form.is_active ? "1" : "0"} onChange={(e) => set("is_active", e.target.value === "1")}>
+            <option value="1">Active</option><option value="0">Off</option>
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Approver Emails (comma separated)</label>
+          <input className="input" value={emailsRaw} onChange={(e) => setEmailsRaw(e.target.value)} data-testid="rule-emails" />
+        </div>
+        {err && <div className="col-span-2 text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] p-2 border border-[color-mix(in_srgb,var(--danger)_30%,transparent)]">{err}</div>}
+      </div>
+      <div className="p-5 border-t flex justify-end gap-2">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy} data-testid="rule-modal-submit">{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
   );
 }

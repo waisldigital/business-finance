@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import DatasetWorkspace from "@/aop/DatasetWorkspace";
 import { Database, LockKey, MagnifyingGlass } from "@phosphor-icons/react";
 
@@ -20,7 +20,7 @@ export default function AdminDataPage() {
 
   return (
     <div data-testid="admin-data-page">
-      <Header icon={Database} title="Data manager"
+      <PageHeader compact icon={Database} title="Data manager"
               subtitle="Every AOP dataset: columns, unique keys, bulk upload (add / replace / modify) and download — admin only" />
       <div className="flex">
         <aside className="w-56 shrink-0 border-r border-[var(--border)] bg-[var(--surface)] min-h-[calc(100vh-110px)]">

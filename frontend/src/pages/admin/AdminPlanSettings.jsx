@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { SECTIONS as ALL_SECTIONS } from "@/config/sections";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import { SlidersHorizontal, FloppyDisk, CheckCircle, PencilSimpleLine, ShieldCheck, MagicWand, PresentationChart, Eye, EyeSlash } from "@phosphor-icons/react";
 
 const DRIVERS = [
@@ -37,7 +37,7 @@ export default function AdminPlanSettings() {
   };
   return (
     <div data-testid="admin-plan-settings">
-      <Header icon={SlidersHorizontal} title="Plan settings" subtitle="Planning cycle, actual cut-off and how user edits are applied"
+      <PageHeader compact icon={SlidersHorizontal} title="Plan settings" subtitle="Planning cycle, actual cut-off and how user edits are applied"
               actions={<>
                 {saved && <span className="text-[11px] text-[var(--success)] flex items-center gap-1"><CheckCircle size={12} />Saved</span>}
                 <button className="icon-btn primary" onClick={save} disabled={busy} data-testid="plan-save"><FloppyDisk size={14} />Save</button>

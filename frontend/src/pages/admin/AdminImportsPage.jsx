@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import { FileArrowUp, FileXls, CheckCircle, Warning, ClockCounterClockwise } from "@phosphor-icons/react";
 
 const KINDS = [
@@ -24,7 +24,7 @@ export default function AdminImportsPage() {
   useEffect(() => { load(); }, []);
   return (
     <div data-testid="admin-imports-page">
-      <Header icon={FileArrowUp} title="Imports" subtitle="Load the AOP from Excel — tabs and columns are located by name, so re-arranged workbooks still import" />
+      <PageHeader compact icon={FileArrowUp} title="Imports" subtitle="Load the AOP from Excel — tabs and columns are located by name, so re-arranged workbooks still import" />
       <div className="p-3 grid md:grid-cols-2 gap-3">
         {KINDS.map((k) => <ImportCard key={k.key} kind={k} onDone={load} />)}
       </div>

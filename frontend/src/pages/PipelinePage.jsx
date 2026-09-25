@@ -6,9 +6,11 @@ import { formatMoney } from "@/aop/format";
 import { Plus, MagnifyingGlass, PencilSimple, CheckCircle, XCircle, Trophy, HourglassMedium, Warning } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
 import PipelineWizardModal, { PIPELINE_STAGES } from "@/components/PipelineWizardModal";
+import Modal from "@/components/common/Modal";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, CartesianGrid,
 } from "recharts";
+import { InfoRow } from "@/components/common/StatTile";
 
 function stageChipClass(stage) {
   return {
@@ -334,39 +336,37 @@ function CloseDealModal({ opportunity, onClose, onClosed, onError }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" data-testid="close-deal-modal">
-      <div className="bg-[var(--surface)] w-full max-w-md border border-[var(--border)]">
-        <div className="p-5 border-b border-[var(--border)]">
-          <div className="text-[10px] tracking-overline text-[var(--muted)]">CLOSE OPPORTUNITY</div>
-          <h3 className="font-display text-lg font-bold">{opportunity.opportunity_title}</h3>
-        </div>
-        <div className="p-5 space-y-3">
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Outcome <span className="text-[var(--gold)]">*</span></label>
-            <select className="input" value={outcome} onChange={(e) => setOutcome(e.target.value)} data-testid="close-outcome">
-              <option value="Won">Won</option>
-              <option value="Lost">Lost</option>
-              <option value="Deferred">Deferred / Dropped</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Reason / Notes</label>
-            <textarea className="input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} data-testid="close-reason" />
-          </div>
-          {outcome === "Won" && (
-            <div className="text-[11px] text-[var(--warning)] flex items-start gap-1 bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] p-2 border border-[color-mix(in_srgb,var(--warning)_35%,transparent)]">
-              <Warning size={12} weight="bold" /> A Project will be auto-created after Finance approves the handoff.
-            </div>
-          )}
-        </div>
-        <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={submit} disabled={busy} data-testid="close-deal-submit">
-            {busy ? "Closing…" : `Close as ${outcome}`}
-          </button>
-        </div>
+    <Modal onClose={onClose} testid="close-deal-modal" z="z-[60]" className="bg-[var(--surface)] w-full max-w-md border border-[var(--border)]">
+      <div className="p-5 border-b border-[var(--border)]">
+        <div className="text-[10px] tracking-overline text-[var(--muted)]">CLOSE OPPORTUNITY</div>
+        <h3 className="font-display text-lg font-bold">{opportunity.opportunity_title}</h3>
       </div>
-    </div>
+      <div className="p-5 space-y-3">
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Outcome <span className="text-[var(--gold)]">*</span></label>
+          <select className="input" value={outcome} onChange={(e) => setOutcome(e.target.value)} data-testid="close-outcome">
+            <option value="Won">Won</option>
+            <option value="Lost">Lost</option>
+            <option value="Deferred">Deferred / Dropped</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Reason / Notes</label>
+          <textarea className="input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} data-testid="close-reason" />
+        </div>
+        {outcome === "Won" && (
+          <div className="text-[11px] text-[var(--warning)] flex items-start gap-1 bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] p-2 border border-[color-mix(in_srgb,var(--warning)_35%,transparent)]">
+            <Warning size={12} weight="bold" /> A Project will be auto-created after Finance approves the handoff.
+          </div>
+        )}
+      </div>
+      <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
+        <button className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button className="btn-primary" onClick={submit} disabled={busy} data-testid="close-deal-submit">
+          {busy ? "Closing…" : `Close as ${outcome}`}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -388,48 +388,38 @@ function ApproveHandoffModal({ opportunity, onClose, onActioned, onError }) {
   const val = opportunity.negotiated_value || opportunity.proposal_value || opportunity.expected_revenue || 0;
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" data-testid="approve-handoff-modal">
-      <div className="bg-[var(--surface)] w-full max-w-md border border-[var(--border)]">
-        <div className="p-5 border-b border-[var(--border)]">
-          <div className="text-[10px] tracking-overline text-[var(--muted)]">FINANCE HANDOFF REVIEW</div>
-          <h3 className="font-display text-lg font-bold">{opportunity.opportunity_title}</h3>
+    <Modal onClose={onClose} testid="approve-handoff-modal" z="z-[60]" className="bg-[var(--surface)] w-full max-w-md border border-[var(--border)]">
+      <div className="p-5 border-b border-[var(--border)]">
+        <div className="text-[10px] tracking-overline text-[var(--muted)]">FINANCE HANDOFF REVIEW</div>
+        <h3 className="font-display text-lg font-bold">{opportunity.opportunity_title}</h3>
+      </div>
+      <div className="p-5 space-y-3">
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <InfoRow fallback="" k="Customer" v={opportunity.customer_name || "—"} />
+          <InfoRow fallback="" k="BD Owner" v={opportunity.bd_owner || "—"} />
+          <InfoRow fallback="" k="Deal Value" v={`₹ ${val.toLocaleString()}`} />
+          <InfoRow fallback="" k="Margin %" v={`${(opportunity.estimated_margin_pct || 0).toFixed(1)}%`} />
         </div>
-        <div className="p-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <Info k="Customer" v={opportunity.customer_name || "—"} />
-            <Info k="BD Owner" v={opportunity.bd_owner || "—"} />
-            <Info k="Deal Value" v={`₹ ${val.toLocaleString()}`} />
-            <Info k="Margin %" v={`${(opportunity.estimated_margin_pct || 0).toFixed(1)}%`} />
-          </div>
-          <div>
-            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Approver Comment</label>
-            <textarea className="input" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} data-testid="handoff-comment" />
-          </div>
-          <div className="text-[11px] text-[var(--muted)]">
-            Approving will create a new <span className="text-[var(--text)] font-semibold">Project</span> stub using this opportunity's data.
-          </div>
+        <div>
+          <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Approver Comment</label>
+          <textarea className="input" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} data-testid="handoff-comment" />
         </div>
-        <div className="p-5 border-t border-[var(--border)] flex justify-between gap-2">
-          <button className="btn-secondary flex items-center gap-1" onClick={() => act("reject")} disabled={busy} data-testid="handoff-reject">
-            <XCircle size={12} weight="bold" /> Reject
-          </button>
-          <div className="flex gap-2">
-            <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button className="btn-primary flex items-center gap-1" onClick={() => act("approve")} disabled={busy} data-testid="handoff-approve">
-              <CheckCircle size={12} weight="bold" /> Approve & Create Project
-            </button>
-          </div>
+        <div className="text-[11px] text-[var(--muted)]">
+          Approving will create a new <span className="text-[var(--text)] font-semibold">Project</span> stub using this opportunity's data.
         </div>
       </div>
-    </div>
+      <div className="p-5 border-t border-[var(--border)] flex justify-between gap-2">
+        <button className="btn-secondary flex items-center gap-1" onClick={() => act("reject")} disabled={busy} data-testid="handoff-reject">
+          <XCircle size={12} weight="bold" /> Reject
+        </button>
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary flex items-center gap-1" onClick={() => act("approve")} disabled={busy} data-testid="handoff-approve">
+            <CheckCircle size={12} weight="bold" /> Approve & Create Project
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
-function Info({ k, v }) {
-  return (
-    <div>
-      <div className="text-[9px] tracking-overline text-[var(--muted)]">{k}</div>
-      <div className="font-medium text-[var(--text)]">{v}</div>
-    </div>
-  );
-}

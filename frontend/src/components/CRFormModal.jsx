@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { X, Plus, Trash, MagnifyingGlass, Upload, WarningCircle } from "@phosphor-icons/react";
 import CustomerQuickAddModal from "./CustomerQuickAddModal";
+import Modal from "@/components/common/Modal";
+import StatTile from "@/components/common/StatTile";
 
 const AIRPORTS = ["DIAL", "GHIAL", "GGIAL", "GVIAL", "Other"];
 const MANDAYS_PER_YEAR = 250;
@@ -215,8 +217,8 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/55 z-[60] flex items-center justify-center p-3" data-testid="cr-form-modal">
-      <div className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-5xl max-h-[94vh] overflow-y-auto">
+    <>
+      <Modal onClose={onClose} testid="cr-form-modal" z="z-[60]" className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-5xl max-h-[94vh] overflow-y-auto">
         {/* Header */}
         <div className="p-5 border-b border-[var(--border)] flex justify-between items-center sticky top-0 bg-[var(--surface)] z-10">
           <div>
@@ -384,9 +386,9 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
 
           {/* Margin calculator strip */}
           <div className="col-span-3 grid grid-cols-4 gap-3 mt-2">
-            <Tile label="PO Value" value={fmt(form.po_value)} accent="gold" />
-            <Tile label="Total Cost" value={fmt(totalCost)} />
-            <Tile label="Margin Amount" value={fmt(marginAmount)} />
+            <StatTile size="md" label="PO Value" value={fmt(form.po_value)} accent="gold" />
+            <StatTile size="md" label="Total Cost" value={fmt(totalCost)} />
+            <StatTile size="md" label="Margin Amount" value={fmt(marginAmount)} />
             <Tile
               label="Margin %"
               value={`${marginPct.toFixed(1)} %`}
@@ -508,7 +510,7 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
             <button className="btn-primary" onClick={() => save(true)} disabled={busy} data-testid="cr-submit">{busy ? "Submitting…" : "Save & Submit"}</button>
           </div>
         </div>
-      </div>
+      </Modal>
 
       {showCustAdd && (
         <CustomerQuickAddModal
@@ -521,25 +523,10 @@ export default function CRFormModal({ existing, onClose, onSaved }) {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 
-function Tile({ label, value, accent, testid }) {
-  const colors = {
-    gold: "var(--gold)",
-    success: "var(--success, #22c55e)",
-    danger: "var(--danger)",
-  };
-  return (
-    <div className="tile p-3" data-testid={testid}>
-      <div className="text-[10px] tracking-overline text-[var(--muted)]">{label}</div>
-      <div className="text-lg font-display font-bold mt-1" style={{ color: accent ? colors[accent] : "var(--text)" }}>
-        {value}
-      </div>
-    </div>
-  );
-}
 
 function AssigneePicker({ label, employees, value = [], onChange, testid }) {
   const [q, setQ] = useState("");

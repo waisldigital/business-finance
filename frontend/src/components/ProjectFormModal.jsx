@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { X, Plus, Trash, UserPlus, FilePdf, FileXls, MagicWand, Warning, CheckCircle } from "@phosphor-icons/react";
 import AirplaneButton from "./AirplaneButton";
+import Modal from "@/components/common/Modal";
 
 const empty = {
   project_name: "", wbs_element: "", customer_po_number: "", po_date: "",
@@ -196,238 +197,236 @@ export default function ProjectFormModal({ project, customers: initialCustomers,
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" data-testid="project-modal">
-      <div className="bg-[var(--surface)] w-full max-w-3xl max-h-[90vh] overflow-y-auto border border-[var(--border)]">
-        <div className="flex items-center justify-between p-5 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
-          <div>
-            <div className="text-[10px] tracking-overline text-[var(--muted)]">{project ? "EDIT" : "CREATE"} PROJECT</div>
-            <h2 className="font-display text-xl font-bold">{project ? "Edit Project" : "New Project"}</h2>
+    <Modal onClose={onClose} testid="project-modal" className="bg-[var(--surface)] w-full max-w-3xl max-h-[90vh] overflow-y-auto border border-[var(--border)]">
+      <div className="flex items-center justify-between p-5 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
+        <div>
+          <div className="text-[10px] tracking-overline text-[var(--muted)]">{project ? "EDIT" : "CREATE"} PROJECT</div>
+          <h2 className="font-display text-xl font-bold">{project ? "Edit Project" : "New Project"}</h2>
+        </div>
+        <button className="btn-ghost" onClick={onClose} data-testid="modal-close"><X size={18} /></button>
+      </div>
+
+      <form onSubmit={onSubmit} className="p-5 space-y-5">
+        {/* Smart Auto-Fill Panel — PDF (Customer/Vendor PO) or Excel (SAP Project Master) */}
+        <div className="border border-[var(--border)] p-4 bg-[var(--surface-2)]">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 mt-0.5">
+              <MagicWand size={22} weight="duotone" className="text-[var(--gold)]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] tracking-overline text-[var(--muted)]">Smart Auto-Fill</div>
+              <div className="font-display text-sm font-bold mb-0.5">Pre-fill this form from a PDF or Excel</div>
+              <p className="text-[12px] text-[var(--muted)] mb-3">
+                <span className="font-semibold text-[var(--text)]">PDF</span>: Customer PO (WAISL is the vendor) or Vendor PO (WAISL is the issuer).{" "}
+                <span className="font-semibold text-[var(--text)]">Excel</span>: unified SAP workbook — we read the <span className="font-mono">Project Master</span> sheet and match by <span className="font-mono">WBS Element</span>. Empty fields only — your edits are preserved.
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  ref={pdfRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  onChange={(e) => onPickPdf(e.target.files?.[0])}
+                  data-testid="modal-pdf-input"
+                />
+                <button
+                  type="button"
+                  className="btn-secondary text-xs flex items-center gap-1"
+                  onClick={() => pdfRef.current?.click()}
+                  disabled={parsing}
+                  data-testid="modal-pdf-pick"
+                >
+                  <FilePdf size={12} weight="bold" /> {parsing ? "Parsing PDF…" : (parsePreview ? "Re-pick PDF" : "Choose PDF")}
+                </button>
+                <input
+                  ref={xlsRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => onPickXls(e.target.files?.[0])}
+                  data-testid="modal-xls-input"
+                />
+                <button
+                  type="button"
+                  className="btn-secondary text-xs flex items-center gap-1"
+                  onClick={() => xlsRef.current?.click()}
+                  disabled={xlsParsing}
+                  data-testid="modal-xls-pick"
+                >
+                  <FileXls size={12} weight="bold" /> {xlsParsing ? "Parsing Excel…" : (xlsPreview ? "Re-pick Excel" : "Choose Excel (SAP)")}
+                </button>
+                {parsePreview && (
+                  <span className="text-[11px] text-[var(--muted)] truncate">
+                    {parsePreview.file_name} · {(parsePreview.size / 1024).toFixed(0)} KB
+                  </span>
+                )}
+                {xlsFile && !parsePreview && (
+                  <span className="text-[11px] text-[var(--muted)] truncate">
+                    {xlsFile.name}
+                  </span>
+                )}
+              </div>
+
+              {parseErr && (
+                <div className="text-xs text-[var(--danger)] mt-3 flex items-start gap-1">
+                  <Warning size={12} weight="bold" /> {parseErr}
+                </div>
+              )}
+              {xlsErr && (
+                <div className="text-xs text-[var(--danger)] mt-3 flex items-start gap-1">
+                  <Warning size={12} weight="bold" /> {xlsErr}
+                </div>
+              )}
+
+              {parsePreview?.parsed && <ParsedPreview parsed={parsePreview.parsed} applied={parsePreview.applied} onApply={applyParsed} />}
+
+              {xlsCandidates.length > 0 && (
+                <div className="mt-3 border border-[var(--border)] bg-[var(--surface)] p-3" data-testid="xls-candidates">
+                  <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">Pick the WBS Element from your SAP master ({xlsCandidates.length} found)</div>
+                  <select className="input" defaultValue="" onChange={(e) => e.target.value && pickWbsFromList(e.target.value)} data-testid="xls-wbs-select">
+                    <option value="">— Select a WBS Element —</option>
+                    {xlsCandidates.map((w) => <option key={w} value={w}>{w}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {xlsPreview?.parsed && <ExcelParsedPreview parsed={xlsPreview.parsed} applied={xlsPreview.applied} onApply={applyXlsParsed} />}
+            </div>
           </div>
-          <button className="btn-ghost" onClick={onClose} data-testid="modal-close"><X size={18} /></button>
         </div>
 
-        <form onSubmit={onSubmit} className="p-5 space-y-5">
-          {/* Smart Auto-Fill Panel — PDF (Customer/Vendor PO) or Excel (SAP Project Master) */}
-          <div className="border border-[var(--border)] p-4 bg-[var(--surface-2)]">
-            <div className="flex items-start gap-3">
-              <div className="shrink-0 mt-0.5">
-                <MagicWand size={22} weight="duotone" className="text-[var(--gold)]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] tracking-overline text-[var(--muted)]">Smart Auto-Fill</div>
-                <div className="font-display text-sm font-bold mb-0.5">Pre-fill this form from a PDF or Excel</div>
-                <p className="text-[12px] text-[var(--muted)] mb-3">
-                  <span className="font-semibold text-[var(--text)]">PDF</span>: Customer PO (WAISL is the vendor) or Vendor PO (WAISL is the issuer).{" "}
-                  <span className="font-semibold text-[var(--text)]">Excel</span>: unified SAP workbook — we read the <span className="font-mono">Project Master</span> sheet and match by <span className="font-mono">WBS Element</span>. Empty fields only — your edits are preserved.
-                </p>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    ref={pdfRef}
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    className="hidden"
-                    onChange={(e) => onPickPdf(e.target.files?.[0])}
-                    data-testid="modal-pdf-input"
-                  />
-                  <button
-                    type="button"
-                    className="btn-secondary text-xs flex items-center gap-1"
-                    onClick={() => pdfRef.current?.click()}
-                    disabled={parsing}
-                    data-testid="modal-pdf-pick"
-                  >
-                    <FilePdf size={12} weight="bold" /> {parsing ? "Parsing PDF…" : (parsePreview ? "Re-pick PDF" : "Choose PDF")}
-                  </button>
-                  <input
-                    ref={xlsRef}
-                    type="file"
-                    accept=".xlsx,.xls"
-                    className="hidden"
-                    onChange={(e) => onPickXls(e.target.files?.[0])}
-                    data-testid="modal-xls-input"
-                  />
-                  <button
-                    type="button"
-                    className="btn-secondary text-xs flex items-center gap-1"
-                    onClick={() => xlsRef.current?.click()}
-                    disabled={xlsParsing}
-                    data-testid="modal-xls-pick"
-                  >
-                    <FileXls size={12} weight="bold" /> {xlsParsing ? "Parsing Excel…" : (xlsPreview ? "Re-pick Excel" : "Choose Excel (SAP)")}
-                  </button>
-                  {parsePreview && (
-                    <span className="text-[11px] text-[var(--muted)] truncate">
-                      {parsePreview.file_name} · {(parsePreview.size / 1024).toFixed(0)} KB
-                    </span>
-                  )}
-                  {xlsFile && !parsePreview && (
-                    <span className="text-[11px] text-[var(--muted)] truncate">
-                      {xlsFile.name}
-                    </span>
-                  )}
-                </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Project Name *" required>
+            <input className="input" value={form.project_name} onChange={(e) => set("project_name", e.target.value)} data-testid="form-project-name" />
+          </Field>
+          <Field label="WBS Element *" required>
+            <input className="input font-mono" value={form.wbs_element || ""} onChange={(e) => set("wbs_element", e.target.value)} data-testid="form-wbs" />
+          </Field>
 
-                {parseErr && (
-                  <div className="text-xs text-[var(--danger)] mt-3 flex items-start gap-1">
-                    <Warning size={12} weight="bold" /> {parseErr}
-                  </div>
-                )}
-                {xlsErr && (
-                  <div className="text-xs text-[var(--danger)] mt-3 flex items-start gap-1">
-                    <Warning size={12} weight="bold" /> {xlsErr}
-                  </div>
-                )}
-
-                {parsePreview?.parsed && <ParsedPreview parsed={parsePreview.parsed} applied={parsePreview.applied} onApply={applyParsed} />}
-
-                {xlsCandidates.length > 0 && (
-                  <div className="mt-3 border border-[var(--border)] bg-[var(--surface)] p-3" data-testid="xls-candidates">
-                    <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">Pick the WBS Element from your SAP master ({xlsCandidates.length} found)</div>
-                    <select className="input" defaultValue="" onChange={(e) => e.target.value && pickWbsFromList(e.target.value)} data-testid="xls-wbs-select">
-                      <option value="">— Select a WBS Element —</option>
-                      {xlsCandidates.map((w) => <option key={w} value={w}>{w}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                {xlsPreview?.parsed && <ExcelParsedPreview parsed={xlsPreview.parsed} applied={xlsPreview.applied} onApply={applyXlsParsed} />}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Project Name *" required>
-              <input className="input" value={form.project_name} onChange={(e) => set("project_name", e.target.value)} data-testid="form-project-name" />
-            </Field>
-            <Field label="WBS Element *" required>
-              <input className="input font-mono" value={form.wbs_element || ""} onChange={(e) => set("wbs_element", e.target.value)} data-testid="form-wbs" />
-            </Field>
-
-            <Field label="Customer *" required>
-              <div className="flex gap-2">
-                <select className="input flex-1" value={form.customer_id || ""} onChange={(e) => {
-                  const id = e.target.value;
-                  set("customer_id", id);
-                  const c = customers.find((x) => x.id === id);
-                  set("customer_name", c ? c.customer_name : "");
-                }} data-testid="form-customer">
-                  <option value="">— Select —</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.customer_name}</option>)}
-                </select>
-                <button type="button" className="btn-secondary text-xs flex items-center gap-1 whitespace-nowrap" onClick={() => setShowNewCust(true)} data-testid="add-customer-inline">
-                  <UserPlus size={12} weight="bold" /> New
-                </button>
-              </div>
-            </Field>
-            <Field label="Customer PO Number *" required>
-              <input className="input" value={form.customer_po_number || ""} onChange={(e) => set("customer_po_number", e.target.value)} />
-            </Field>
-
-            <Field label="PO Date *" required><input type="date" className="input" value={form.po_date || ""} onChange={(e) => set("po_date", e.target.value)} /></Field>
-            <Field label="Start Date *" required><input type="date" className="input" value={form.start_date || ""} onChange={(e) => set("start_date", e.target.value)} /></Field>
-            <Field label="End Date *" required><input type="date" className="input" value={form.end_date || ""} onChange={(e) => set("end_date", e.target.value)} /></Field>
-            <Field label="Billing Type *" required>
-              <select className="input" value={form.billing_type} onChange={(e) => set("billing_type", e.target.value)} data-testid="form-billing-type">
-                <option>Monthly</option><option>Milestone</option>
+          <Field label="Customer *" required>
+            <div className="flex gap-2">
+              <select className="input flex-1" value={form.customer_id || ""} onChange={(e) => {
+                const id = e.target.value;
+                set("customer_id", id);
+                const c = customers.find((x) => x.id === id);
+                set("customer_name", c ? c.customer_name : "");
+              }} data-testid="form-customer">
+                <option value="">— Select —</option>
+                {customers.map((c) => <option key={c.id} value={c.id}>{c.customer_name}</option>)}
               </select>
-            </Field>
-
-            <Field label="PO Value (₹) *" required><input type="number" className="input font-mono" value={form.po_value} onChange={(e) => set("po_value", e.target.value)} data-testid="form-po-value" /></Field>
-            <Field label="Revenue Total (₹) *" required><input type="number" className="input font-mono" value={form.revenue_total} onChange={(e) => set("revenue_total", e.target.value)} /></Field>
-            <Field label="Cost Total (₹) *" required><input type="number" className="input font-mono" value={form.cost_total} onChange={(e) => set("cost_total", e.target.value)} /></Field>
-            <Field label="Business Category *" required>
-              <select className="input" value={form.business_category} onChange={(e) => set("business_category", e.target.value)}>
-                <option>GMR</option><option>Non-GMR</option>
-              </select>
-            </Field>
-
-            <Field label="P&L Location *" required><input className="input" value={form.pnl_location || ""} onChange={(e) => set("pnl_location", e.target.value)} /></Field>
-            <Field label="P&L Region *" required><input className="input" value={form.pnl_region || ""} onChange={(e) => set("pnl_region", e.target.value)} /></Field>
-            <Field label="Location *" required><input className="input" value={form.location || ""} onChange={(e) => set("location", e.target.value)} /></Field>
-            <Field label="Ownership Email *" required><input className="input" value={form.ownership_email || ""} onChange={(e) => set("ownership_email", e.target.value)} /></Field>
-
-            <Field label="Description" full><textarea className="input" rows={2} value={form.description || ""} onChange={(e) => set("description", e.target.value)} /></Field>
-            <Field label="Baseline Remarks" full><textarea className="input" rows={2} value={form.baseline_remarks || ""} onChange={(e) => set("baseline_remarks", e.target.value)} /></Field>
-
-            <Field label="Finance SPOC Email"><input className="input" value={form.finance_spoc_email || ""} onChange={(e) => set("finance_spoc_email", e.target.value)} data-testid="form-finance-spoc" /></Field>
-            <Field label="" full>
-              <div className="border border-[var(--border)] p-3">
-                <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">Management Review Flags</div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    ["md_review_required", "MD Review Required"],
-                    ["cfo_review_required", "CFO Review Required"],
-                    ["ceo_visibility", "CEO Visibility"],
-                    ["strategic_deal", "Strategic Deal"],
-                  ].map(([k, lbl]) => (
-                    <label key={k} className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!form[k]}
-                        onChange={(e) => set(k, e.target.checked)}
-                        data-testid={`form-flag-${k}`}
-                      />
-                      {lbl}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </Field>
-          </div>
-
-          {/* Milestones editor */}
-          <div className="border border-[var(--border)] p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-[10px] tracking-overline text-[var(--muted)]">Milestones</div>
-                <div className="text-sm font-medium text-[var(--text)]">
-                  {form.milestones?.length || 0} milestone(s) — auto-extracted from PDF or added manually
-                </div>
-              </div>
-              <button type="button" className="btn-secondary text-xs flex items-center gap-1" onClick={addMilestone} data-testid="add-milestone-btn">
-                <Plus size={12} weight="bold" /> Add Milestone
+              <button type="button" className="btn-secondary text-xs flex items-center gap-1 whitespace-nowrap" onClick={() => setShowNewCust(true)} data-testid="add-customer-inline">
+                <UserPlus size={12} weight="bold" /> New
               </button>
             </div>
-            {form.milestones?.length > 0 ? (
-              <div className="space-y-2">
-                {form.milestones.map((m, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center" data-testid={`milestone-row-${i}`}>
-                    <input className="input col-span-4" placeholder="Milestone name" value={m.milestone_name || ""} onChange={(e) => updateMilestone(i, { milestone_name: e.target.value })} />
-                    <input type="date" className="input col-span-3" value={m.due_date || ""} onChange={(e) => updateMilestone(i, { due_date: e.target.value })} />
-                    <input type="number" className="input col-span-3 font-mono" placeholder="Value" value={m.value || 0} onChange={(e) => updateMilestone(i, { value: e.target.value })} />
-                    <label className="col-span-1 flex items-center gap-1 text-xs text-[var(--muted)]">
-                      <input type="checkbox" checked={!!m.is_billed} onChange={(e) => updateMilestone(i, { is_billed: e.target.checked })} /> Billed
-                    </label>
-                    <button type="button" className="btn-ghost col-span-1" onClick={() => removeMilestone(i)} data-testid={`milestone-remove-${i}`}>
-                      <Trash size={14} />
-                    </button>
-                  </div>
+          </Field>
+          <Field label="Customer PO Number *" required>
+            <input className="input" value={form.customer_po_number || ""} onChange={(e) => set("customer_po_number", e.target.value)} />
+          </Field>
+
+          <Field label="PO Date *" required><input type="date" className="input" value={form.po_date || ""} onChange={(e) => set("po_date", e.target.value)} /></Field>
+          <Field label="Start Date *" required><input type="date" className="input" value={form.start_date || ""} onChange={(e) => set("start_date", e.target.value)} /></Field>
+          <Field label="End Date *" required><input type="date" className="input" value={form.end_date || ""} onChange={(e) => set("end_date", e.target.value)} /></Field>
+          <Field label="Billing Type *" required>
+            <select className="input" value={form.billing_type} onChange={(e) => set("billing_type", e.target.value)} data-testid="form-billing-type">
+              <option>Monthly</option><option>Milestone</option>
+            </select>
+          </Field>
+
+          <Field label="PO Value (₹) *" required><input type="number" className="input font-mono" value={form.po_value} onChange={(e) => set("po_value", e.target.value)} data-testid="form-po-value" /></Field>
+          <Field label="Revenue Total (₹) *" required><input type="number" className="input font-mono" value={form.revenue_total} onChange={(e) => set("revenue_total", e.target.value)} /></Field>
+          <Field label="Cost Total (₹) *" required><input type="number" className="input font-mono" value={form.cost_total} onChange={(e) => set("cost_total", e.target.value)} /></Field>
+          <Field label="Business Category *" required>
+            <select className="input" value={form.business_category} onChange={(e) => set("business_category", e.target.value)}>
+              <option>GMR</option><option>Non-GMR</option>
+            </select>
+          </Field>
+
+          <Field label="P&L Location *" required><input className="input" value={form.pnl_location || ""} onChange={(e) => set("pnl_location", e.target.value)} /></Field>
+          <Field label="P&L Region *" required><input className="input" value={form.pnl_region || ""} onChange={(e) => set("pnl_region", e.target.value)} /></Field>
+          <Field label="Location *" required><input className="input" value={form.location || ""} onChange={(e) => set("location", e.target.value)} /></Field>
+          <Field label="Ownership Email *" required><input className="input" value={form.ownership_email || ""} onChange={(e) => set("ownership_email", e.target.value)} /></Field>
+
+          <Field label="Description" full><textarea className="input" rows={2} value={form.description || ""} onChange={(e) => set("description", e.target.value)} /></Field>
+          <Field label="Baseline Remarks" full><textarea className="input" rows={2} value={form.baseline_remarks || ""} onChange={(e) => set("baseline_remarks", e.target.value)} /></Field>
+
+          <Field label="Finance SPOC Email"><input className="input" value={form.finance_spoc_email || ""} onChange={(e) => set("finance_spoc_email", e.target.value)} data-testid="form-finance-spoc" /></Field>
+          <Field label="" full>
+            <div className="border border-[var(--border)] p-3">
+              <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">Management Review Flags</div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  ["md_review_required", "MD Review Required"],
+                  ["cfo_review_required", "CFO Review Required"],
+                  ["ceo_visibility", "CEO Visibility"],
+                  ["strategic_deal", "Strategic Deal"],
+                ].map(([k, lbl]) => (
+                  <label key={k} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!form[k]}
+                      onChange={(e) => set(k, e.target.checked)}
+                      data-testid={`form-flag-${k}`}
+                    />
+                    {lbl}
+                  </label>
                 ))}
               </div>
-            ) : (
-              <div className="text-sm text-[var(--muted)] py-4 text-center border border-dashed border-[var(--border)]">
-                No milestones yet. PDF auto-parse can pre-fill these — or click <span className="font-semibold text-[var(--gold)]">Add Milestone</span>.
+            </div>
+          </Field>
+        </div>
+
+        {/* Milestones editor */}
+        <div className="border border-[var(--border)] p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[10px] tracking-overline text-[var(--muted)]">Milestones</div>
+              <div className="text-sm font-medium text-[var(--text)]">
+                {form.milestones?.length || 0} milestone(s) — auto-extracted from PDF or added manually
               </div>
-            )}
+            </div>
+            <button type="button" className="btn-secondary text-xs flex items-center gap-1" onClick={addMilestone} data-testid="add-milestone-btn">
+              <Plus size={12} weight="bold" /> Add Milestone
+            </button>
           </div>
+          {form.milestones?.length > 0 ? (
+            <div className="space-y-2">
+              {form.milestones.map((m, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 items-center" data-testid={`milestone-row-${i}`}>
+                  <input className="input col-span-4" placeholder="Milestone name" value={m.milestone_name || ""} onChange={(e) => updateMilestone(i, { milestone_name: e.target.value })} />
+                  <input type="date" className="input col-span-3" value={m.due_date || ""} onChange={(e) => updateMilestone(i, { due_date: e.target.value })} />
+                  <input type="number" className="input col-span-3 font-mono" placeholder="Value" value={m.value || 0} onChange={(e) => updateMilestone(i, { value: e.target.value })} />
+                  <label className="col-span-1 flex items-center gap-1 text-xs text-[var(--muted)]">
+                    <input type="checkbox" checked={!!m.is_billed} onChange={(e) => updateMilestone(i, { is_billed: e.target.checked })} /> Billed
+                  </label>
+                  <button type="button" className="btn-ghost col-span-1" onClick={() => removeMilestone(i)} data-testid={`milestone-remove-${i}`}>
+                    <Trash size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-[var(--muted)] py-4 text-center border border-dashed border-[var(--border)]">
+              No milestones yet. PDF auto-parse can pre-fill these — or click <span className="font-semibold text-[var(--gold)]">Add Milestone</span>.
+            </div>
+          )}
+        </div>
 
-          {err && <div className="text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] p-2 border border-[var(--danger)]">{err}</div>}
+        {err && <div className="text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] p-2 border border-[var(--danger)]">{err}</div>}
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-            <AirplaneButton
-              type="submit"
-              disabled={busy}
-              testid="form-submit"
-            >
-              {busy ? "Saving…" : "Save Project"}
-            </AirplaneButton>
-          </div>
-        </form>
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <AirplaneButton
+            type="submit"
+            disabled={busy}
+            testid="form-submit"
+          >
+            {busy ? "Saving…" : "Save Project"}
+          </AirplaneButton>
+        </div>
+      </form>
 
-        {showNewCust && <InlineCustomerForm onClose={() => setShowNewCust(false)} onCreated={onCustomerCreated} />}
-      </div>
-    </div>
+      {showNewCust && <InlineCustomerForm onClose={() => setShowNewCust(false)} onCreated={onCustomerCreated} />}
+    </Modal>
   );
 }
 
@@ -592,26 +591,24 @@ function InlineCustomerForm({ onClose, onCreated }) {
     } finally { setBusy(false); }
   };
   return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" data-testid="inline-customer-modal">
-      <form onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-md">
-        <div className="p-5 border-b border-[var(--border)] flex justify-between items-center">
-          <h3 className="font-display text-lg font-bold">Quick Add Customer</h3>
-          <button type="button" className="btn-ghost" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="p-5 space-y-3">
-          <input className="input" required placeholder="Customer Name *" value={form.customer_name} onChange={(e) => set("customer_name", e.target.value)} data-testid="inline-cust-name" />
-          <input className="input" placeholder="SAP Customer Code" value={form.sap_customer_code} onChange={(e) => set("sap_customer_code", e.target.value)} />
-          <input className="input" placeholder="Contact Person" value={form.contact_person} onChange={(e) => set("contact_person", e.target.value)} />
-          <input className="input" type="email" placeholder="Email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-          <input className="input" placeholder="Phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
-          <input className="input" placeholder="Country" value={form.country} onChange={(e) => set("country", e.target.value)} />
-          {err && <div className="text-xs text-[var(--danger)]">{err}</div>}
-        </div>
-        <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy} data-testid="inline-cust-submit">{busy ? "Creating…" : "Create Customer"}</button>
-        </div>
-      </form>
-    </div>
+    <Modal onClose={onClose} testid="inline-customer-modal" z="z-[60]" as="form" onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-md">
+      <div className="p-5 border-b border-[var(--border)] flex justify-between items-center">
+        <h3 className="font-display text-lg font-bold">Quick Add Customer</h3>
+        <button type="button" className="btn-ghost" onClick={onClose}><X size={16} /></button>
+      </div>
+      <div className="p-5 space-y-3">
+        <input className="input" required placeholder="Customer Name *" value={form.customer_name} onChange={(e) => set("customer_name", e.target.value)} data-testid="inline-cust-name" />
+        <input className="input" placeholder="SAP Customer Code" value={form.sap_customer_code} onChange={(e) => set("sap_customer_code", e.target.value)} />
+        <input className="input" placeholder="Contact Person" value={form.contact_person} onChange={(e) => set("contact_person", e.target.value)} />
+        <input className="input" type="email" placeholder="Email" value={form.email} onChange={(e) => set("email", e.target.value)} />
+        <input className="input" placeholder="Phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} />
+        <input className="input" placeholder="Country" value={form.country} onChange={(e) => set("country", e.target.value)} />
+        {err && <div className="text-xs text-[var(--danger)]">{err}</div>}
+      </div>
+      <div className="p-5 border-t border-[var(--border)] flex justify-end gap-2">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy} data-testid="inline-cust-submit">{busy ? "Creating…" : "Create Customer"}</button>
+      </div>
+    </Modal>
   );
 }

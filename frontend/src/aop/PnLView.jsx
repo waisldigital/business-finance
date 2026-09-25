@@ -5,7 +5,7 @@ import { Globe, AirplaneTilt, Prohibit, LockSimple, ArrowClockwise, DownloadSimp
 import { fmtAmount, fmtPct, download, unitDiv, unitLabel } from "./format";
 import ColumnSettings, { usePersistedColumns } from "./ColumnSettings";
 import { useTree } from "./mis";
-import { TreeLabel, ExpandButtons, Modal } from "./MisCommon";
+import { TreeLabel, ExpandButtons, MisModal } from "./MisCommon";
 import RevenuePerformance from "./RevenuePerformance";
 
 // Headline ratios stay visible when the P&L is collapsed to its consolidated view
@@ -161,9 +161,9 @@ export default function PnLView({ unit: unitProp, onDrill }) {
         </div>
       )}
       {drill && (
-        <Modal title="Revenue performance — Actuals vs AOP" onClose={() => setDrill(false)} testid="revenue-drill">
+        <MisModal title="Revenue performance — Actuals vs AOP" onClose={() => setDrill(false)} testid="revenue-drill">
           <RevenuePerformance unit={unit} geo={geo} tag={tag} embedded />
-        </Modal>
+        </MisModal>
       )}
     </div>
   );

@@ -12,6 +12,7 @@ import {
 import { useApprovalsInbox } from "@/lib/approvals";
 import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
 import NotificationBell from "./NotificationBell";
+import Popover from "@/components/common/Popover";
 import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
@@ -164,37 +165,20 @@ export default function AppLayout({ children, portal = "app" }) {
             <NotificationBell />
 
             {/* Theme picker */}
-            <div className="relative">
+            <Popover open={showThemes} onOpenChange={setShowThemes} panelClassName="mt-2 w-56 bg-[var(--surface)] border border-[var(--border)] z-50 shadow-lg"
+                     panelTestid="theme-menu" button={(open, toggle) => (
               <button
                 className="btn-secondary text-xs flex items-center gap-1.5"
-                onClick={() => setShowThemes((v) => !v)}
+                onClick={toggle}
                 data-testid="theme-toggle-btn"
                 title="Change theme"
               >
                 <Palette size={14} weight="duotone" />
                 <span className="hidden md:inline capitalize">{themes.find((t) => t.key === theme)?.label}</span>
               </button>
-              {showThemes && (
-                <div className="absolute right-0 mt-2 w-56 bg-[var(--surface)] border border-[var(--border)] z-50 shadow-lg" data-testid="theme-menu">
-                  {themes.map((t) => (
-                    <button
-                      key={t.key}
-                      className={`w-full px-3 py-2 text-left text-sm flex items-center gap-3 hover:bg-[var(--row-hover)] ${theme === t.key ? "text-[var(--gold)] font-semibold" : ""}`}
-                      onClick={() => { setTheme(t.key); setShowThemes(false); }}
-                      data-testid={`theme-option-${t.key}`}
-                    >
-                      <div className="flex h-5 w-10">
-                        {t.swatch.map((c, i) => <div key={i} style={{ background: c, flex: 1 }} />)}
-                      </div>
-                      <div className="flex-1">
-                        <div>{t.label}</div>
-                        <div className="text-[10px] tracking-overline text-[var(--muted)]">{t.mode}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            )}>
+              <ThemeOptions theme={theme} themes={themes} onPick={(k) => { setTheme(k); setShowThemes(false); }} />
+            </Popover>
 
             {/* Number format: ₹ Crore · ₹ Lakh · $ Million — drives every screen */}
             <div className="flex items-center bg-[var(--surface-2)] border border-[var(--border)] p-0.5" data-testid="currency-toggle">
@@ -212,4 +196,23 @@ export default function AppLayout({ children, portal = "app" }) {
       </div>
     </div>
   );
+}
+
+function ThemeOptions({ theme, themes, onPick }) {
+  return themes.map((t) => (
+    <button
+      key={t.key}
+      className={`w-full px-3 py-2 text-left text-sm flex items-center gap-3 hover:bg-[var(--row-hover)] ${theme === t.key ? "text-[var(--gold)] font-semibold" : ""}`}
+      onClick={() => onPick(t.key)}
+      data-testid={`theme-option-${t.key}`}
+    >
+      <div className="flex h-5 w-10">
+        {t.swatch.map((c, i) => <div key={i} style={{ background: c, flex: 1 }} />)}
+      </div>
+      <div className="flex-1">
+        <div>{t.label}</div>
+        <div className="text-[10px] tracking-overline text-[var(--muted)]">{t.mode}</div>
+      </div>
+    </button>
+  ));
 }

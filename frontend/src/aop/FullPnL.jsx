@@ -3,7 +3,7 @@ import api from "@/lib/api";
 import { GearSix, DownloadSimple, ArrowClockwise, LockSimple, Info } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, periodPrefix, useTree, csvDownload, usePref } from "./mis";
-import { TreeLabel, ExpandButtons, PeriodPicker, Popover, Check, useFilters, FilterBar, Modal } from "./MisCommon";
+import { TreeLabel, ExpandButtons, PeriodPicker, Popover, Check, useFilters, FilterBar, MisModal } from "./MisCommon";
 import RevenuePerformance from "./RevenuePerformance";
 import { SharedDefault } from "./GridSettings";
 import { useAuth } from "@/lib/auth";
@@ -174,9 +174,9 @@ export default function FullPnL({ unit, onDrill }) {
         </div>
       )}
       {drill && (
-        <Modal title="Revenue performance — Actuals vs AOP" onClose={() => setDrill(false)} testid="revenue-drill">
+        <MisModal title="Revenue performance — Actuals vs AOP" onClose={() => setDrill(false)} testid="revenue-drill">
           <RevenuePerformance unit={unit} geo={f.geo} tag={f.tag} initialMonth={month} embedded />
-        </Modal>
+        </MisModal>
       )}
     </div>
   );

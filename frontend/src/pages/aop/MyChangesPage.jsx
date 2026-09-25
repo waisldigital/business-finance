@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import { ClockCounterClockwise } from "@phosphor-icons/react";
 
 export default function MyChangesPage() {
@@ -9,7 +9,7 @@ export default function MyChangesPage() {
   useEffect(() => { api.get("/aop/changes", { params: { status } }).then((r) => setRows(r.data)); }, [status]);
   return (
     <div data-testid="aop-my-changes">
-      <Header icon={ClockCounterClockwise} title="My changes" subtitle="AOP edits you made that need (or needed) admin approval"
+      <PageHeader compact icon={ClockCounterClockwise} title="My changes" subtitle="AOP edits you made that need (or needed) admin approval"
               actions={<div className="seg">{["pending", "approved", "rejected"].map((s) => <button key={s} className={status === s ? "on" : ""} onClick={() => setStatus(s)}>{s}</button>)}</div>} />
       <div className="p-3">
         <table className="w-full text-xs border border-[var(--border)] bg-[var(--surface)]">

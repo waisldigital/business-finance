@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
-import Header from "@/aop/Header";
+import PageHeader from "@/components/PageHeader";
 import { CheckSquareOffset, Check, X, ArrowClockwise } from "@phosphor-icons/react";
 
 export default function AdminAopApprovals() {
@@ -19,7 +19,7 @@ export default function AdminAopApprovals() {
   };
   return (
     <div data-testid="admin-aop-approvals">
-      <Header icon={CheckSquareOffset} title="AOP approvals" subtitle="User edits waiting for approval (sections set to 'with approval' in Plan settings)"
+      <PageHeader compact icon={CheckSquareOffset} title="AOP approvals" subtitle="User edits waiting for approval (sections set to 'with approval' in Plan settings)"
               actions={
                 <>
                   <div className="seg">

@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import CommonModal from "@/components/common/Modal";
+import CommonPopover from "@/components/common/Popover";
+import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Globe, AirplaneTilt, CalendarBlank, ArrowsInLineVertical, ArrowsOutLineVertical, LockSimple, X } from "@phosphor-icons/react";
 import { PERIODS } from "./mis";
@@ -48,20 +50,16 @@ export function PeriodPicker({ period, month, months, onChange, testid = "period
 }
 
 export function Popover({ icon, label, children, testid, width = "w-64" }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
   return (
-    <div className="relative" ref={ref}>
-      <button className={`icon-btn ${open ? "!border-[var(--gold)] !text-[var(--gold)]" : ""}`} onClick={() => setOpen((o) => !o)} data-testid={testid} title={typeof label === "string" ? label : undefined}>
-        {icon}{label && typeof label !== "string" ? label : null}
-      </button>
-      {open && <div className={`absolute right-0 mt-1 z-40 ${width} bg-[var(--surface)] border border-[var(--border)] shadow-lg text-xs`} data-testid={`${testid}-panel`}>{children}</div>}
-    </div>
+    <CommonPopover panelClassName={`mt-1 z-40 ${width} bg-[var(--surface)] border border-[var(--border)] shadow-lg text-xs`} panelTestid={`${testid}-panel`}
+                   button={(open, toggle) => (
+                     <button className={`icon-btn ${open ? "!border-[var(--gold)] !text-[var(--gold)]" : ""}`} onClick={toggle} data-testid={testid}
+                             title={typeof label === "string" ? label : undefined}>
+                       {icon}{label && typeof label !== "string" ? label : null}
+                     </button>
+                   )}>
+      {children}
+    </CommonPopover>
   );
 }
 
@@ -103,21 +101,16 @@ export function FilterBar({ f }) {
   );
 }
 
-export function Modal({ title, onClose, children, testid }) {
-  useEffect(() => {
-    const esc = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", esc);
-    return () => document.removeEventListener("keydown", esc);
-  }, [onClose]);
+// MIS-styled dialog (drill-downs over a report) on the shared Modal
+export function MisModal({ title, onClose, children, testid }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-auto" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="mis mis-card w-full max-w-[1200px] shadow-2xl" data-testid={testid}>
-        <div className="mis-title">
-          <span className="text-sm font-semibold flex-1">{title}</span>
-          <button onClick={onClose} className="text-white/80 hover:text-white" title="Close (Esc)"><X size={14} /></button>
-        </div>
-        <div className="p-2">{children}</div>
+    <CommonModal onClose={onClose} closeOnOverlay panelTestid={testid}
+                 className="mis mis-card w-full max-w-[1200px] max-h-[94vh] overflow-auto shadow-2xl">
+      <div className="mis-title">
+        <span className="text-sm font-semibold flex-1">{title}</span>
+        <button onClick={onClose} className="text-white/80 hover:text-white" title="Close (Esc)"><X size={14} /></button>
       </div>
-    </div>
+      <div className="p-2">{children}</div>
+    </CommonModal>
   );
 }
