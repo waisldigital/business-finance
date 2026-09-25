@@ -25,7 +25,9 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 import openpyxl
 
-from .datasets import (ACTUALS, AOP_SECTIONS, CUTE_LEAD, DRIVER_LEAD, SPECS, VERSION_KEY, build_key, coerce, column, norm,
+from sections import AOP_SECTIONS
+
+from .datasets import (ACTUALS, CUTE_LEAD, DRIVER_LEAD, SPECS, VERSION_KEY, build_key, coerce, column, norm,
                        slug, wide_columns, widen_cute, widen_drivers)
 from .importer import Result, import_aop_workbook, import_opex_workbook
 from .actuals_import import (import_mis_working, import_project_health, import_reporting_package, import_resource_cost,

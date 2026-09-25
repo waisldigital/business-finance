@@ -5,36 +5,27 @@ import { useCurrency } from "@/lib/currency";
 import { useTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import {
-  ChartLineUp, FolderSimple, Database, UploadSimple, GavelIcon,
-  ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
-  Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, 
-  Table, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
+  Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Wallet, Truck, UserCircle, Palette,
+  Gear, CaretLeft, CaretRight, Table, SlidersHorizontal, Gauge, FileArrowUp, CheckSquareOffset,
   PresentationChart, Stamp,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
+import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
 import NotificationBell from "./NotificationBell";
 import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
+// Workspace sidebar: built from the section registry, plus the approvals inbox and the AOP change log
+const navItem = (x) => ({ to: x.path, label: x.nav.label, icon: x.nav.icon, testid: x.nav.testid,
+                          ...(x.nav.sections ? { sections: x.nav.sections } : { section: x.key }), confidential: x.confidential });
 const USER_NAV = [
-  { title: "Workspace", items: [
-    { to: "/app/approvals",       label: "My approvals",     icon: Stamp,           testid: "sidebar-my-approvals",    approvals: true },
-    { to: "/app/dashboard",       label: "Dashboard",        icon: ChartLineUp,     testid: "sidebar-dashboard",       section: "dashboard" },
-    { to: "/app/pipeline",        label: "Pipeline",         icon: FunnelSimple,    testid: "sidebar-pipeline",        section: "pipeline" },
-    { to: "/app/projects",        label: "Projects",         icon: FolderSimple,    testid: "sidebar-projects",        section: "projects" },
-    { to: "/app/change-requests", label: "Change Requests",  icon: ArrowsClockwise, testid: "sidebar-change-requests", section: "change_requests" },
-    { to: "/app/customers",       label: "Customer Profile", icon: UsersThree,      testid: "sidebar-customers",       section: "customer_profile" },
-    { to: "/app/wbs-budget",      label: "WBS and Budget",   icon: Stack,           testid: "sidebar-wbs-budget",      section: "wbs_budget" },
+  { title: GROUPS.workspace, items: [
+    { to: "/app/approvals", label: "My approvals", icon: Stamp, testid: "sidebar-my-approvals", approvals: true },
+    ...SECTIONS.filter((x) => x.group === "workspace" && x.nav).map(navItem),
   ]},
-  { title: "Annual Operating Plan", items: [
-    { to: "/app/aop/reports",   label: "AOP reports", icon: PresentationChart, testid: "sidebar-aop-reports", sections: ["aop_pnl", "aop_reports"] },
-    { to: "/app/aop/inputs",    label: "AOP Inputs", icon: SlidersHorizontal, testid: "sidebar-aop-inputs", section: "aop_inputs" },
-    { to: "/app/aop/revenue",   label: "Revenue",    icon: TrendUp,        testid: "sidebar-aop-revenue",   section: "aop_revenue" },
-    { to: "/app/aop/opex",      label: "Opex & POs", icon: Receipt,        testid: "sidebar-aop-opex",      section: "aop_opex" },
-    { to: "/app/aop/overheads", label: "Overheads",  icon: Buildings,      testid: "sidebar-aop-overheads", section: "aop_overheads" },
-    { to: "/app/aop/payroll",   label: "Payroll",    icon: LockKey,        testid: "sidebar-aop-payroll",   section: "aop_payroll" },
-    { to: "/app/aop/capex",     label: "Capex",      icon: HardDrives,     testid: "sidebar-aop-capex",     section: "aop_capex" },
-    { to: "/app/aop/changes",   label: "My changes", icon: ClockCounterClockwise, testid: "sidebar-aop-changes", anyAop: true },
+  { title: GROUPS.aop, items: [
+    ...SECTIONS.filter((x) => x.group === "aop" && x.nav).map(navItem),
+    { to: "/app/aop/changes", label: "My changes", icon: ClockCounterClockwise, testid: "sidebar-aop-changes", anyAop: true },
   ]},
 ];
 
@@ -58,7 +49,6 @@ const ADMIN_NAV = [
   ]},
 ];
 
-const AOP_SECTIONS = ["aop_pnl", "aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex", "aop_reports"];
 
 export default function AppLayout({ children, portal = "app" }) {
   const { user, logout } = useAuth();
@@ -79,7 +69,7 @@ export default function AppLayout({ children, portal = "app" }) {
   const onApprovals = typeof window !== "undefined" && window.location.pathname.startsWith("/app/approvals");
   const canSee = (n) => {
     if (n.approvals) return inbox.count > 0 || onApprovals; // shown while something waits for this user
-    if (n.anyAop) return AOP_SECTIONS.some((sec) => permissions?.[sec]?.can_view);
+    if (n.anyAop) return AOP_SECTION_KEYS.some((sec) => permissions?.[sec]?.can_view);
     if (n.sections) return n.sections.some((sec) => permissions?.[sec]?.can_view);
     return !!permissions?.[n.section]?.can_view;
   };

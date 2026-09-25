@@ -1,24 +1,10 @@
 import React, { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
+import { SECTIONS as ALL_SECTIONS } from "@/config/sections";
 import { Plus, PencilSimple, Trash, X, Eye, PencilLine, ShieldStar, Warning, UploadSimple } from "@phosphor-icons/react";
 
-const SECTIONS = [
-  { key: "dashboard",        label: "Dashboard" },
-  { key: "pipeline",         label: "Pipeline" },
-  { key: "projects",         label: "Projects" },
-  { key: "change_requests",  label: "Change Requests" },
-  { key: "customer_profile", label: "Customer Profile" },
-  { key: "wbs_budget",       label: "WBS and Budget" },
-  { key: "aop_pnl",          label: "AOP · P&L" },
-  { key: "aop_inputs",       label: "AOP · Inputs" },
-  { key: "aop_revenue",      label: "AOP · Revenue" },
-  { key: "aop_opex",         label: "AOP · Opex & POs" },
-  { key: "aop_overheads",    label: "AOP · Overheads" },
-  { key: "aop_payroll",      label: "AOP · Payroll (confidential)" },
-  { key: "aop_capex",        label: "AOP · Capex" },
-  { key: "aop_reports",      label: "AOP · Reports" },
-];
+const SECTIONS = ALL_SECTIONS.map(({ key, label }) => ({ key, label }));
 
 const EMPTY_PERMS = SECTIONS.reduce((acc, s) => {
   acc[s.key] = { can_view: false, can_edit: false, can_upload: false };

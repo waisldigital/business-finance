@@ -81,3 +81,11 @@ def test_dashboard_empty_scope_sums_nothing(client, admin):
     d = client.get("/api/dashboard/summary", headers=admin, params={"customer_ids": "no-such-customer"}).json()
     assert d["totals"]["total_projects"] == 0 and d["recognized_unbilled"]["recognized"] == 0
     assert client.get("/api/dashboard/summary", headers=admin, params={"section": "projects"}).status_code == 200
+
+
+def test_frontend_and_backend_sections_match():
+    import pathlib
+    import re
+    from sections import SECTIONS
+    js = (pathlib.Path(__file__).parents[2] / "frontend/src/config/sections.js").read_text()
+    assert re.findall(r'\{ key: "([a-z_]+)"', js) == SECTIONS

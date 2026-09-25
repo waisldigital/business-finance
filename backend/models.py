@@ -1,5 +1,7 @@
 """Pydantic models for WAISL FinSight."""
 from pydantic import BaseModel, EmailStr
+
+from sections import SECTIONS
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timezone
 import uuid
@@ -60,23 +62,7 @@ class PasswordChange(BaseModel):
 
 
 # ---------- ROLE (workspace section permissions) ----------
-WORKSPACE_SECTIONS = [
-    "dashboard",
-    "pipeline",
-    "projects",
-    "change_requests",
-    "customer_profile",
-    "wbs_budget",
-    # AOP (Annual Operating Plan) sections
-    "aop_pnl",
-    "aop_inputs",
-    "aop_revenue",
-    "aop_opex",
-    "aop_overheads",
-    "aop_payroll",  # confidential — gates resource-cost lines everywhere, P&L included
-    "aop_capex",
-    "aop_reports",
-]
+WORKSPACE_SECTIONS = SECTIONS  # every section a role can grant (sections.py)
 
 
 class SectionPermission(BaseModel):

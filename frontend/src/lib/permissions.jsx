@@ -1,29 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { emptyPermissions } from "@/config/sections";
 
 const PermsCtx = createContext(null);
 
-const EMPTY = {
-  is_admin: false,
-  is_permanent_admin: false,
-  permissions: {
-    dashboard: { can_view: false, can_edit: false, can_delete: false },
-    pipeline: { can_view: false, can_edit: false, can_delete: false },
-    projects: { can_view: false, can_edit: false, can_delete: false },
-    change_requests: { can_view: false, can_edit: false, can_delete: false },
-    customer_profile: { can_view: false, can_edit: false, can_delete: false },
-    wbs_budget: { can_view: false, can_edit: false, can_delete: false },
-    aop_pnl: { can_view: false, can_edit: false, can_delete: false },
-    aop_inputs: { can_view: false, can_edit: false, can_delete: false },
-    aop_revenue: { can_view: false, can_edit: false, can_delete: false },
-    aop_opex: { can_view: false, can_edit: false, can_delete: false },
-    aop_overheads: { can_view: false, can_edit: false, can_delete: false },
-    aop_payroll: { can_view: false, can_edit: false, can_delete: false },
-    aop_capex: { can_view: false, can_edit: false, can_delete: false },
-    aop_reports: { can_view: false, can_edit: false, can_delete: false },
-  },
-};
+const EMPTY = { is_admin: false, is_permanent_admin: false, permissions: emptyPermissions() };
 
 export function PermissionsProvider({ children }) {
   const { user } = useAuth();
@@ -66,6 +48,7 @@ export function useCan(section, action = "view") {
   if (!p) return false;
   if (action === "view") return !!p.can_view;
   if (action === "edit") return !!p.can_edit;
+  if (action === "upload") return !!p.can_upload;
   if (action === "delete") return !!p.can_delete;
   return false;
 }

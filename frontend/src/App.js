@@ -31,6 +31,17 @@ import AdminDataPage from "@/pages/admin/AdminDataPage";
 import AdminImportsPage from "@/pages/admin/AdminImportsPage";
 import AdminAopApprovals from "@/pages/admin/AdminAopApprovals";
 import AdminPlanSettings from "@/pages/admin/AdminPlanSettings";
+import { SECTIONS, LANDING, AOP_SECTION_KEYS } from "@/config/sections";
+
+// the page each workspace section opens (sections sharing a path share its page and its route guard)
+const SECTION_PAGES = {
+  dashboard: <DashboardPage />, pipeline: <PipelinePage />, projects: <ProjectsPage />,
+  change_requests: <ChangeRequestsPage />, customer_profile: <MasterPage entityKey="customers" />,
+  wbs_budget: <WBSBudgetPage />, aop_pnl: <AopReportsPage />,
+  ...Object.fromEntries(["aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex"]
+    .map((k) => [k, <AopSectionPage section={k} />])),
+};
+const sectionsAt = (path) => SECTIONS.filter((x) => x.path === path).map((x) => x.key);
 
 const Loading = () => (
   <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
@@ -38,14 +49,6 @@ const Loading = () => (
   </div>
 );
 
-// User workspace sections in landing order: (path, section)
-const USER_HOMES = [
-  ["/app/dashboard", "dashboard"], ["/app/aop/reports", "aop_pnl"], ["/app/aop/inputs", "aop_inputs"],
-  ["/app/aop/revenue", "aop_revenue"], ["/app/aop/opex", "aop_opex"], ["/app/aop/overheads", "aop_overheads"],
-  ["/app/aop/payroll", "aop_payroll"], ["/app/aop/capex", "aop_capex"], ["/app/aop/reports", "aop_reports"], ["/app/pipeline", "pipeline"],
-  ["/app/projects", "projects"], ["/app/change-requests", "change_requests"], ["/app/customers", "customer_profile"],
-  ["/app/wbs-budget", "wbs_budget"],
-];
 
 // /admin/* — system admin only. Anyone else is sent to their workspace.
 function AdminRoute({ children }) {
@@ -74,10 +77,10 @@ function UserRoute({ section, sections, anyAop, children }) {
   if (!user) return <Navigate to="/login" replace />;
   if (user.role === "admin") return <Navigate to="/admin" replace />;
   const allowed = anyAop
-    ? Object.keys(permissions || {}).some((k) => k.startsWith("aop_") && permissions[k]?.can_view)
+    ? AOP_SECTION_KEYS.some((k) => permissions?.[k]?.can_view)
     : sections ? sections.some((s) => permissions?.[s]?.can_view) : !!permissions?.[section]?.can_view;
   if (!allowed) {
-    const first = USER_HOMES.find(([, s]) => permissions?.[s]?.can_view);
+    const first = LANDING.find(([, s]) => permissions?.[s]?.can_view);
     return <Navigate to={first ? first[0] : "/app"} replace />;
   }
   return <AppLayout portal="app">{children}</AppLayout>;
@@ -89,7 +92,7 @@ function UserHome() {
   if (user === null || loading) return <Loading />;
   if (!user) return <Navigate to="/login" replace />;
   if (user.role === "admin") return <Navigate to="/admin" replace />;
-  const first = USER_HOMES.find(([, s]) => permissions?.[s]?.can_view);
+  const first = LANDING.find(([, s]) => permissions?.[s]?.can_view);
   if (first) return <Navigate to={first[0]} replace />;
   return (
     <AppLayout portal="app">
@@ -128,24 +131,14 @@ function App() {
 
                   {/* ---------- user workspace ---------- */}
                   <Route path="/app" element={<UserHome />} />
-                  <Route path="/app/dashboard" element={U("dashboard", <DashboardPage />)} />
-                  <Route path="/app/projects" element={U("projects", <ProjectsPage />)} />
+                  {SECTIONS.filter((x) => SECTION_PAGES[x.key]).map((x) => (
+                    <Route key={x.key} path={x.path} element={<UserRoute sections={sectionsAt(x.path)}>{SECTION_PAGES[x.key]}</UserRoute>} />
+                  ))}
                   <Route path="/app/projects/:id" element={U("projects", <ProjectDetailPage />)} />
-                  <Route path="/app/pipeline" element={U("pipeline", <PipelinePage />)} />
-                  <Route path="/app/change-requests" element={U("change_requests", <ChangeRequestsPage />)} />
+                  <Route path="/app/customers/:id" element={U("customer_profile", <CustomerProfilePage />)} />
                   <Route path="/app/change-requests/:id" element={<SignedIn adminToo><CRLinkPage /></SignedIn>} />
                   <Route path="/app/approvals" element={<SignedIn><MyApprovalsPage /></SignedIn>} />
-                  <Route path="/app/wbs-budget" element={U("wbs_budget", <WBSBudgetPage />)} />
-                  <Route path="/app/customers" element={U("customer_profile", <MasterPage entityKey="customers" />)} />
-                  <Route path="/app/customers/:id" element={U("customer_profile", <CustomerProfilePage />)} />
                   <Route path="/app/aop/pnl" element={<Navigate to="/app/aop/reports" replace />} />
-                  <Route path="/app/aop/inputs" element={U("aop_inputs", <AopSectionPage section="aop_inputs" />)} />
-                  <Route path="/app/aop/revenue" element={U("aop_revenue", <AopSectionPage section="aop_revenue" />)} />
-                  <Route path="/app/aop/opex" element={U("aop_opex", <AopSectionPage section="aop_opex" />)} />
-                  <Route path="/app/aop/overheads" element={U("aop_overheads", <AopSectionPage section="aop_overheads" />)} />
-                  <Route path="/app/aop/payroll" element={U("aop_payroll", <AopSectionPage section="aop_payroll" />)} />
-                  <Route path="/app/aop/capex" element={U("aop_capex", <AopSectionPage section="aop_capex" />)} />
-                  <Route path="/app/aop/reports" element={<UserRoute sections={["aop_pnl", "aop_reports"]}><AopReportsPage /></UserRoute>} />
                   <Route path="/app/aop/changes" element={<UserRoute anyAop><MyChangesPage /></UserRoute>} />
 
                   {/* ---------- admin portal ---------- */}

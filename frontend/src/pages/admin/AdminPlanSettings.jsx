@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { SECTIONS as ALL_SECTIONS } from "@/config/sections";
 import api from "@/lib/api";
 import Header from "@/aop/Header";
 import { SlidersHorizontal, FloppyDisk, CheckCircle, PencilSimpleLine, ShieldCheck, MagicWand, PresentationChart, Eye, EyeSlash } from "@phosphor-icons/react";
@@ -10,10 +11,8 @@ const DRIVERS = [
   ["payroll_loading", "Payroll CTC loading"], ["overhead_escalation", "Overhead escalation on CC+GL run-rate"],
 ];
 
-const SECTIONS = [
-  ["aop_inputs", "AOP inputs"], ["aop_revenue", "Revenue"], ["aop_opex", "Opex & POs"], ["aop_overheads", "Overheads"],
-  ["aop_payroll", "Payroll"], ["aop_capex", "Capex"],
-];
+// sections whose user edits can go straight in or through approval (AOP data sections)
+const SECTIONS = ALL_SECTIONS.filter((x) => x.group === "aop" && x.nav && !x.nav.sections).map((x) => [x.key, x.nav.label]);
 
 const F = ({ label, children }) => (
   <label className="block"><span className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">{label}</span>{children}</label>

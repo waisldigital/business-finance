@@ -21,17 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-# Permission sections (added to WORKSPACE_SECTIONS so the existing roles screen manages them)
-AOP_SECTIONS = [
-    "aop_pnl",        # P&L views
-    "aop_inputs",     # Assumptions / drivers for the next AOP
-    "aop_revenue",    # CUTE / Non-CUTE / CR / Projects
-    "aop_opex",       # Opex lines, PO tracker, PO register
-    "aop_overheads",  # Department overheads (WBS original budget, CC+GL plan)
-    "aop_payroll",    # Confidential
-    "aop_capex",
-    "aop_reports",
-]
+# Permission sections for the AOP screens live in sections.py (AOP_SECTIONS)
 
 ACTUALS = "actuals"  # pseudo-dataset backed by the aop_actuals collection
 
