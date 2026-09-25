@@ -33,6 +33,7 @@ from models import (
     ChangeRequestIn, ChangeRequestOut, CRAttachmentOut, CR_AIRPORTS,
     InAppNotificationOut,
 )
+from storage import delete_legacy, make_storage, open_legacy
 from permissions import allows, make_require_section, normalize_role_permissions, resolve_permissions
 from services import (
     can_transition, write_audit, compute_margin, find_matching_rule, create_approval_request,
@@ -2166,13 +2167,12 @@ async def customer_profile(cid: str, _: dict = Depends(require_section("customer
 # ============================================================
 # DOCUMENT ATTACHMENTS (per project, with optional PDF parsing)
 # ============================================================
-UPLOAD_DIR = ROOT_DIR / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+storage = make_storage(db)  # GridFS by default, local disk with FILE_STORAGE=local (see storage.py)
 
 
 @api.get("/projects/{pid}/documents")
 async def list_documents(pid: str, _: dict = Depends(require_section("projects"))):
-    docs = await db.documents.find({"project_id": pid}, {"_id": 0, "storage_path": 0}).sort("uploaded_at", -1).to_list(500)
+    docs = await db.documents.find({"project_id": pid}, {"_id": 0, "storage_path": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
     return docs
 
 
@@ -2194,10 +2194,8 @@ async def upload_document(
 
     contents = await file.read()
     doc_id = gen_id()
-    safe_name = (file.filename or "file").replace("/", "_")
-    path = UPLOAD_DIR / f"{doc_id}__{safe_name}"
-    with open(path, "wb") as f:
-        f.write(contents)
+    safe_name = (file.filename or "file").replace("/", "_").replace("\\", "_")
+    key = await storage.save(f"documents/{doc_id}/{safe_name}", contents, file.content_type)
 
     parsed: Optional[Dict[str, Any]] = None
     is_pdf = (file.content_type == "application/pdf") or safe_name.lower().endswith(".pdf")
@@ -2215,7 +2213,7 @@ async def upload_document(
         "file_name": safe_name,
         "size": len(contents),
         "content_type": file.content_type or "application/octet-stream",
-        "storage_path": str(path),
+        "storage_key": key,
         "parsed": parsed,
         "uploaded_by": user["email"],
         "uploaded_at": now_iso(),
@@ -2245,7 +2243,7 @@ async def upload_document(
                               user=user, field_changes=upd, reason=f"From document {safe_name}")
 
     doc.pop("_id", None)
-    doc.pop("storage_path", None)
+    doc.pop("storage_key", None)
     return {"document": doc, "applied": applied}
 
 
@@ -2254,11 +2252,10 @@ async def download_document(did: str, _: dict = Depends(require_section("project
     d = await db.documents.find_one({"id": did})
     if not d:
         raise HTTPException(404, "Not found")
-    p = Path(d["storage_path"])
-    if not p.exists():
+    got = await storage.open(d["storage_key"]) if d.get("storage_key") else None
+    data = got[0] if got else open_legacy(d.get("storage_path"))
+    if data is None:
         raise HTTPException(404, "File missing")
-    with open(p, "rb") as f:
-        data = f.read()
     return StreamingResponse(io.BytesIO(data),
                              media_type=d.get("content_type") or "application/octet-stream",
                              headers={"Content-Disposition": f'attachment; filename="{d["file_name"]}"'})
@@ -2269,10 +2266,9 @@ async def delete_document(did: str, user: dict = Depends(require_section("projec
     d = await db.documents.find_one({"id": did})
     if not d:
         raise HTTPException(404, "Not found")
-    try:
-        Path(d["storage_path"]).unlink(missing_ok=True)
-    except Exception:
-        pass
+    if d.get("storage_key"):
+        await storage.delete(d["storage_key"])
+    delete_legacy(d.get("storage_path"))
     await db.documents.delete_one({"id": did})
     await write_audit(db, entity_type="document", entity_id=did, action="delete", user=user)
     return {"ok": True}
@@ -2605,8 +2601,6 @@ async def notifications_test(payload: dict = None, user: dict = Depends(require_
 # ============================================================
 # CHANGE REQUESTS (Iter 10 — dedicated entity)
 # ============================================================
-CR_UPLOAD_ROOT = Path(os.environ.get("CR_UPLOAD_ROOT", str(ROOT_DIR / "uploads" / "cr")))
-CR_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def _compute_cr_costs_margin(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -2984,23 +2978,12 @@ async def reject_cr(cid: str, payload: dict, user: dict = Depends(get_current_us
 @api.delete("/change-requests/{cid}")
 async def delete_change_request(cid: str, user: dict = Depends(require_role("admin"))):
     """Hard-delete a CR — admin only."""
+    async for a in db.cr_attachments.find({"cr_id": cid}, {"_id": 0, "storage_key": 1, "_path": 1}):
+        if a.get("storage_key"):
+            await storage.delete(a["storage_key"])
+        delete_legacy(a.get("_path"))
     await db.change_requests.delete_one({"id": cid})
     await db.cr_attachments.delete_many({"cr_id": cid})
-    # remove disk files
-    try:
-        d = CR_UPLOAD_ROOT / cid
-        if d.exists():
-            for f in d.iterdir():
-                try:
-                    f.unlink()
-                except Exception:
-                    pass
-            try:
-                d.rmdir()
-            except Exception:
-                pass
-    except Exception:
-        pass
     await write_audit(db, entity_type="change_request", entity_id=cid, action="delete", user=user)
     return {"ok": True}
 
@@ -3026,19 +3009,15 @@ async def upload_cr_attachment(
     contents = await file.read()
     if len(contents) > 25 * 1024 * 1024:
         raise HTTPException(413, "File too large (max 25 MB)")
-    folder = CR_UPLOAD_ROOT / cid
-    folder.mkdir(parents=True, exist_ok=True)
     att_id = gen_id()
     safe_name = (file.filename or "file").replace("/", "_").replace("\\", "_")
-    dest = folder / f"{att_id}_{safe_name}"
-    with open(dest, "wb") as f:
-        f.write(contents)
+    key = await storage.save(f"cr/{cid}/{att_id}_{safe_name}", contents, file.content_type)
     rec = {
         "id": att_id, "cr_id": cid, "kind": kind,
         "filename": safe_name, "size": len(contents),
         "mime": file.content_type,
         "uploaded_by": user["email"], "uploaded_at": now_iso(),
-        "_path": str(dest),
+        "storage_key": key,
     }
     await db.cr_attachments.insert_one(rec)
     return {"id": att_id, "kind": kind, "filename": safe_name, "size": len(contents)}
@@ -3049,10 +3028,11 @@ async def download_cr_attachment(cid: str, att_id: str, user: dict = Depends(req
     rec = await db.cr_attachments.find_one({"id": att_id, "cr_id": cid}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Attachment not found")
-    path = rec.get("_path")
-    if not path or not Path(path).exists():
-        raise HTTPException(404, "File missing on disk")
-    return StreamingResponse(open(path, "rb"),
+    got = await storage.open(rec["storage_key"]) if rec.get("storage_key") else None
+    data = got[0] if got else open_legacy(rec.get("_path"))
+    if data is None:
+        raise HTTPException(404, "File missing")
+    return StreamingResponse(io.BytesIO(data),
         media_type=rec.get("mime") or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{rec.get("filename")}"'})
 
@@ -3062,12 +3042,9 @@ async def delete_cr_attachment(cid: str, att_id: str, user: dict = Depends(requi
     rec = await db.cr_attachments.find_one({"id": att_id, "cr_id": cid}, {"_id": 0})
     if not rec:
         raise HTTPException(404, "Attachment not found")
-    try:
-        p = rec.get("_path")
-        if p and Path(p).exists():
-            Path(p).unlink()
-    except Exception:
-        pass
+    if rec.get("storage_key"):
+        await storage.delete(rec["storage_key"])
+    delete_legacy(rec.get("_path"))
     await db.cr_attachments.delete_one({"id": att_id, "cr_id": cid})
     return {"ok": True}
 

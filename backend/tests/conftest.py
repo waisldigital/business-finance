@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture(scope="session")
-def app():
+def app(tmp_path_factory):
+    os.environ["UPLOAD_ROOT"] = str(tmp_path_factory.mktemp("uploads"))
     os.environ.update(MONGO_URL="mongodb://localhost:27017", DB_NAME="finsight_test", JWT_SECRET="t" * 48,
                       ADMIN1_EMAIL=ADMIN_EMAIL, ADMIN1_PASSWORD=ADMIN_PASSWORD, FILE_STORAGE="local",
                       CORS_ORIGINS="http://localhost:3000", ENV="test")
