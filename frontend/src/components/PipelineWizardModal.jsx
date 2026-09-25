@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { X, Warning, CaretLeft, CaretRight } from "@phosphor-icons/react";
-import AirplaneButton from "./AirplaneButton";
 import Modal from "@/components/common/Modal";
 
 const CURRENCIES = ["USD", "INR", "AED", "AUD", "CNY", "EUR", "GBP", "JPY", "RUB", "SAR", "SGD"];
@@ -436,14 +435,9 @@ export default function PipelineWizardModal({ opportunity, customers, onClose, o
                   Next Stage <CaretRight size={12} />
                 </button>
               )}
-              <AirplaneButton
-                type="button"
-                onClick={onSubmit}
-                disabled={busy}
-                testid="pipeline-submit"
-              >
+              <button type="button" className="btn-primary" onClick={onSubmit} disabled={busy} data-testid="pipeline-submit">
                 {busy ? "Saving…" : (opportunity ? "Update" : "Save Opportunity")}
-              </AirplaneButton>
+              </button>
             </div>
           </div>
         </div>

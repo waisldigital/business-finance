@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useAuth, homeFor, nextPath } from "@/lib/auth";
 import BrandMark from "@/components/common/BrandMark";
 import { ChartLineUp, Lock, EnvelopeSimple, Target, Receipt, ShieldCheck } from "@phosphor-icons/react";
-import AirplaneButton from "@/components/AirplaneButton";
 
 export default function LoginPage() {
   const { login, error, user } = useAuth();
@@ -133,14 +132,9 @@ export default function LoginPage() {
             </div>
           )}
 
-          <AirplaneButton
-            type="submit"
-            disabled={busy}
-            testid="login-submit"
-            className="w-full mt-6 justify-center"
-          >
+          <button type="submit" className="btn-primary w-full mt-6 justify-center" disabled={busy} data-testid="login-submit">
             {busy ? "Signing in…" : "Sign in"}
-          </AirplaneButton>
+          </button>
 
           <div className="mt-6 text-[11px] text-[#5E5E5A] border-t border-[#E5E5E0] pt-4">
             Forgot your password? Ask your FinSight administrator to reset it.

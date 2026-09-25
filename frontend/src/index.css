@@ -439,6 +439,9 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   60%  { transform: translate(120px, -20px) rotate(-18deg) scale(0.95); opacity: 0.9; }
   100% { transform: translate(260px, -42px) rotate(-22deg) scale(0.7); opacity: 0; }
 }
+@media (prefers-reduced-motion: reduce) {
+  .btn-airplane .plane-icon, .btn-airplane.is-taking-off .plane-icon { transition: none; animation: none; }
+}
 .btn-airplane.is-taking-off .plane-icon {
   animation: plane-takeoff 0.65s cubic-bezier(0.4, 0.0, 0.6, 1) forwards;
 }
