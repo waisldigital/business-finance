@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { GearSix, CalendarBlank, ArrowCounterClockwise } from "@phosphor-icons/react";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 /**
  * Gear-icon popover to pick which column blocks (and their month breakdown) are shown.
@@ -50,12 +51,8 @@ export default function ColumnSettings({ blocks, value, onChange, onReset, testi
 
 // Persisted per browser; falls back to defaults if storage is unavailable.
 export function usePersistedColumns(storageKey, defaults) {
-  const [value, setValue] = useState(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem(storageKey) || "null");
-      return v ? { show: { ...defaults.show, ...v.show }, months: { ...defaults.months, ...v.months } } : defaults;
-    } catch { return defaults; }
+  const [value, update, reset] = usePersistentState(storageKey, defaults, {
+    restore: (v) => (v ? { show: { ...defaults.show, ...v.show }, months: { ...defaults.months, ...v.months } } : defaults),
   });
-  const update = (v) => { setValue(v); try { localStorage.setItem(storageKey, JSON.stringify(v)); } catch { /* ignore */ } };
-  return [value, update, () => update(defaults)];
+  return [value, update, reset];
 }

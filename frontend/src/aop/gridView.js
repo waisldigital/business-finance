@@ -2,6 +2,7 @@
 // sorting, Excel-style column filters and the 12-month toggle. Saved per viewer and per grid in localStorage.
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 const MONTH_KEY = /^([A-Z]\d{2}[A-Z]?)__(\d{4}-\d{2})$/;
 
@@ -16,10 +17,6 @@ export const isNumeric = (c) => ["number", "money", "percent"].includes(c.type) 
 
 // pivot defaults follow Excel's tabular layout: no subtotal rows, item labels repeated on every line
 const DEFAULT_VIEW = { order: null, hidden: [], pivot: 0, subtotals: false, repeatLabels: true, filtersOn: false, twelveM: false, sort: null, filters: {} };
-
-function loadLocal(key) {
-  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
-}
 
 // ------------------------------------------------------------------ admin default views (shared by every viewer)
 // The admin can save any grid's / report's current layout as everyone's default (server: /aop/views). A viewer
@@ -74,16 +71,13 @@ export async function clearSharedView(key) {
 export function useGridView(storageKey, defaults = {}) {
   const init = { ...DEFAULT_VIEW, ...defaults };
   const sharedView = useSharedView(storageKey);
-  const [local, setLocal] = useState(() => loadLocal(storageKey));
+  const [local, setLocal, reset] = usePersistentState(storageKey, null); // the viewer's own changes (null = none)
   const base = { ...init, ...(sharedView || {}) };
   const view = local ? { ...base, ...local } : base;
   const update = (patch) => setLocal((cur) => {
     const v = cur ? { ...base, ...cur } : base;
-    const next = { ...v, ...(typeof patch === "function" ? patch(v) : patch) };
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* storage unavailable */ }
-    return next;
+    return { ...v, ...(typeof patch === "function" ? patch(v) : patch) };
   });
-  const reset = () => { try { localStorage.removeItem(storageKey); } catch { /* ignore */ } setLocal(null); };
   const admin = {
     key: storageKey, hasDefault: !!sharedView,
     save: () => saveSharedView(storageKey, view).then(reset),
