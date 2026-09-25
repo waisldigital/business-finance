@@ -38,3 +38,14 @@ def test_project_document_upload_download_delete(client, admin):
     got = client.get(f"/api/documents/{did}/download", headers=admin)
     assert got.status_code == 200 and got.content == b"purchase order"
     assert client.delete(f"/api/documents/{did}", headers=admin).status_code == 200
+
+
+def test_cors_is_explicit(app):
+    import re
+    import server
+    o, rx = server.cors_settings({"RENDER": "true"})
+    assert o == server.PROD_ORIGINS  # never "*" in production, even when unset
+    assert re.fullmatch(rx, "https://business-finance-abc123-waisldigital-5107.vercel.app")
+    assert not re.fullmatch(rx, "https://evil-app.vercel.app")
+    o, rx = server.cors_settings({"CORS_ORIGINS": "*,https://a.example", "CORS_ORIGIN_REGEX": r"https://.*\.vercel\.app"})
+    assert o == ["https://a.example"] and rx == server.PREVIEW_REGEX

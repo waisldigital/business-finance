@@ -19,6 +19,12 @@
 ## 2. Backend on Render
 1. **New → Blueprint** → select this repo; Render reads `render.yaml`.
 2. Fill the prompted secrets: `MONGO_URL`, `ADMIN_PASSWORD`, `CORS_ORIGINS` (your Vercel URL).
+   - **CORS:** `CORS_ORIGINS` lists the frontend origins allowed to call the API with credentials
+     (comma-separated, e.g. `https://business-finance-rust.vercel.app`). `*` is never accepted. If it is unset
+     in production only the production Vercel URL is allowed and an error is logged.
+     `CORS_ORIGIN_REGEX` admits this project's Vercel preview deployments only; the default is
+     `https://business-finance-[a-z0-9-]+-waisldigital-5107\.vercel\.app`. A pattern that trusts every
+     Vercel app (`https://.*\.vercel\.app`) is ignored.
    `JWT_SECRET` is generated automatically.
 3. Health check: `GET /api/health` returns 200 only when Atlas is reachable.
 

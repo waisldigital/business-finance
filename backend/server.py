@@ -3101,11 +3101,36 @@ api.include_router(build_aop_router(db, get_current_user, write_audit, gen_id))
 # Register router & CORS
 app.include_router(api)
 
+# CORS: credentials are allowed, so origins are listed explicitly — never "*".
+# CORS_ORIGINS: comma-separated origins (the production frontend). CORS_ORIGIN_REGEX: preview deployments of
+# this project only (default: business-finance-<id>-waisldigital-5107.vercel.app).
+PROD_ORIGINS = ["https://business-finance-rust.vercel.app"]
+PREVIEW_REGEX = r"https://business-finance-[a-z0-9-]+-waisldigital-5107\.vercel\.app"
+BROAD_REGEXES = {r"https://.*\.vercel\.app", r"https://.*", ".*"}
+
+
+def cors_settings(env=os.environ):
+    production = bool(env.get("RENDER")) or env.get("ENV") == "production"
+    origins = [o.strip().rstrip("/") for o in (env.get("CORS_ORIGINS") or "").split(",") if o.strip()]
+    if "*" in origins:
+        logger.error("CORS_ORIGINS contains '*', which can't be combined with credentials — ignoring it")
+        origins = [o for o in origins if o != "*"]
+    if not origins:
+        origins = PROD_ORIGINS if production else ["http://localhost:3000"]
+        if production:
+            logger.error("CORS_ORIGINS is not set — allowing only %s; set it in the Render environment", origins)
+    regex = (env.get("CORS_ORIGIN_REGEX") or "").strip() or PREVIEW_REGEX
+    if regex in BROAD_REGEXES:
+        logger.warning("CORS_ORIGIN_REGEX %r trusts every Vercel app — using this project's previews only", regex)
+        regex = PREVIEW_REGEX
+    return origins, regex
+
+
+_cors_origins, _cors_regex = cors_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()],
-    # e.g. https://.*\.vercel\.app to also allow Vercel preview deployments
-    allow_origin_regex=os.environ.get("CORS_ORIGIN_REGEX") or None,
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

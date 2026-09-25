@@ -26,6 +26,6 @@ services:
       - key: CORS_ORIGINS
         sync: false
       - key: CORS_ORIGIN_REGEX
-        value: https://.*\.vercel\.app
+        value: https://business-finance-[a-z0-9-]+-waisldigital-5107\.vercel\.app
       - key: NOTIFY_ENABLED
         value: "false"
