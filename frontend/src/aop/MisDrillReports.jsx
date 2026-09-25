@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import { useApi } from "@/lib/useApi";
 import { Info, CalendarBlank, WarningCircle } from "@phosphor-icons/react";
 import { ResponsiveContainer, ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 import { fmtAmount, fmtPct, unitDiv } from "./format";
@@ -7,24 +8,10 @@ import { agg, periodPrefix } from "./mis";
 import { PeriodPicker } from "./MisCommon";
 import ReportTable from "./ReportTable";
 import { useGridView } from "./gridView";
+import { CHART } from "@/lib/chartColors";
 
-const TEAL = "#31869b";
-const MAROON = "#963634";
-const NAVY = "#1e3a5f";
 
 // ------------------------------------------------------------------ shared bits
-function useMis(url, params) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState("");
-  const key = JSON.stringify(params || {});
-  const load = () => {
-    setErr("");
-    if (!url) { setData(null); return; }
-    api.get(url, { params }).then((r) => setData(r.data)).catch((e) => setErr(e.response?.data?.detail || e.message));
-  };
-  useEffect(load, [url, key]); // eslint-disable-line react-hooks/exhaustive-deps
-  return [data, err, load];
-}
 
 function usePeriod(storageKey, data) {
   const [view, update, reset, shared] = useGridView(storageKey, { period: "ytd", month: null });
@@ -44,7 +31,7 @@ const monthCols = (data, meas, get, unit, label = "") => (data?.months?.labels |
 
 // ------------------------------------------------------------------ slide 10 — airport-wise gross margin
 export function AirportGM({ unit, onDrill }) {
-  const [data, err] = useMis("/aop/mis/airport-gm");
+  const [data, err] = useApi("/aop/mis/airport-gm");
   const p = usePeriod("aop_rep_airport_gm_v1", data);
   const ms = [["a_base", "PY"], ["b_plan", "AOP"], ["af_plan", "Act"]];
   const cls = { DIAL: "h-cacr", GHIAL: "h-sol", GGIAL: "h-cacr", GVIAL: "h-sol", total: "h-tot" };
@@ -81,8 +68,8 @@ export function AirportGM({ unit, onDrill }) {
               <CartesianGrid stroke="var(--border-soft)" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis yAxisId="l" tick={{ fontSize: 10 }} /><YAxis yAxisId="r" orientation="right" tick={{ fontSize: 10 }} unit="%" />
               <Tooltip formatter={(v) => Number(v).toFixed(0)} /><Legend wrapperStyle={{ fontSize: 10 }} />
-              <Bar yAxisId="l" dataKey="YTD AOP Rev" fill={TEAL} /><Bar yAxisId="l" dataKey="YTD Actual Rev" fill={MAROON} />
-              <Line yAxisId="r" dataKey="AOP GM %" stroke={NAVY} strokeWidth={2} /><Line yAxisId="r" dataKey="Actual GM %" stroke="#d97706" strokeWidth={2} />
+              <Bar yAxisId="l" dataKey="YTD AOP Rev" fill={CHART.aop} /><Bar yAxisId="l" dataKey="YTD Actual Rev" fill={CHART.actual} />
+              <Line yAxisId="r" dataKey="AOP GM %" stroke={CHART.navy} strokeWidth={2} /><Line yAxisId="r" dataKey="Actual GM %" stroke="#d97706" strokeWidth={2} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -94,7 +81,7 @@ export function AirportGM({ unit, onDrill }) {
 
 // ------------------------------------------------------------------ slide 20 — CUTE: PAX × rate
 export function CuteAnalysis({ unit }) {
-  const [data, err] = useMis("/aop/mis/cute");
+  const [data, err] = useApi("/aop/mis/cute");
   const p = usePeriod("aop_rep_cute_v1", data);
   const [meas, setMeas] = useState("af_plan");
   const labels = data?.months?.labels || [];
@@ -134,7 +121,7 @@ export function CuteAnalysis({ unit }) {
 
 // ------------------------------------------------------------------ slides 21–22 — opex
 export function OpexAnalysis({ unit }) {
-  const [data, err] = useMis("/aop/mis/opex");
+  const [data, err] = useApi("/aop/mis/opex");
   const p = usePeriod("aop_rep_opex_v1", data);
   const v = (vals, m) => (vals?.[m] ? agg(vals[m], p.period, p.month) : null);
   const locRows = [...(data?.by_location || []).map((r) => ({ ...r })),
@@ -193,7 +180,7 @@ export function OpexAnalysis({ unit }) {
                   <CartesianGrid stroke="var(--border-soft)" horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110} />
                   <Tooltip formatter={(x) => Number(x).toFixed(0)} /><Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="AOP" fill={TEAL} /><Bar dataKey="Actual" fill={MAROON} />
+                  <Bar dataKey="AOP" fill={CHART.aop} /><Bar dataKey="Actual" fill={CHART.actual} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -218,7 +205,7 @@ function sumVals(rows) {
 
 // ------------------------------------------------------------------ slides 23–24 — resources
 export function Resources({ unit, params }) {
-  const [data, err] = useMis("/aop/mis/resources");
+  const [data, err] = useApi("/aop/mis/resources");
   const p = usePeriod("aop_rep_resources_v1", data);
   const [section, setSection] = useState(params?.section || "all");
   const src = (data?.rows || []).filter((r) => section === "all" || r.section === section || (section === "indirect" && r.section === "capex"));
@@ -265,7 +252,7 @@ export function Resources({ unit, params }) {
 
 // ------------------------------------------------------------------ slides 25–26 — overheads
 export function OverheadsSummary({ unit, onDrill }) {
-  const [data, err] = useMis("/aop/mis/overheads");
+  const [data, err] = useApi("/aop/mis/overheads");
   const p = usePeriod("aop_rep_oh_summary_v1", data);
   const v = (r, s, m) => (r.values?.[s]?.[m] ? agg(r.values[s][m], p.period, p.month) : 0);
   const rows = [...(data?.rows || []).map((r) => ({ ...r, drill: "overheads_nature" })),
@@ -296,7 +283,7 @@ export function OverheadsSummary({ unit, onDrill }) {
               <CartesianGrid stroke="var(--border-soft)" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} /><YAxis tick={{ fontSize: 10 }} />
               <Tooltip formatter={(x) => Number(x).toFixed(0)} /><Legend wrapperStyle={{ fontSize: 10 }} />
-              <Bar dataKey="YTD AOP" fill={TEAL} /><Bar dataKey="YTD Act" fill={MAROON} />
+              <Bar dataKey="YTD AOP" fill={CHART.aop} /><Bar dataKey="YTD Act" fill={CHART.actual} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -328,7 +315,7 @@ function DeptPicker({ value, onChange, withNature, nature, onNature }) {
 
 export function OverheadsNature({ unit, params, onDrill }) {
   const [dept, setDept] = useState(params?.dept || "");
-  const [data, err] = useMis(dept ? "/aop/mis/overheads/nature" : null, { dept });
+  const [data, err] = useApi(dept ? "/aop/mis/overheads/nature" : null, { dept });
   const p = usePeriod("aop_rep_oh_nature_v1", data);
   useEffect(() => { if (params?.dept) setDept(params.dept); }, [params?.dept]);
   const pref = periodPrefix(p.period, data?.months, p.month) || "FY";
@@ -360,7 +347,7 @@ export function OverheadsNature({ unit, params, onDrill }) {
 export function OverheadsLines({ unit, params }) {
   const [dept, setDept] = useState(params?.dept || "");
   const [nature, setNature] = useState(params?.nature || null);
-  const [data, err] = useMis(dept ? "/aop/mis/overheads/lines" : null, { dept, nature: nature || undefined });
+  const [data, err] = useApi(dept ? "/aop/mis/overheads/lines" : null, { dept, nature: nature || undefined });
   const p = usePeriod("aop_rep_oh_lines_v1", data);
   const pv = useGridView("aop_rep_oh_book_v1", {});
   const upto = p.period === "fy" ? 11 : p.month;
@@ -416,7 +403,7 @@ export function OverheadsLines({ unit, params }) {
 
 // ------------------------------------------------------------------ slide 12 — project health
 export function ProjectHealth({ unit }) {
-  const [data, err] = useMis("/aop/mis/project-health");
+  const [data, err] = useApi("/aop/mis/project-health");
   const p = usePeriod("aop_rep_projects_v1", data);
   const [top, setTop] = useState(15);
   const g = (r, part, m) => (r[part]?.[m] ? agg(r[part][m], p.period, p.month) : 0);
@@ -464,7 +451,7 @@ export function ProjectHealth({ unit }) {
 
 // ------------------------------------------------------------------ slide 13 — capex tracker
 export function CapexTracker({ unit }) {
-  const [data, err] = useMis("/aop/mis/capex-tracker");
+  const [data, err] = useApi("/aop/mis/capex-tracker");
   const p = usePeriod("aop_rep_capex_v1", data);
   const upto = p.period === "fy" ? 11 : p.month;
   const from = p.period === "mtd" ? p.month : 0;

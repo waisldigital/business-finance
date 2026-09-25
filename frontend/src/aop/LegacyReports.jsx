@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
+import React, { useMemo, useState } from "react";
+import { useApi } from "@/lib/useApi";
 import ColumnSettings, { usePersistedColumns } from "@/aop/ColumnSettings";
 import PoDrawer from "@/aop/PoDrawer";
 import { fmtAmount, fmtPct, download, unitDiv } from "@/aop/format";
@@ -9,14 +9,6 @@ import { CaretRight, CaretDown, DownloadSimple, ArrowClockwise, WarningCircle, C
 export { Margin, Opex, Overheads, Wbs };
 
 // ---------- shared table ----------
-function useReport(url, params) {
-  const [data, setData] = useState(null);
-  const [err, setErr] = useState("");
-  const key = JSON.stringify(params || {});
-  const load = () => { setErr(""); api.get(url, { params }).then((r) => setData(r.data)).catch((e) => setErr(e.response?.data?.detail || e.message)); };
-  useEffect(load, [url, key]); // eslint-disable-line react-hooks/exhaustive-deps
-  return [data, err, load];
-}
 
 function Table({ cols, rows, unit, rowKey, expand, total, name }) {
   const [open, setOpen] = useState({});
@@ -70,7 +62,7 @@ const sum = (rows, key) => rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
 // ---------- margin profile ----------
 function Margin({ unit }) {
   const [block, setBlock] = useState("af_plan");
-  const [data, err, load] = useReport("/aop/reports/margin", { block });
+  const [data, err, load] = useApi("/aop/reports/margin", { block });
   const cols = [
     { key: "tag", label: "Airport / tag", text: true },
     { key: "cute", label: "CUTE" }, { key: "non_cute", label: "Non-CUTE" }, { key: "change_request", label: "CR" },
@@ -101,7 +93,7 @@ function Margin({ unit }) {
 // ---------- opex budget vs forecast ----------
 function Opex({ unit }) {
   const [groupBy, setGroupBy] = useState("aop_code");
-  const [data, err, load] = useReport("/aop/reports/opex", { group_by: groupBy });
+  const [data, err, load] = useApi("/aop/reports/opex", { group_by: groupBy });
   const [po, setPo] = useState(null);
   const fy = data?.plan_fy || "";
   const cols = [
@@ -147,7 +139,7 @@ function Opex({ unit }) {
 // ---------- overheads ----------
 const OH_DEFAULT = { show: { a_base: false, b_plan: false, b_draft: true, growth: true }, months: {} };
 function Overheads({ unit }) {
-  const [data, err, load] = useReport("/aop/reports/overheads");
+  const [data, err, load] = useApi("/aop/reports/overheads");
   const [cfg, setCfg, reset] = usePersistedColumns("aop_rep_oh_cols_v1", OH_DEFAULT);
   const all = useMemo(() => [
     { key: "a_base", label: `A ${data?.base_fy || ""}` }, { key: "b_plan", label: `B ${data?.plan_fy || ""} (WBS / AOP head)` },
@@ -183,7 +175,7 @@ function Overheads({ unit }) {
 
 // ---------- WBS ----------
 function Wbs({ unit }) {
-  const [data, err, load] = useReport("/aop/reports/wbs");
+  const [data, err, load] = useApi("/aop/reports/wbs");
   const [onlyMissing, setOnlyMissing] = useState(false);
   const cols = [
     { key: "wbs", label: "WBS element", text: true },
