@@ -25,6 +25,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 import openpyxl
 
+from permissions import resolve_permissions
 from sections import AOP_SECTIONS
 
 from .datasets import (ACTUALS, CUTE_LEAD, DRIVER_LEAD, SPECS, VERSION_KEY, build_key, coerce, column, norm,
@@ -122,30 +123,22 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     async def perms_for(user: dict) -> Dict[str, Any]:
         if not cache.get("wide"):
             await get_config()  # runs the one-time data-layout migration before anything reads the rows
-        if user.get("role") == "admin":
-            return {"admin": True, "sections": {s: {"can_view": True, "can_edit": True, "can_upload": True} for s in AOP_SECTIONS},
-                    "tags": [], "departments": None, "dept_scope": "all"}
-        sections = {s: {"can_view": False, "can_edit": False, "can_upload": False} for s in AOP_SECTIONS}
-        tags: List[str] = []
+        resolved = await resolve_permissions(db, user)  # the one permission resolver (permissions.py)
+        sections = {s: {k: resolved["permissions"][s][k] for k in ("can_view", "can_edit", "can_upload")} for s in AOP_SECTIONS}
+        if resolved["is_admin"]:
+            return {"admin": True, "sections": sections, "tags": [], "departments": None, "dept_scope": "all"}
+        role = resolved["role"] or {}
+        tags: List[str] = [t for t in (role.get("aop_tags") or []) if t]
         departments: Optional[List[str]] = None
-        scope = "all"
-        if user.get("role_id"):
-            role = await db.roles.find_one({"id": user["role_id"]}, {"_id": 0})
-            if role:
-                for s, p in (role.get("permissions") or {}).items():
-                    if s in sections:
-                        sections[s] = {"can_view": bool(p.get("can_view")), "can_edit": bool(p.get("can_edit")),
-                                       "can_upload": bool(p.get("can_upload"))}
-                tags = [t for t in (role.get("aop_tags") or []) if t]
-                scope = role.get("aop_dept_scope") or "all"
-                if scope in ("own", "list"):
-                    names = list(role.get("aop_departments") or [])
-                    if scope == "own":
-                        emp = await db.employees.find_one({"email_id": {"$regex": f"^{re.escape(user.get('email') or '')}$", "$options": "i"}},
-                                                          {"_id": 0, "department": 1, "sub_department": 1})
-                        names = [x for x in ((emp or {}).get("department"), (emp or {}).get("sub_department")) if x] + names
-                    cfg = await get_config()
-                    departments = dept_scope.expand(names, cfg.get("dept_aliases"))
+        scope = role.get("aop_dept_scope") or "all"
+        if scope in ("own", "list"):
+            names = list(role.get("aop_departments") or [])
+            if scope == "own":
+                emp = await db.employees.find_one({"email_id": {"$regex": f"^{re.escape(user.get('email') or '')}$", "$options": "i"}},
+                                                  {"_id": 0, "department": 1, "sub_department": 1})
+                names = [x for x in ((emp or {}).get("department"), (emp or {}).get("sub_department")) if x] + names
+            cfg = await get_config()
+            departments = dept_scope.expand(names, cfg.get("dept_aliases"))
         return {"admin": False, "sections": sections, "tags": tags, "departments": departments, "dept_scope": scope}
 
     def payroll_visible(p: Dict[str, Any]) -> bool:

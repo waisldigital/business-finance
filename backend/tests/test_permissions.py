@@ -67,3 +67,16 @@ def test_cr_approver_inbox_open_and_decide(client, make_user):
     r = client.post("/api/change-requests/cr-inbox-1/approve", headers=approver, json={"comment": "ok for FY27"})
     assert r.status_code == 200 and r.json()["status"] == "approved"
     assert client.get("/api/approvals/inbox", headers=approver).json()["count"] == 0
+
+
+def test_aop_department_scope_via_shared_resolver(client, make_user):
+    import asyncio
+    import server
+    rows = [{"dataset": "overhead_lines", "key": k, "seq": i, "fields": {"aop_head": k, "pl_tag": t, "department": t}}
+            for i, (k, t) in enumerate((("OH1", "Admin"), ("OH2", "HR"), ("OH3", "Admin")))]
+    asyncio.get_event_loop().run_until_complete(server.db.aop_rows.insert_many(rows))
+    own = make_user({"aop_overheads": {"can_view": True}}, aop_dept_scope="own", department="Admin")
+    got = client.get("/api/aop/datasets/overhead_lines/rows", headers=own).json()
+    assert sorted(r["key"] for r in got["rows"]) == ["OH1", "OH3"]
+    nobody = make_user({"dashboard": {"can_view": True}})
+    assert client.get("/api/aop/datasets/overhead_lines/rows", headers=nobody).status_code == 403
