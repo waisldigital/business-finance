@@ -135,7 +135,12 @@ function scan() {
 export function useResizableColumns() {
   useEffect(() => {
     let raf = 0;
-    const obs = new MutationObserver(() => {
+    // rescan only when a table header could have appeared (not on every keystroke or cell update)
+    const addsHeaders = (records) => records.some((r) => Array.from(r.addedNodes).some((n) =>
+      n.nodeType === 1 && (n.tagName === "TABLE" || n.tagName === "TH" || n.tagName === "THEAD" || n.tagName === "TR"
+                           || (n.querySelector && n.querySelector("th")))));
+    const obs = new MutationObserver((records) => {
+      if (!addsHeaders(records)) return;
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(scan);
     });
