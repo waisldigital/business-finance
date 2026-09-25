@@ -158,6 +158,31 @@ def require_role(*roles):
 
 
 # ---------- STARTUP ----------
+# Query-shaped indexes. Each is created on its own so one failure (e.g. a unique index over existing duplicate
+# rows) is logged and doesn't stop the service from starting.
+EXTRA_INDEXES = [
+    ("notifications_inapp", [("user_id", 1), ("read", 1), ("created_at", -1)], {}),  # unread badge, polled by everyone
+    ("change_requests", [("id", 1)], {"unique": True}),
+    ("change_requests", [("cr_number", 1)], {"unique": True}),
+    ("change_requests", [("status", 1), ("created_at", -1)], {}),
+    ("change_requests", [("approver_emails", 1)], {}),                                # approvals inbox
+    ("wbs_elements", [("wbs_element", 1)], {}),
+    ("approval_requests", [("status", 1), ("requested_at", -1)], {}),
+    ("approval_requests", [("approver_emails", 1)], {}),
+    ("audit_logs", [("entity_type", 1), ("entity_id", 1), ("timestamp", -1)], {}),
+    ("documents", [("project_id", 1), ("uploaded_at", -1)], {}),
+    ("cr_attachments", [("cr_id", 1)], {}),
+]
+
+
+async def _ensure_indexes():
+    for coll, keys, opts in EXTRA_INDEXES:
+        try:
+            await db[coll].create_index(keys, **opts)
+        except Exception as e:  # noqa: BLE001 — keep starting; the index can be fixed later
+            logger.warning("Index %s %s not created: %s", coll, keys, e)
+
+
 async def on_startup():
     # Indexes
     await db.users.create_index("email", unique=True)
@@ -188,6 +213,7 @@ async def on_startup():
     await db.aop_history.create_index([("dataset", 1), ("key", 1)])
     await db.roles.create_index("name", unique=True)
     await db.employees.create_index("employee_no", unique=False)
+    await _ensure_indexes()
 
     # Migration: drop legacy employee rows that don't have employee_no (old schema)
     legacy = await db.employees.count_documents({"employee_no": {"$exists": False}})
