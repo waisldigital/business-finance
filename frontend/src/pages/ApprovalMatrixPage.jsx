@@ -5,8 +5,8 @@ import { Plus, X, Trash } from "@phosphor-icons/react";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney } from "@/aop/format";
 import Modal from "@/components/common/Modal";
+import { RULE_STAGES } from "@/config/stages";
 
-const STAGES = ["", "Deal P&L", "Customer PO", "Operations", "Closure"];
 const ROLES = ["", "admin", "finance", "leadership", "approver"];
 const BIZ = ["Any", "GMR", "Non-GMR"];
 
@@ -126,7 +126,7 @@ function RuleModal({ rule, onClose, onSaved }) {
         <div>
           <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1">Target Stage</label>
           <select className="input" value={form.target_stage || ""} onChange={(e) => set("target_stage", e.target.value)}>
-            {STAGES.map((s) => <option key={s} value={s}>{s || "Any"}</option>)}
+            {RULE_STAGES.map((s) => <option key={s} value={s}>{s || "Any"}</option>)}
           </select>
         </div>
         <div>

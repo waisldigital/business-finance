@@ -1,6 +1,6 @@
 import React from "react";
 
-const STAGES = ["Pipeline", "Deal P&L", "Customer PO", "Operations", "Closure"];
+import { STAGES } from "@/config/stages";
 
 export default function StageTracker({ current, onStageClick }) {
   const idx = STAGES.indexOf(current);
@@ -25,4 +25,3 @@ export default function StageTracker({ current, onStageClick }) {
   );
 }
 
-export { STAGES };

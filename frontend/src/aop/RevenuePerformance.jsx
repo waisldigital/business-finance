@@ -5,9 +5,8 @@ import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tool
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, useTree, csvDownload } from "./mis";
 import { TreeLabel, ExpandButtons, useFilters, FilterBar } from "./MisCommon";
+import { CHART } from "@/lib/chartColors";
 
-const TEAL = "#31869b";
-const MAROON = "#963634";
 
 /**
  * Revenue performance (MIS slide 4): revenue by stream — full-year AOP, YTD and MTD AOP vs actual/forecast
@@ -144,8 +143,8 @@ function PaxCharts({ pax, labels, month, aopLbl }) {
             <XAxis dataKey="month" tick={tick} /><YAxis tick={tick} />
             <Tooltip formatter={(v) => (v === null ? "—" : `${Math.round(v * 1000).toLocaleString("en-IN")} K`)} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
-            <Line dataKey="AOP" name={`AOP PAX (${aopLbl})`} stroke={TEAL} strokeWidth={2} dot={false} />
-            {hasAct && <Line dataKey="Actual" name="Actual PAX" stroke={MAROON} strokeWidth={2} dot={{ r: 2 }} />}
+            <Line dataKey="AOP" name={`AOP PAX (${aopLbl})`} stroke={CHART.aop} strokeWidth={2} dot={false} />
+            {hasAct && <Line dataKey="Actual" name="Actual PAX" stroke={CHART.actual} strokeWidth={2} dot={{ r: 2 }} />}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -157,8 +156,8 @@ function PaxCharts({ pax, labels, month, aopLbl }) {
             <XAxis dataKey="name" tick={tick} /><YAxis tick={tick} />
             <Tooltip formatter={(v) => (v === null ? "—" : `${Math.round(v * 1000).toLocaleString("en-IN")} K`)} />
             <Legend wrapperStyle={{ fontSize: 10 }} />
-            <Bar dataKey="AOP" fill={TEAL} />
-            {hasAct && <Bar dataKey="Actual" fill={MAROON} />}
+            <Bar dataKey="AOP" fill={CHART.aop} />
+            {hasAct && <Bar dataKey="Actual" fill={CHART.actual} />}
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -5,7 +5,7 @@ import { useCurrency } from "@/lib/currency";
 import { formatMoney, formatDate } from "@/aop/format";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
-import { STAGES } from "@/components/StageTracker";
+import { STAGES } from "@/config/stages";
 import { Plus, MagnifyingGlass, FunnelSimple, PencilSimple, UploadSimple, DownloadSimple } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
 
