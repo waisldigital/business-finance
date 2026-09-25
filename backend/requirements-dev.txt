@@ -1,0 +1,4 @@
+# Test / lint tools on top of requirements.txt (pytest, pyflakes and httpx are already pinned there)
+-r requirements.txt
+mongomock-motor==0.0.36
+mongomock==4.3.0

@@ -34,10 +34,12 @@
 
 See `backend/.env.example` and `frontend/.env.example` for all variables.
 
-## Known limitation
-Uploaded documents (PO PDFs, CR attachments) are stored on the backend's local disk
-(`backend/uploads`). Render's filesystem is ephemeral, so uploads are lost on redeploy
-unless you attach a Render persistent disk (paid) or move file storage to Atlas GridFS / S3.
+## File storage
+Uploaded documents (PO PDFs, project documents, CR attachments) are stored in MongoDB GridFS
+(`FILE_STORAGE=gridfs`, the default), so they survive redeploys of the Render service. Files uploaded by
+earlier builds to the service's disk can be copied in once with
+`cd backend && python scripts/migrate_uploads_to_gridfs.py` (add `--dry-run` to preview). For local
+development `FILE_STORAGE=local` keeps files under `UPLOAD_ROOT`.
 
 ## AOP module (Annual Operating Plan)
 
