@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from .datasets import vkey
 from .periods import fy_months
@@ -85,5 +85,3 @@ def _intersect(a: Span, b: Span) -> Span:
     return (lo, hi) if hi >= lo else None
 
 
-def forecast_all(rows: List[Dict[str, Any]], fy: str) -> List[Dict[str, float]]:
-    return [forecast_line(r, fy) for r in rows]

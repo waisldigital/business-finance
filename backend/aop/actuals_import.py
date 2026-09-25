@@ -17,7 +17,7 @@ from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from .datasets import column, norm
-from .importer import Book, Header, Result, find_header_row, num, txt
+from .importer import Book, Result, find_header_row, num, txt
 from .periods import fy_of_period, to_period
 
 # SAP_Expense "Nature of services" / AOP nature → the opex categories of the MIS pack

@@ -1,6 +1,5 @@
 """CRacker Pro Phase 2: Finance Queries, Customer Profile, Document Attachments."""
 import os
-import io
 import pytest
 import requests
 

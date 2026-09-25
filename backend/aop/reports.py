@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .datasets import norm, vkey
 from .periods import fy_months, shift_fy
@@ -154,8 +154,3 @@ def tags_for_margin(data) -> List[str]:
     return first + sorted(tags - set(first), key=str.lower)
 
 
-def safe_float(v) -> Optional[float]:
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None

@@ -246,12 +246,11 @@ class PnLEngine:
             fcst_fn = lambda r, p: _n(r.get(vkey(self.BB + "T", p)))
         else:
             plan_fn = None
-        act_ok = None
-        if norm(f.region) != "all":
-            def act_ok(d):
-                d = dict(d)
-                d["location"] = self.payroll_region.get(str(d.get("project_code")), d.get("geo"))
-                return ok(d)
+        def region_act_ok(d):  # payroll actuals carry the project; its region comes from the project master
+            d = dict(d)
+            d["location"] = self.payroll_region.get(str(d.get("project_code")), d.get("geo"))
+            return ok(d)
+        act_ok = region_act_ok if norm(f.region) != "all" else None
         s = self.line_series("payroll_lines", "payroll", ok, pred_act=act_ok, plan_ver=ver, plan_fn=plan_fn, fcst_fn=fcst_fn,
                              b_base_fn=lambda r: _n(r.get(vkey(self.BB, "total"))))
         if zero_base:  # nothing "to be hired" in actual months or the prior-year budget column

@@ -14,10 +14,10 @@ from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional
 
 from .datasets import norm, version_months, vkey
-from .mis import MEASURES, N, OH_BLOCKS, Vec, engines, measure_labels, measures_of, months_meta, vsum, zero
+from .mis import Vec, engines, measure_labels, measures_of, months_meta, vsum
 from .actuals_import import OPEX_CATEGORIES, opex_category
 from .periods import fy_months
-from .pnl import Filters, Series
+from .pnl import Filters
 
 AIRPORTS = ["DIAL", "GHIAL", "GGIAL", "GVIAL"]
 

@@ -3,7 +3,7 @@ import os
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
-from fastapi import HTTPException, Request, Depends, Response
+from fastapi import HTTPException, Request, Response
 from typing import Optional
 
 JWT_ALGORITHM = "HS256"
@@ -83,11 +83,6 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-async def get_current_user_from_db(request: Request) -> dict:
-    """Dependency placeholder - actual db is injected from server.py via factory."""
-    raise NotImplementedError
-
-
 def make_get_current_user(db):
     async def get_current_user(request: Request) -> dict:
         token = _get_token(request)
@@ -103,10 +98,3 @@ def make_get_current_user(db):
     return get_current_user
 
 
-def require_roles(*roles):
-    """Dependency factory for role-based access."""
-    def _check(user: dict):
-        if user.get("role") not in roles:
-            raise HTTPException(status_code=403, detail=f"Requires one of roles: {roles}")
-        return user
-    return _check

@@ -1,5 +1,5 @@
 """Pydantic models for WAISL FinSight."""
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timezone
 import uuid

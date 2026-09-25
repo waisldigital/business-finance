@@ -1,7 +1,6 @@
 """Iteration 3 – SAP unified upload, customer delete guard, project delete cascade,
 parse-excel autofill, regression on parse-pdf, transitions, notifications status."""
 import os
-import io
 import pytest
 import requests
 from dotenv import load_dotenv

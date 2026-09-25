@@ -217,12 +217,6 @@ def apply_aliases(h: Header, row: Row, aliases: Dict[str, List[str]], f: Dict[st
             f[canon] = v
 
 
-def split_months(months: List[Tuple[int, str]], row: Row, cutoff: str):
-    """Yield (period, value, is_actual)."""
-    for i, p in months:
-        yield p, num(row[i] if i < len(row) else 0), p <= cutoff
-
-
 # =====================================================================================
 # AOP workbook
 # =====================================================================================

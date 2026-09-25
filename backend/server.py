@@ -26,12 +26,12 @@ from models import (
     CustomerIn, CustomerOut, EmployeeIn, EmployeeOut, SupplierIn, SupplierOut,
     ProjectIn, ProjectOut, StageTransitionIn,
     RevenueLineIn, RevenueLineOut, CostLineIn, CostLineOut,
-    ApprovalRuleIn, ApprovalRuleOut, ApprovalActionIn, ApprovalRequestOut,
+    ApprovalRuleIn, ApprovalRuleOut, ApprovalActionIn,
     AuditLogOut, UploadLogOut, gen_id, now_iso, STAGES,
     PipelineIn, PipelineOut, PipelineStageIn, PipelineHandoffAction, PIPELINE_STAGES,
     RoleIn, RoleOut,
     WBSElementIn, WBSElementOut,
-    ChangeRequestIn, ChangeRequestOut, CRAttachmentOut, CR_AIRPORTS,
+    ChangeRequestIn, ChangeRequestOut, CRAttachmentOut,
     InAppNotificationOut,
 )
 from storage import delete_legacy, make_storage, open_legacy
