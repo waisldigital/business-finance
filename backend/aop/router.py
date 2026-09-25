@@ -117,6 +117,9 @@ def now_iso() -> str:
 
 def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
     r = APIRouter(prefix="/aop", tags=["aop"])
+    # Per-process cache of the datasets and actuals the P&L engine reads. It is keyed on aop_config.data_version,
+    # a counter in MongoDB bumped by every write (bump_version), so with several workers or instances each one
+    # reloads as soon as any of them changes data — no single-worker requirement.
     cache: Dict[str, Any] = {"version": None, "data": None, "actuals": None}
 
     # ------------------------------------------------------------------ access
