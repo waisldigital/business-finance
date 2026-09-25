@@ -5,7 +5,7 @@ import { useCurrency } from "@/lib/currency";
 import { useTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import {
-  Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Wallet, Truck, UserCircle, Palette,
+  Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
   Gear, CaretLeft, CaretRight, Table, SlidersHorizontal, Gauge, FileArrowUp, CheckSquareOffset,
   PresentationChart, Stamp,
 } from "@phosphor-icons/react";
@@ -13,6 +13,7 @@ import { useApprovalsInbox } from "@/lib/approvals";
 import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
 import NotificationBell from "./NotificationBell";
 import Popover from "@/components/common/Popover";
+import BrandMark from "@/components/common/BrandMark";
 import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
@@ -96,9 +97,7 @@ export default function AppLayout({ children, portal = "app" }) {
 
         <div className={`${collapsed ? "px-3 py-5" : "px-6 py-6"} border-b shrink-0`} style={{ borderColor: "rgba(255,255,255,0.1)" }}>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 flex items-center justify-center shrink-0" style={{ background: "var(--gold)" }}>
-              <Wallet weight="bold" size={18} className="text-black" />
-            </div>
+            <BrandMark size={32} />
             {!collapsed && (
               <div>
                 <div className="font-display text-lg font-bold tracking-tight">WAISL FinSight</div>

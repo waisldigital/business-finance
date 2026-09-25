@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, homeFor, nextPath } from "@/lib/auth";
+import BrandMark from "@/components/common/BrandMark";
 import { ChartLineUp, Lock, EnvelopeSimple, Target, Receipt, ShieldCheck } from "@phosphor-icons/react";
 import AirplaneButton from "@/components/AirplaneButton";
 
@@ -48,9 +49,7 @@ export default function LoginPage() {
         <div className="cloud-trail" />
         <div className="relative z-10 flex flex-col justify-between p-12 text-white w-full">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#FFC000] flex items-center justify-center rounded-sm">
-              <ChartLineUp weight="bold" size={22} className="text-[#0A1628]" />
-            </div>
+            <BrandMark size={40} className="rounded-sm !bg-[#FFC000]" />
             <div>
               <div className="font-display text-xl font-bold tracking-tight">WAISL FinSight</div>
               <div className="text-[10px] tracking-overline text-[#FFD24A]">Business Finance &amp; FP&amp;A</div>
