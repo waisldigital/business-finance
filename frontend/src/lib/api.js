@@ -42,8 +42,8 @@ instance.interceptors.response.use(
   async (err) => {
     const cfg = err.config || {};
     if (err.response?.status !== 401 || isAuthCall(cfg.url)) return Promise.reject(err);
-    const hadSession = !!localStorage.getItem("fs_token") || !!localStorage.getItem("fs_refresh");
-    if (!hadSession) return Promise.reject(err); // never signed in: let the caller handle it (login screen)
+    // (also when nothing is stored — the session may still be alive in the refresh cookie, or the stored token was
+    // cleared by another tab; either way renew it or send the user to sign in, never leave a dead screen)
     if (!cfg._retried) {
       cfg._retried = true;
       try {

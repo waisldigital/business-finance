@@ -66,7 +66,9 @@ function ImportCard({ kind, onDone }) {
       const fd = new FormData(); fd.append("file", file);
       const { data } = await api.post(kind.url, fd, { timeout: 600000 });
       setRes(data); onDone();
-    } catch (e) { setErr(e.response?.data?.detail || e.message); } finally { setBusy(false); }
+    } catch (e) {
+      setErr(e.response?.status === 401 ? "Your session has ended — sign in again and re-run the import." : (e.response?.data?.detail || e.message));
+    } finally { setBusy(false); }
   };
   return (
     <div className="border border-[var(--border)] bg-[var(--surface)] p-3 text-xs space-y-2" data-testid={`import-${kind.key}`}>
