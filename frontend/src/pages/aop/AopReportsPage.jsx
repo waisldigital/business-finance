@@ -77,6 +77,7 @@ export default function AopReportsPage({ admin = false }) {
               subtitle="MIS and AOP report formats on the single actual source — pick one or more formats; each opens as its own page below"
               actions={<>
                 <Popover icon={<Stack size={14} />} label={<span className="text-[11px]">Formats · {selected.length}</span>} testid="format-picker" width="w-80">
+                  {(close) => (<>
                   <div className="px-3 py-1.5 text-[10px] text-[var(--muted)] border-b border-[var(--border)]">Click a format to show it alone · tick the box to add it to the page</div>
                   {admin && (
                     <div className="px-3 py-1.5 border-b border-[var(--border)] bg-[var(--surface-2)] flex items-center gap-1.5 flex-wrap" data-testid="formats-default">
@@ -94,7 +95,7 @@ export default function AopReportsPage({ admin = false }) {
                         <div className="px-3 py-1.5 border-b border-[var(--border)] text-[10px] tracking-overline text-[var(--muted)]">{title}</div>
                         {items.map((f) => (
                           <div key={f.key} className="flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--row-hover)]"
-                               onClick={() => setPref({ selected: [f.key] })} title="Click to show only this format · tick the box to add it"
+                               onClick={() => { setPref({ selected: [f.key] }); close(); }} title="Click to show only this format · tick the box to add it"
                                data-testid={`fmt-row-${f.key}`}>
                             <input type="checkbox" className="accent-[var(--gold)] mt-0.5 cursor-pointer" checked={selected.includes(f.key)}
                                    onClick={(e) => e.stopPropagation()} onChange={(e) => toggle(f.key, e.target.checked)} data-testid={`fmt-${f.key}`} />
@@ -109,6 +110,7 @@ export default function AopReportsPage({ admin = false }) {
                       </div>
                     );
                   })}
+                  </>)}
                 </Popover>
               </>} />
       <div className="p-3 space-y-4">
