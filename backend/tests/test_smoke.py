@@ -64,3 +64,20 @@ def test_refresh_returns_new_tokens(client):
     assert client.post("/api/auth/refresh", json={"refresh_token": r["access_token"]}).status_code == 401
     assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {r['refresh_token']}"}).status_code == 401
     assert client.post("/api/auth/refresh", json={}).status_code == 401
+
+
+def test_list_paging_and_total_header(client, admin):
+    for i in range(3):
+        client.post("/api/customers", headers=admin, json={"customer_name": f"Paging Co {i}"})
+    r = client.get("/api/customers", headers=admin, params={"limit": 2})
+    total = int(r.headers["X-Total-Count"])
+    assert len(r.json()) == 2 and total >= 3
+    assert len(client.get("/api/customers", headers=admin, params={"skip": total - 1}).json()) == 1
+
+
+def test_dashboard_empty_scope_sums_nothing(client, admin):
+    pid = client.post("/api/projects", headers=admin, json={"project_name": "Dash P"}).json()["id"]
+    client.post(f"/api/projects/{pid}/revenue", headers=admin, json={"amount": 500, "recognition_date": "2026-05-01"})
+    d = client.get("/api/dashboard/summary", headers=admin, params={"customer_ids": "no-such-customer"}).json()
+    assert d["totals"]["total_projects"] == 0 and d["recognized_unbilled"]["recognized"] == 0
+    assert client.get("/api/dashboard/summary", headers=admin, params={"section": "projects"}).status_code == 200

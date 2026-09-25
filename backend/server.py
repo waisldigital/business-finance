@@ -15,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import certifi
 import io
+import re
 
 from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -129,6 +130,22 @@ async def check_upload_entity(user: dict, entity: str, action: str):
         raise HTTPException(403, "Admin only")
     if sec:
         await check_section(user, sec, action)
+
+
+PAGE_MAX = 20000
+
+
+async def page(cursor, coll, q, response: Optional[Response], skip: int, limit: Optional[int], default: int):
+    """One page of a list endpoint. The full count goes in the X-Total-Count header (the body stays a plain list);
+    without an explicit limit the endpoint's usual size applies and a cut-off is logged instead of passing silently."""
+    total = await coll.count_documents(q)
+    n = limit or default
+    rows = await cursor.skip(skip).limit(n).to_list(n)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+    if limit is None and total > skip + len(rows):
+        logger.warning("%s: %d rows, returned %d — page with skip/limit", coll.name, total, len(rows))
+    return rows
 
 
 def require_role(*roles):
@@ -626,8 +643,8 @@ async def my_permissions(user: dict = Depends(get_current_user)):
 # CUSTOMERS
 # ============================================================
 @api.get("/customers", response_model=List[CustomerOut])
-async def list_customers(_: dict = Depends(require_section(CUSTOMER_LOOKUP))):
-    return await db.customers.find({}, {"_id": 0}).to_list(2000)
+async def list_customers(skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None, _: dict = Depends(require_section(CUSTOMER_LOOKUP))):
+    return await page(db.customers.find({}, {"_id": 0}), db.customers, {}, response, skip, limit, 2000)
 
 
 @api.post("/customers", response_model=CustomerOut)
@@ -748,8 +765,8 @@ async def _sync_employee_to_user(emp: Dict[str, Any], password: Optional[str], w
 
 
 @api.get("/employees", response_model=List[EmployeeOut])
-async def list_employees(_: dict = Depends(require_section("change_requests"))):
-    emps = await db.employees.find({}, {"_id": 0}).to_list(2000)
+async def list_employees(skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None, _: dict = Depends(require_section("change_requests"))):
+    emps = await page(db.employees.find({}, {"_id": 0}), db.employees, {}, response, skip, limit, 2000)
     return [await _enrich_employee(e) for e in emps]
 
 
@@ -945,7 +962,7 @@ async def employees_bulk_upload(
     replaced_count = 0
     if mode == "replace":
         # Preserve permanent admin employee rows
-        protected = await db.employees.find({}, {"_id": 0}).to_list(5000)
+        protected = await db.employees.find({}, {"_id": 0}).to_list(None)
         protected = [p for p in protected if (p.get("email_id") or "").lower() in PERMANENT_ADMIN_EMPLOYEES_LOWER]
         if protected:
             await db.employees.delete_many({"email_id": {"$nin": [p["email_id"] for p in protected]}})
@@ -1034,8 +1051,8 @@ def _coerce_wbs_value(field: str, val: Any) -> Any:
 
 
 @api.get("/wbs", response_model=List[WBSElementOut])
-async def list_wbs(_: dict = Depends(require_section("wbs_budget"))):
-    return await db.wbs_elements.find({}, {"_id": 0}).to_list(20000)
+async def list_wbs(skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None, _: dict = Depends(require_section("wbs_budget"))):
+    return await page(db.wbs_elements.find({}, {"_id": 0}), db.wbs_elements, {}, response, skip, limit, 20000)
 
 
 @api.get("/wbs/template")
@@ -1177,8 +1194,8 @@ async def wbs_bulk_upload(
 # SUPPLIERS
 # ============================================================
 @api.get("/suppliers", response_model=List[SupplierOut])
-async def list_suppliers(_: dict = Depends(require_role("admin"))):
-    return await db.suppliers.find({}, {"_id": 0}).to_list(2000)
+async def list_suppliers(skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None, _: dict = Depends(require_role("admin"))):
+    return await page(db.suppliers.find({}, {"_id": 0}), db.suppliers, {}, response, skip, limit, 2000)
 
 
 @api.post("/suppliers", response_model=SupplierOut)
@@ -1218,6 +1235,9 @@ async def list_projects(
     stage: Optional[str] = None,
     customer_id: Optional[str] = None,
     search: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX),
+    response: Response = None,
     _: dict = Depends(require_section("projects")),
 ):
     q: Dict[str, Any] = {}
@@ -1231,7 +1251,7 @@ async def list_projects(
             {"wbs_element": {"$regex": search, "$options": "i"}},
             {"customer_name": {"$regex": search, "$options": "i"}},
         ]
-    rows = await db.projects.find(q, {"_id": 0}).to_list(2000)
+    rows = await page(db.projects.find(q, {"_id": 0}), db.projects, q, response, skip, limit, 2000)
     return rows
 
 
@@ -1418,8 +1438,8 @@ async def delete_project(pid: str, user: dict = Depends(require_role("admin"))):
 # REVENUE & COST LINES
 # ============================================================
 @api.get("/projects/{pid}/revenue", response_model=List[RevenueLineOut])
-async def list_revenue(pid: str, _: dict = Depends(require_section("projects"))):
-    return await db.revenue_lines.find({"project_id": pid}, {"_id": 0}).to_list(1000)
+async def list_revenue(pid: str,skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None,  _: dict = Depends(require_section("projects"))):
+    return await page(db.revenue_lines.find({"project_id": pid}, {"_id": 0}), db.revenue_lines, {"project_id": pid}, response, skip, limit, 1000)
 
 
 @api.post("/projects/{pid}/revenue", response_model=RevenueLineOut)
@@ -1442,8 +1462,8 @@ async def delete_revenue(rid: str, user: dict = Depends(require_section("project
 
 
 @api.get("/projects/{pid}/cost", response_model=List[CostLineOut])
-async def list_cost(pid: str, _: dict = Depends(require_section("projects"))):
-    return await db.cost_lines.find({"project_id": pid}, {"_id": 0}).to_list(1000)
+async def list_cost(pid: str,skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None,  _: dict = Depends(require_section("projects"))):
+    return await page(db.cost_lines.find({"project_id": pid}, {"_id": 0}), db.cost_lines, {"project_id": pid}, response, skip, limit, 1000)
 
 
 @api.post("/projects/{pid}/cost", response_model=CostLineOut)
@@ -1500,13 +1520,13 @@ async def delete_rule(rid: str, user: dict = Depends(require_role("admin"))):
 
 
 @api.get("/approvals/requests")
-async def list_requests(status: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def list_requests(status: Optional[str] = None,skip: int = Query(0, ge=0), limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX), response: Response = None,  user: dict = Depends(get_current_user)):
     q: Dict[str, Any] = {}
     if status:
         q["status"] = status
     if user.get("role") != "admin":  # everyone else: requests they approve or raised
         q["$or"] = await _approver_clauses(user) + [{"requested_by": user.get("email")}]
-    rows = await db.approval_requests.find(q, {"_id": 0}).sort("requested_at", -1).to_list(500)
+    rows = await page(db.approval_requests.find(q, {"_id": 0}).sort("requested_at", -1), db.approval_requests, q, response, skip, limit, 500)
     return rows
 
 
@@ -1600,24 +1620,20 @@ async def dashboard_summary(
     cust_filter = [c for c in (customer_ids or "").split(",") if c]
     proj_filter = [p for p in (project_ids or "").split(",") if p]
 
-    def _project_matches(p: dict) -> bool:
-        if cust_filter and p.get("customer_id") not in cust_filter:
-            return False
-        if proj_filter and p["id"] not in proj_filter:
-            return False
-        if business_category and (p.get("business_category") or "Non-GMR") != business_category:
-            return False
-        if section in ("projects", "change_requests"):
-            cat = (p.get("category1") or "").strip().lower()
-            is_cr = "change request" in cat or "change order" in cat or "amendment" in cat
-            if section == "change_requests" and not is_cr:
-                return False
-            if section == "projects" and is_cr:
-                return False
-        return True
-
-    all_projects = await db.projects.find({}, {"_id": 0}).to_list(5000)
-    projects = [p for p in all_projects if _project_matches(p)]
+    # filters run in the database; every matching project is summarised (no row cap)
+    pq: Dict[str, Any] = {}
+    if cust_filter:
+        pq["customer_id"] = {"$in": cust_filter}
+    if proj_filter:
+        pq["id"] = {"$in": proj_filter}
+    if business_category == "Non-GMR":  # a project without a category counts as Non-GMR
+        pq["business_category"] = {"$in": ["Non-GMR", None, ""]}
+    elif business_category:
+        pq["business_category"] = business_category
+    if section in ("projects", "change_requests"):
+        cr_like = re.compile(r"change request|change order|amendment", re.IGNORECASE)
+        pq["category1"] = cr_like if section == "change_requests" else {"$not": cr_like}
+    projects = await db.projects.find(pq, {"_id": 0}).to_list(None)
     pids = {p["id"] for p in projects}
 
     stage_summary: Dict[str, Dict[str, float]] = {s: {"count": 0, "value": 0.0, "margin": 0.0} for s in STAGES}
@@ -1679,14 +1695,11 @@ async def dashboard_summary(
             })
 
     # recognized but unbilled (filter to pids in scope)
-    rev_q: Dict[str, Any] = {}
-    if pids:
-        rev_q["project_id"] = {"$in": list(pids)}
-    rev_lines = await db.revenue_lines.find(rev_q, {"_id": 0}).to_list(5000)
-    if date_from:
-        rev_lines = [r for r in rev_lines if (r.get("recognition_date") or "") >= date_from]
-    if date_to:
-        rev_lines = [r for r in rev_lines if (r.get("recognition_date") or "") <= date_to]
+    # (an empty scope matches no lines — earlier builds summed every line when no project matched)
+    rev_q: Dict[str, Any] = {"project_id": {"$in": list(pids)}}
+    if date_from or date_to:
+        rev_q["recognition_date"] = {**({"$gte": date_from} if date_from else {}), **({"$lte": date_to} if date_to else {})}
+    rev_lines = await db.revenue_lines.find(rev_q, {"_id": 0}).to_list(None)
     recognized = sum(r.get("amount", 0) for r in rev_lines)
     billed = sum(r.get("amount", 0) for r in rev_lines if r.get("is_billed"))
     unbilled = recognized - billed
@@ -1704,10 +1717,7 @@ async def dashboard_summary(
     top_customers = sorted(cust_agg.values(), key=lambda x: -x["po_value"])[:10]
 
     # vendor exposure (sum of cost lines by supplier_name) — top 10
-    cost_q: Dict[str, Any] = {}
-    if pids:
-        cost_q["project_id"] = {"$in": list(pids)}
-    cost_lines = await db.cost_lines.find(cost_q, {"_id": 0}).to_list(5000)
+    cost_lines = await db.cost_lines.find({"project_id": {"$in": list(pids)}}, {"_id": 0}).to_list(None)
     vendor_agg: Dict[str, float] = {}
     for c in cost_lines:
         sn = c.get("supplier_name") or "Unspecified"
@@ -1827,7 +1837,7 @@ async def export_master(entity: str, user: dict = Depends(get_current_user)):
         "project": "projects", "customer": "customers", "employee": "employees",
         "supplier": "suppliers", "revenue": "revenue_lines", "cost": "cost_lines",
     }
-    rows = await db[coll_map[entity]].find({}, {"_id": 0}).to_list(10000)
+    rows = await db[coll_map[entity]].find({}, {"_id": 0}).to_list(None)
     # only include columns from schema
     cols = list(SCHEMAS[entity].keys())
     rows = [{c: r.get(c) for c in cols} for r in rows]
@@ -2100,10 +2110,10 @@ async def customer_profile(cid: str, _: dict = Depends(require_section("customer
     cust = await db.customers.find_one({"id": cid}, {"_id": 0})
     if not cust:
         raise HTTPException(404, "Customer not found")
-    projects = await db.projects.find({"customer_id": cid}, {"_id": 0}).to_list(500)
+    projects = await db.projects.find({"customer_id": cid}, {"_id": 0}).to_list(None)
     pids = [p["id"] for p in projects]
-    revenue_lines = await db.revenue_lines.find({"project_id": {"$in": pids}}, {"_id": 0}).to_list(5000) if pids else []
-    cost_lines = await db.cost_lines.find({"project_id": {"$in": pids}}, {"_id": 0}).to_list(5000) if pids else []
+    revenue_lines = await db.revenue_lines.find({"project_id": {"$in": pids}}, {"_id": 0}).to_list(None) if pids else []
+    cost_lines = await db.cost_lines.find({"project_id": {"$in": pids}}, {"_id": 0}).to_list(None) if pids else []
 
     total_po = sum((p.get("po_value") or 0) for p in projects)
     total_revenue = sum((p.get("revenue_total") or 0) for p in projects)
@@ -2284,6 +2294,9 @@ async def list_pipeline(
     stage: Optional[str] = None,
     outcome: Optional[str] = None,
     search: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX),
+    response: Response = None,
     _: dict = Depends(require_section("pipeline")),
 ):
     q: Dict[str, Any] = {}
@@ -2297,13 +2310,13 @@ async def list_pipeline(
             {"customer_name": {"$regex": search, "$options": "i"}},
             {"bd_owner": {"$regex": search, "$options": "i"}},
         ]
-    rows = await db.pipelines.find(q, {"_id": 0}).sort("updated_at", -1).to_list(2000)
+    rows = await page(db.pipelines.find(q, {"_id": 0}).sort("updated_at", -1), db.pipelines, q, response, skip, limit, 2000)
     return rows
 
 
 @api.get("/pipeline/summary")
 async def pipeline_summary(_: dict = Depends(require_section("pipeline"))):
-    rows = await db.pipelines.find({}, {"_id": 0}).to_list(2000)
+    rows = await db.pipelines.find({}, {"_id": 0}).to_list(None)
     by_stage = {s: {"count": 0, "value": 0.0} for s in PIPELINE_STAGES}
     total_value = 0.0
     won_value = 0.0
@@ -2731,6 +2744,9 @@ async def list_change_requests(
     airport: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=PAGE_MAX),
+    response: Response = None,
     user: dict = Depends(require_section("change_requests")),
 ):
     q: Dict[str, Any] = {}
@@ -2744,7 +2760,7 @@ async def list_change_requests(
         q["created_at"] = {**q.get("created_at", {}), "$gte": date_from}
     if date_to:
         q["created_at"] = {**q.get("created_at", {}), "$lte": date_to + "T23:59:59"}
-    docs = await db.change_requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    docs = await page(db.change_requests.find(q, {"_id": 0}).sort("created_at", -1), db.change_requests, q, response, skip, limit, 2000)
     return [await _enrich_cr(d) for d in docs]
 
 
@@ -2759,7 +2775,7 @@ async def cr_metrics(
         q["created_at"] = {**q.get("created_at", {}), "$gte": date_from}
     if date_to:
         q["created_at"] = {**q.get("created_at", {}), "$lte": date_to + "T23:59:59"}
-    docs = await db.change_requests.find(q, {"_id": 0}).to_list(5000)
+    docs = await db.change_requests.find(q, {"_id": 0}).to_list(None)
     total_count = len(docs)
     total_po = sum(float(d.get("po_value") or 0) for d in docs)
     total_cost = sum(float(d.get("estimated_total_cost") or 0) for d in docs)
@@ -3134,6 +3150,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_origin_regex=_cors_regex,
     allow_credentials=True,
+    expose_headers=["X-Total-Count"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
