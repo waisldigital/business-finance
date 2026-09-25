@@ -9,14 +9,16 @@ import {
   ShieldCheck, ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
   Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, IdentificationBadge,
   Table, ChartBar, SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives, Gauge, FileArrowUp, CheckSquareOffset,
-  PresentationChart,
+  PresentationChart, Stamp,
 } from "@phosphor-icons/react";
+import { useApprovalsInbox } from "@/lib/approvals";
 import NotificationBell from "./NotificationBell";
 import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
 const USER_NAV = [
   { title: "Workspace", items: [
+    { to: "/app/approvals",       label: "My approvals",     icon: Stamp,           testid: "sidebar-my-approvals",    approvals: true },
     { to: "/app/dashboard",       label: "Dashboard",        icon: ChartLineUp,     testid: "sidebar-dashboard",       section: "dashboard" },
     { to: "/app/pipeline",        label: "Pipeline",         icon: FunnelSimple,    testid: "sidebar-pipeline",        section: "pipeline" },
     { to: "/app/projects",        label: "Projects",         icon: FolderSimple,    testid: "sidebar-projects",        section: "projects" },
@@ -73,7 +75,10 @@ export default function AppLayout({ children, portal = "app" }) {
   }, [collapsed]);
 
   const asideWidth = collapsed ? "w-16" : "w-64";
+  const inbox = useApprovalsInbox({ enabled: portal === "app" });
+  const onApprovals = typeof window !== "undefined" && window.location.pathname.startsWith("/app/approvals");
   const canSee = (n) => {
+    if (n.approvals) return inbox.count > 0 || onApprovals; // shown while something waits for this user
     if (n.anyAop) return AOP_SECTIONS.some((sec) => permissions?.[sec]?.can_view);
     if (n.sections) return n.sections.some((sec) => permissions?.[sec]?.can_view);
     return !!permissions?.[n.section]?.can_view;
@@ -120,6 +125,10 @@ export default function AppLayout({ children, portal = "app" }) {
                 <NavLink key={n.to} to={n.to} end={!!n.end} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} data-testid={n.testid} title={collapsed ? n.label : undefined}>
                   <n.icon size={17} weight="duotone" />
                   <span className="nav-label">{n.label}</span>
+                  {n.approvals && inbox.count > 0 && (
+                    <span className="ml-auto text-[10px] font-bold px-1.5 min-w-[18px] text-center text-black" style={{ background: "var(--gold)" }}
+                          data-testid="my-approvals-badge">{inbox.count}</span>
+                  )}
                 </NavLink>
               ))}
             </React.Fragment>

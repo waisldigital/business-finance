@@ -4,6 +4,9 @@ import PageHeader from "@/components/PageHeader";
 import { useAuth } from "@/lib/auth";
 import { Plus, MagnifyingGlass, ArrowsClockwise, CheckCircle, Funnel } from "@phosphor-icons/react";
 import CRFormModal from "@/components/CRFormModal";
+import CRReview, { canDecideCR } from "@/components/CRReview";
+import Modal from "@/components/common/Modal";
+import { refreshApprovals } from "@/lib/approvals";
 
 const STATUS_COLORS = {
   draft:         { bg: "rgba(148,163,184,0.18)", fg: "#94a3b8", label: "Draft" },
@@ -29,7 +32,7 @@ function fmt(n) {
   return Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
-export default function ChangeRequestsPage() {
+export default function ChangeRequestsPage({ openId = null }) {
   const { user } = useAuth();
   const isFinance = user?.role === "finance" || user?.role === "admin";
   const [rows, setRows] = useState([]);
@@ -40,6 +43,8 @@ export default function ChangeRequestsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [reviewing, setReviewing] = useState(openId);
+  useEffect(() => { setReviewing(openId); }, [openId]);
 
   const load = async () => {
     const params = {};
@@ -188,6 +193,12 @@ export default function ChangeRequestsPage() {
                         <CheckCircle size={14} weight="bold" /> Approve WBS
                       </button>
                     )}
+                    {canDecideCR(r, user) && (
+                      <button className="btn-primary text-xs" onClick={() => setReviewing(r.id)} data-testid={`cr-review-${r.id}`}
+                              title="Review and approve or reject">
+                        Review
+                      </button>
+                    )}
                     {r.status === "draft" && (
                       <button
                         className="btn-ghost text-xs"
@@ -210,6 +221,11 @@ export default function ChangeRequestsPage() {
         </div>
       </div>
 
+      {reviewing && (
+        <Modal title="Change request" subtitle="REVIEW" size="lg" onClose={() => setReviewing(null)} testid="cr-review-modal">
+          <CRReview id={reviewing} onDecided={() => { load(); refreshApprovals(); }} />
+        </Modal>
+      )}
       {showForm && (
         <CRFormModal
           existing={editing}

@@ -14,6 +14,8 @@ import MasterPage from "@/pages/MasterPage";
 import CustomerProfilePage from "@/pages/CustomerProfilePage";
 import UploadsPage from "@/pages/UploadsPage";
 import ApprovalsPage from "@/pages/ApprovalsPage";
+import MyApprovalsPage from "@/pages/MyApprovalsPage";
+import CRLinkPage from "@/pages/CRLinkPage";
 import AuditPage from "@/pages/AuditPage";
 import SettingsPage from "@/pages/SettingsPage";
 import PipelinePage from "@/pages/PipelinePage";
@@ -55,6 +57,16 @@ function AdminRoute({ children }) {
 }
 
 // /app/* — workspace sections gated by the role's can_view. Admins use the admin portal instead.
+// any signed-in user, in their own portal's layout (notification links, the approvals inbox)
+function SignedIn({ adminToo = false, children }) {
+  const { user } = useAuth();
+  const { loading } = usePermissions();
+  if (user === null || loading) return <Loading />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role === "admin" && !adminToo) return <Navigate to="/admin" replace />;
+  return <AppLayout portal={user.role === "admin" ? "admin" : "app"}>{children}</AppLayout>;
+}
+
 function UserRoute({ section, sections, anyAop, children }) {
   const { user } = useAuth();
   const { permissions, loading } = usePermissions();
@@ -121,6 +133,8 @@ function App() {
                   <Route path="/app/projects/:id" element={U("projects", <ProjectDetailPage />)} />
                   <Route path="/app/pipeline" element={U("pipeline", <PipelinePage />)} />
                   <Route path="/app/change-requests" element={U("change_requests", <ChangeRequestsPage />)} />
+                  <Route path="/app/change-requests/:id" element={<SignedIn adminToo><CRLinkPage /></SignedIn>} />
+                  <Route path="/app/approvals" element={<SignedIn><MyApprovalsPage /></SignedIn>} />
                   <Route path="/app/wbs-budget" element={U("wbs_budget", <WBSBudgetPage />)} />
                   <Route path="/app/customers" element={U("customer_profile", <MasterPage entityKey="customers" />)} />
                   <Route path="/app/customers/:id" element={U("customer_profile", <CustomerProfilePage />)} />

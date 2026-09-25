@@ -1501,8 +1501,42 @@ async def list_requests(status: Optional[str] = None, user: dict = Depends(get_c
     q: Dict[str, Any] = {}
     if status:
         q["status"] = status
+    if user.get("role") != "admin":  # everyone else: requests they approve or raised
+        q["$or"] = await _approver_clauses(user) + [{"requested_by": user.get("email")}]
     rows = await db.approval_requests.find(q, {"_id": 0}).sort("requested_at", -1).to_list(500)
     return rows
+
+
+async def _approver_clauses(user: dict) -> List[Dict[str, Any]]:
+    """Mongo clauses matching approval requests this user may action (by email or by role)."""
+    email = (user.get("email") or "").strip()
+    roles = [r for r in {user.get("role")} if r]
+    if user.get("role_id"):
+        role = await db.roles.find_one({"id": user["role_id"]}, {"_id": 0, "name": 1})
+        if role and role.get("name"):
+            roles.append(role["name"])
+    out: List[Dict[str, Any]] = [{"approver_emails": {"$in": list({email, email.lower()})}}]
+    if roles:
+        out.append({"approver_role": {"$in": roles}})
+    return out
+
+
+CR_OPEN = ("approved", "completed", "rejected")
+
+
+@api.get("/approvals/inbox")
+async def approvals_inbox(user: dict = Depends(get_current_user)):
+    """Everything waiting for this user's decision: project stage-gate requests and change requests."""
+    gates = await db.approval_requests.find({"status": "Pending", "$or": await _approver_clauses(user)},
+                                            {"_id": 0}).sort("requested_at", 1).to_list(500)
+    email = (user.get("email") or "").strip()
+    crs = await db.change_requests.find(
+        {"approver_emails": {"$in": list({email, email.lower()})}, "status": {"$nin": list(CR_OPEN) + ["draft"]}},
+        {"_id": 0, "id": 1, "cr_number": 1, "cr_name": 1, "customer_name": 1, "airport_name": 1, "status": 1,
+         "wbs_approved": 1, "po_value": 1, "estimated_margin_pct": 1, "submitted_at": 1, "created_at": 1,
+         "created_by_name": 1}).sort("created_at", 1).to_list(500)
+    ready = [c for c in crs if c.get("wbs_approved")]
+    return {"stage_gates": gates, "change_requests": crs, "count": len(gates) + len(ready)}
 
 
 @api.post("/approvals/requests/{req_id}/action")
@@ -2910,6 +2944,7 @@ async def approve_cr(cid: str, payload: Optional[dict] = None, user: dict = Depe
     now = now_iso()
     await db.change_requests.update_one({"id": cid}, {"$set": {
         "status": "approved", "approved_by": user["email"], "approved_at": now, "updated_at": now,
+        "approval_comment": str((payload or {}).get("comment") or "")[:2000],
     }})
     targets: List[str] = []
     if existing.get("created_by_user_id"):

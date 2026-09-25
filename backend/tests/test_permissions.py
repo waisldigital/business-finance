@@ -29,3 +29,17 @@ def test_view_vs_edit(client, make_user):
 def test_no_role_sees_dashboard_only(client, admin):
     r = client.get("/api/me/permissions", headers=admin).json()
     assert r["is_admin"] and r["permissions"]["projects"]["can_delete"]
+
+
+def test_approval_requests_scoped_to_approver_or_requester(client, admin, make_user, app):
+    import asyncio
+    import server
+    reqs = [{"id": "r1", "status": "Pending", "approver_emails": ["user90@finsight-test.com"], "requested_by": "x@y.com",
+             "project_id": "p", "target_stage": "S2", "requested_at": "2026-01-01"},
+            {"id": "r2", "status": "Pending", "approver_emails": ["someone@else.com"], "requested_by": "x@y.com",
+             "project_id": "p", "target_stage": "S2", "requested_at": "2026-01-02"}]
+    asyncio.get_event_loop().run_until_complete(server.db.approval_requests.insert_many(reqs))
+    assert {r["id"] for r in client.get("/api/approvals/requests", headers=admin).json()} >= {"r1", "r2"}
+    other = make_user({"dashboard": {"can_view": True}})
+    assert client.get("/api/approvals/requests", headers=other).json() == []
+    assert client.get("/api/approvals/inbox", headers=other).json()["count"] == 0
