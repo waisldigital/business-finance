@@ -15,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import certifi
 import io
+from contextlib import asynccontextmanager
 import re
 
 from auth import (
@@ -157,7 +158,6 @@ def require_role(*roles):
 
 
 # ---------- STARTUP ----------
-@app.on_event("startup")
 async def on_startup():
     # Indexes
     await db.users.create_index("email", unique=True)
@@ -434,9 +434,18 @@ async def on_startup():
             await db.pipelines.update_one({"id": row["id"]}, {"$set": {"opportunity_id": opp_id}})
 
 
-@app.on_event("shutdown")
 async def on_shutdown():
     client.close()
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    await on_startup()
+    yield
+    await on_shutdown()
+
+
+app.router.lifespan_context = lifespan  # startup: indexes, admins, seed data; shutdown: close the DB client
 
 
 # ============================================================
