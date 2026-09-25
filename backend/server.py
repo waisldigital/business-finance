@@ -2886,7 +2886,7 @@ async def submit_change_request(cid: str, user: dict = Depends(require_section("
         kind="cr_submitted" if wbs_exists else "cr_wbs_pending",
         title=f"New Change Request: {existing.get('cr_name')}",
         body=f"CR {existing.get('cr_number')} submitted by {existing.get('created_by_name')}. PO value: {existing.get('po_value')}. {'WBS already approved.' if wbs_exists else 'Awaiting WBS approval by Finance.'}",
-        link=f"/change-requests/{cid}",
+        link=f"/app/change-requests/{cid}",
     )
     await write_audit(db, entity_type="change_request", entity_id=cid, action="submit", user=user,
                       field_changes={"new_status": new_status})
@@ -2922,7 +2922,7 @@ async def approve_wbs(cid: str, user: dict = Depends(get_current_user)):
         targets, kind="cr_wbs_approved",
         title=f"WBS approved: {existing.get('cr_name')}",
         body=f"WBS code {existing.get('wbs_element')} for CR {existing.get('cr_number')} has been approved by {user['email']}.",
-        link=f"/change-requests/{cid}",
+        link=f"/app/change-requests/{cid}",
     )
     await write_audit(db, entity_type="change_request", entity_id=cid, action="approve_wbs", user=user)
     return await _enrich_cr(await db.change_requests.find_one({"id": cid}, {"_id": 0}))
@@ -2954,7 +2954,7 @@ async def approve_cr(cid: str, payload: Optional[dict] = None, user: dict = Depe
     await _notify_in_app(list({u for u in targets if u}), kind="cr_approved",
         title=f"CR Approved: {existing.get('cr_name')}",
         body=f"{existing.get('cr_number')} approved by {user['email']}.",
-        link=f"/change-requests/{cid}")
+        link=f"/app/change-requests/{cid}")
     await write_audit(db, entity_type="change_request", entity_id=cid, action="approve", user=user)
     return await _enrich_cr(await db.change_requests.find_one({"id": cid}, {"_id": 0}))
 
@@ -2976,7 +2976,7 @@ async def reject_cr(cid: str, payload: dict, user: dict = Depends(get_current_us
     await _notify_in_app([u for u in targets if u], kind="cr_rejected",
         title=f"CR Rejected: {existing.get('cr_name')}",
         body=f"{existing.get('cr_number')} rejected by {user['email']}. Reason: {reason}",
-        link=f"/change-requests/{cid}")
+        link=f"/app/change-requests/{cid}")
     await write_audit(db, entity_type="change_request", entity_id=cid, action="reject", user=user, field_changes={"reason": reason})
     return await _enrich_cr(await db.change_requests.find_one({"id": cid}, {"_id": 0}))
 

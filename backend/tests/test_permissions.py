@@ -43,3 +43,9 @@ def test_approval_requests_scoped_to_approver_or_requester(client, admin, make_u
     other = make_user({"dashboard": {"can_view": True}})
     assert client.get("/api/approvals/requests", headers=other).json() == []
     assert client.get("/api/approvals/inbox", headers=other).json()["count"] == 0
+
+
+def test_cr_notification_links_point_at_the_workspace():
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "server.py").read_text()
+    assert 'link=f"/change-requests/' not in src and src.count('link=f"/app/change-requests/{cid}"') == 4
