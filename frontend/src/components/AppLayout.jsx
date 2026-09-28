@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import api from "@/lib/api";
 import { useCurrency } from "@/lib/currency";
 import { useTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import {
   Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
-  Gear, CaretDoubleLeft, CaretDoubleRight, CaretDown, Table, Gauge, FileArrowUp, CheckSquareOffset,
+  Gear, CaretDoubleLeft, CaretDoubleRight, Table, Gauge, FileArrowUp, CheckSquareOffset,
   PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
@@ -142,9 +143,11 @@ export default function AppLayout({ children, portal = "app" }) {
       <div className="flex-1 flex flex-col min-w-0">
         <div className="h-12 px-5 border-b border-[var(--border)] bg-[var(--surface)] flex items-center justify-between gap-3" data-testid="app-topbar">
           <div className="flex items-center gap-2 text-xs min-w-0">
-            <span className={`px-1.5 py-0.5 text-[10px] font-semibold border shrink-0 tracking-overline ${portal === "admin" ? "border-[var(--danger)] text-[var(--danger)]" : "border-[var(--gold)] text-[var(--gold)]"}`} data-testid="portal-badge">
-              {portal === "admin" ? "ADMIN PORTAL" : "WORKSPACE"}
-            </span>
+            {portal === "admin" && (
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold border shrink-0 tracking-overline border-[var(--danger)] text-[var(--danger)]" data-testid="portal-badge">
+                ADMIN PORTAL
+              </span>
+            )}
             <Breadcrumb groups={portal === "admin" ? ADMIN_NAV : USER_NAV} />
           </div>
 
@@ -224,18 +227,27 @@ function Breadcrumb({ groups }) {
   );
 }
 
-// Avatar menu: who is signed in, the theme picker and sign out
+const initialsOf = (user) => (user?.name || user?.email || "?").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+
+/** The user's photo, or their initials on the gold tile. */
+export function Avatar({ user, size = 32 }) {
+  return user?.avatar
+    ? <img src={user.avatar} alt="" className="object-cover shrink-0" style={{ width: size, height: size }} data-testid="user-avatar-img" />
+    : <span className="flex items-center justify-center shrink-0 font-bold text-[#0A1628]"
+            style={{ width: size, height: size, background: "var(--gold)", fontSize: Math.round(size * 0.36) }}>{initialsOf(user)}</span>;
+}
+
+// Avatar menu: who is signed in, their profile, the theme picker and sign out
 function UserMenu({ user, theme, themes, setTheme, onLogout }) {
   const [showThemes, setShowThemes] = useState(false);
-  const initials = (user?.name || user?.email || "?").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+  const [profile, setProfile] = useState(false);
   return (
+    <>
     <Popover panelClassName="mt-2 w-64 bg-[var(--surface)] border border-[var(--border)] z-50 shadow-lg" panelTestid="user-menu"
              button={(open, toggle) => (
-               <button className={`flex items-center gap-2 pl-1 pr-2 py-1 border ${open ? "border-[var(--gold)]" : "border-[var(--border)]"} bg-[var(--surface)]`}
-                       onClick={toggle} data-testid="user-menu-btn" title={user?.name}>
-                 <span className="w-7 h-7 flex items-center justify-center text-[11px] font-bold text-[#0A1628]" style={{ background: "var(--gold)" }}>{initials}</span>
-                 <span className="hidden lg:block text-xs font-semibold max-w-[140px] truncate">{user?.name}</span>
-                 <CaretDown size={11} className="text-[var(--muted)]" />
+               <button className={`p-0.5 border ${open ? "border-[var(--gold)]" : "border-[var(--border)]"} bg-[var(--surface)]`}
+                       onClick={toggle} data-testid="user-menu-btn" title={user?.name} aria-label={`${user?.name || "User"} menu`}>
+                 <Avatar user={user} size={30} />
                </button>
              )}>
       {(close) => (
@@ -245,6 +257,10 @@ function UserMenu({ user, theme, themes, setTheme, onLogout }) {
             <div className="text-[11px] text-[var(--muted)] truncate">{user?.email}</div>
             <div className="text-[10px] tracking-overline text-[var(--gold)] mt-0.5">{user?.role === "admin" ? "SYSTEM ADMIN" : "WORKSPACE USER"}</div>
           </div>
+          <button className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-[var(--row-hover)]"
+                  onClick={() => { close(); setProfile(true); }} data-testid="profile-btn">
+            <UserCircle size={14} weight="duotone" /><span className="flex-1">My profile</span>
+          </button>
           <button className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-[var(--row-hover)]"
                   onClick={() => setShowThemes((v) => !v)} data-testid="theme-toggle-btn">
             <Palette size={14} weight="duotone" /><span className="flex-1">Theme</span>
@@ -262,5 +278,58 @@ function UserMenu({ user, theme, themes, setTheme, onLogout }) {
         </>
       )}
     </Popover>
+    {profile && <ProfileModal user={user} onClose={() => setProfile(false)} />}
+    </>
+  );
+}
+
+// Small profile window: who you are, and your photo (resized in the browser before upload)
+function ProfileModal({ user, onClose }) {
+  const { refresh } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const input = React.useRef(null);
+  const shrink = (file) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const n = 160; const c = document.createElement("canvas"); c.width = n; c.height = n;
+      const side = Math.min(img.width, img.height);
+      c.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, n, n);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => reject(new Error("That file isn't an image the browser can read"));
+    img.src = URL.createObjectURL(file);
+  });
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true); setErr("");
+    try { await api.put("/me/avatar", { image: await shrink(file) }); await refresh(); }
+    catch (e) { setErr(e.response?.data?.detail || e.message); } finally { setBusy(false); }
+  };
+  const remove = async () => {
+    setBusy(true); setErr("");
+    try { await api.delete("/me/avatar"); await refresh(); } catch (e) { setErr(e.response?.data?.detail || e.message); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="My profile" size="sm" onClose={onClose} testid="profile-modal">
+      <div className="px-5 py-4 flex items-center gap-4">
+        <Avatar user={user} size={72} />
+        <div className="min-w-0 text-sm">
+          <div className="font-semibold truncate">{user?.name}</div>
+          <div className="text-xs text-[var(--muted)] truncate">{user?.email}</div>
+          <div className="text-[10px] tracking-overline text-[var(--gold)] mt-0.5">{user?.role === "admin" ? "SYSTEM ADMIN" : "WORKSPACE USER"}</div>
+        </div>
+      </div>
+      <div className="px-5 pb-4 flex items-center gap-2 flex-wrap">
+        <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+               onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ""; }} data-testid="profile-photo-input" />
+        <button className="btn-primary text-xs" disabled={busy} onClick={() => input.current?.click()} data-testid="profile-photo-btn">
+          {busy ? "Saving…" : user?.avatar ? "Change photo" : "Upload photo"}
+        </button>
+        {user?.avatar && <button className="btn-secondary text-xs" disabled={busy} onClick={remove} data-testid="profile-photo-remove">Remove photo</button>}
+        {err && <span className="text-xs text-[var(--danger)] w-full">{String(err)}</span>}
+      </div>
+    </Modal>
   );
 }

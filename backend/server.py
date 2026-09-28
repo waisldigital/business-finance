@@ -517,6 +517,27 @@ async def me(user: dict = Depends(get_current_user)):
     return user
 
 
+AVATAR_MAX_BYTES = 300_000  # the browser sends a ~160 px JPEG, typically 10–30 kB
+
+
+@api.put("/me/avatar")
+async def set_avatar(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
+    """The signed-in user's profile photo, as a data URL (PNG, JPEG or WebP)."""
+    img = str(payload.get("image") or "")
+    if not re.match(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$", img):
+        raise HTTPException(400, "Send the photo as a PNG, JPEG or WebP image")
+    if len(img) > AVATAR_MAX_BYTES:
+        raise HTTPException(413, "Photo is too large — use a smaller image")
+    await db.users.update_one({"id": user["id"]}, {"$set": {"avatar": img}})
+    return {"ok": True, "avatar": img}
+
+
+@api.delete("/me/avatar")
+async def remove_avatar(user: dict = Depends(get_current_user)):
+    await db.users.update_one({"id": user["id"]}, {"$unset": {"avatar": ""}})
+    return {"ok": True}
+
+
 @api.post("/auth/refresh")
 async def refresh_token(request: Request, response: Response, payload: Optional[Dict[str, Any]] = Body(None)):
     """New tokens from a refresh token — sent in the body by the web app (its API is cross-site, so the cookie

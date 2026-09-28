@@ -89,3 +89,14 @@ def test_frontend_and_backend_sections_match():
     from sections import SECTIONS
     js = (pathlib.Path(__file__).parents[2] / "frontend/src/config/sections.js").read_text()
     assert re.findall(r'\{ key: "([a-z_]+)"', js) == SECTIONS
+
+
+def test_profile_photo(client, make_user):
+    h = make_user({"dashboard": {"can_view": True}})
+    img = "data:image/jpeg;base64," + "A" * 400
+    assert client.put("/api/me/avatar", headers=h, json={"image": img}).status_code == 200
+    assert client.get("/api/auth/me", headers=h).json()["avatar"] == img
+    assert client.put("/api/me/avatar", headers=h, json={"image": "javascript:alert(1)"}).status_code == 400
+    assert client.put("/api/me/avatar", headers=h, json={"image": "data:image/png;base64," + "A" * 400000}).status_code == 413
+    assert client.delete("/api/me/avatar", headers=h).status_code == 200
+    assert client.get("/api/auth/me", headers=h).json()["avatar"] is None

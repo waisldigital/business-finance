@@ -48,6 +48,7 @@ class UserOut(BaseModel):
     is_active: bool = True
     role_id: Optional[str] = None
     is_permanent_admin: bool = False
+    avatar: Optional[str] = None  # profile photo as a small data URL (set from the profile window)
     created_at: str
 
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { GearSix, DownloadSimple, ArrowClockwise, LockSimple, Info } from "@phosphor-icons/react";
+import { GearSix, DownloadSimple, ArrowClockwise, LockSimple } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, periodPrefix, useTree, csvDownload, usePref } from "./mis";
 import { TreeLabel, ExpandButtons, PeriodPicker, Popover, Check, useFilters, FilterBar, MisModal } from "./MisCommon";
@@ -123,7 +123,6 @@ export default function FullPnL({ unit, onDrill }) {
       {data && (
         <div className="flex items-center gap-3 text-[10.5px] text-[var(--muted)] flex-wrap">
           {!data.meta?.payroll_visible && <span className="flex items-center gap-1"><LockSimple size={11} /> Employee cost lines are confidential for your role; totals include them.</span>}
-          <span className="flex items-center gap-1"><Info size={11} /> Indirect costs: department → segment rules; common costs split by revenue. Double-click a line to drill down (Back returns here).</span>
           <span className="ml-auto">Actuals to {data.months?.cutoff}</span>
         </div>
       )}
