@@ -8,7 +8,7 @@ import { usePermissions } from "@/lib/permissions";
 import {
   Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
   Gear, CaretDoubleLeft, CaretDoubleRight, Table, Gauge, FileArrowUp, CheckSquareOffset,
-  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple,
+  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple, CaretDown, CaretRight,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
 import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
@@ -64,9 +64,18 @@ export default function AppLayout({ children, portal = "app" }) {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("fs_sidebar_collapsed") === "1");
 
+  // Sidebar sections (Projects and CR, Annual Operating Plan, …) fold open / shut independently
+  const [closedGroups, setClosedGroups] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("fs_sidebar_closed_groups") || "[]"); } catch { return []; }
+  });
+
   useEffect(() => {
     localStorage.setItem("fs_sidebar_collapsed", collapsed ? "1" : "0");
   }, [collapsed]);
+  useEffect(() => {
+    localStorage.setItem("fs_sidebar_closed_groups", JSON.stringify(closedGroups));
+  }, [closedGroups]);
+  const toggleGroup = (t) => setClosedGroups((c) => (c.includes(t) ? c.filter((x) => x !== t) : [...c, t]));
 
   const asideWidth = collapsed ? "w-16" : "w-64";
   const inbox = useApprovalsInbox({ enabled: portal === "app" });
@@ -102,8 +111,13 @@ export default function AppLayout({ children, portal = "app" }) {
         <nav className="flex-1 py-3 overflow-y-auto">
           {groups.map((g, gi) => (
             <React.Fragment key={g.title}>
-              <div className={`nav-section-label px-4 py-1.5 ${gi ? "mt-3" : ""} text-[10px] tracking-overline`} style={{ color: "rgba(255,255,255,0.4)" }}>{g.title}</div>
-              {g.items.map((n) => (
+              <button type="button" onClick={() => toggleGroup(g.title)} aria-expanded={!closedGroups.includes(g.title)}
+                      className={`nav-section-label w-full flex items-center gap-1.5 px-4 py-1.5 ${gi ? "mt-3" : ""} text-[10px] tracking-overline text-left hover:text-white/70`}
+                      style={{ color: "rgba(255,255,255,0.4)" }} data-testid={`sidebar-group-${gi}`}>
+                <span className="flex-1">{g.title}</span>
+                {closedGroups.includes(g.title) ? <CaretRight size={10} weight="bold" /> : <CaretDown size={10} weight="bold" />}
+              </button>
+              {(collapsed || !closedGroups.includes(g.title)) && g.items.map((n) => (
                 <NavLink key={n.to} to={n.to} end={!!n.end} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`} data-testid={n.testid} title={collapsed ? n.label : undefined}>
                   <span className="relative inline-flex shrink-0">
                     <n.icon size={17} weight="duotone" />
