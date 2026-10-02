@@ -8,7 +8,7 @@ import {
   TrendUp, Receipt, Buildings, UsersFour, HardDrives,
 } from "@phosphor-icons/react";
 
-export const GROUPS = { workspace: "Workspace", aop: "Annual Operating Plan" };
+export const GROUPS = { workspace: "Projects and CR", aop: "Annual Operating Plan" };
 
 export const SECTIONS = [
   { key: "dashboard", label: "Dashboard", path: "/app/dashboard", group: "workspace", landing: 1,

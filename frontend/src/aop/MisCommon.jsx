@@ -1,6 +1,6 @@
 import CommonModal from "@/components/common/Modal";
 import CommonPopover from "@/components/common/Popover";
-import React, { useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Globe, AirplaneTilt, CalendarBlank, ArrowsInLineVertical, ArrowsOutLineVertical, LockSimple, X } from "@phosphor-icons/react";
 import { PERIODS } from "./mis";
@@ -20,12 +20,19 @@ export function TreeLabel({ row, tree, depth, onDoubleClick, title }) {
   );
 }
 
+// Extra toolbar control a host page injects just before the row buttons (AOP reports: the Formats picker)
+export const ToolbarExtra = createContext(null);
+
 export function ExpandButtons({ tree }) {
+  const extra = useContext(ToolbarExtra);
   return (
+    <>
+    {extra}
     <div className="seg" title="Rows">
       <button onClick={tree.collapseAll} title="Consolidated view (collapse all)" data-testid="collapse-all"><ArrowsInLineVertical size={12} /></button>
       <button onClick={tree.expandAll} title="Expand all" data-testid="expand-all"><ArrowsOutLineVertical size={12} /></button>
     </div>
+    </>
   );
 }
 
@@ -110,7 +117,7 @@ export function MisModal({ title, onClose, children, testid }) {
         <span className="text-sm font-semibold flex-1">{title}</span>
         <button onClick={onClose} className="text-white/80 hover:text-white" title="Close (Esc)"><X size={14} /></button>
       </div>
-      <div className="p-2">{children}</div>
+      <div className="p-2"><ToolbarExtra.Provider value={null}>{children}</ToolbarExtra.Provider></div>
     </CommonModal>
   );
 }

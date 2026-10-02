@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { useCurrency } from "@/lib/currency";
 import { Stack, CaretUp, CaretDown, X, EyeSlash, ArrowLeft, Database } from "@phosphor-icons/react";
-import { Popover } from "@/aop/MisCommon";
+import { Popover, ToolbarExtra } from "@/aop/MisCommon";
 import DatasetWorkspace from "@/aop/DatasetWorkspace";
 import { AirportGM, CuteAnalysis, OpexAnalysis, Resources, OverheadsSummary, OverheadsNature, OverheadsLines, ProjectHealth, CapexTracker } from "@/aop/MisDrillReports";
 import { usePref } from "@/aop/mis";
@@ -12,6 +12,9 @@ import PnLView from "@/aop/PnLView";
 import RevenuePerformance from "@/aop/RevenuePerformance";
 import RegionalPnL from "@/aop/RegionalPnL";
 import { Margin, Opex, Overheads, Wbs } from "@/aop/LegacyReports";
+
+// Reports whose own toolbar hosts the Formats picker (next to the row expand / collapse buttons)
+const TOOLBAR_HOSTS = new Set(["full_pnl", "detailed_pnl", "revenue_performance", "regional_pnl"]);
 
 const BODIES = {
   full_pnl: FullPnL, detailed_pnl: PnLView, revenue_performance: RevenuePerformance, regional_pnl: RegionalPnL,
@@ -70,11 +73,7 @@ export default function AopReportsPage({ admin = false }) {
   });
   const groups = [["aop_pnl", "P&L formats"], ["aop_reports", "Analysis"]];
 
-  return (
-    <div data-testid="aop-reports-page">
-      <div className="p-3 space-y-3">
-        {/* format picker, top right just above the reports */}
-        <div className="flex justify-end">
+  const picker = (
           <Popover icon={<Stack size={14} />} label={<span className="text-[11px]">Formats · {selected.length}</span>} testid="format-picker" width="w-80">
             {(close) => (<>
             <div className="px-3 py-1.5 text-[10px] text-[var(--muted)] border-b border-[var(--border)]">Click a format to show it alone · tick the box to add it to the page</div>
@@ -111,16 +110,21 @@ export default function AopReportsPage({ admin = false }) {
             })}
             </>)}
           </Popover>
-        </div>
+  );
+
+  return (
+    <div data-testid="aop-reports-page">
+      <div className="p-3 space-y-3">
         {err && <div className="text-xs text-[var(--danger)]">{String(err)}</div>}
         {catalog && !selected.length && (
-          <div className="text-xs text-[var(--muted)] border border-dashed border-[var(--border)] p-6 text-center">
+          <div className="text-xs text-[var(--muted)] border border-dashed border-[var(--border)] p-6 text-center flex flex-col items-center gap-2">
+            {catalog.length > 0 && picker}
             {catalog.length ? "Pick a report format from the Formats menu." : "No report formats are enabled for your role — ask an administrator."}
           </div>
         )}
         {selected.map((k, i) => (
           <ReportCard key={k} f={byKey[k]} byKey={byKey} unit={unit} datasets={datasets} admin={admin}
-                      first={i === 0} last={i === selected.length - 1} onMove={(d) => move(k, d)} onClose={() => toggle(k, false)} />
+                      picker={i === 0 ? picker : null} first={i === 0} last={i === selected.length - 1} onMove={(d) => move(k, d)} onClose={() => toggle(k, false)} />
         ))}
       </div>
     </div>
@@ -131,7 +135,7 @@ export default function AopReportsPage({ admin = false }) {
  * One report page. Double-clicks push a drill-down (Back returns, breadcrumbs jump); the data button opens the
  * datasets behind the report — download / bulk upload (permitted roles) and the FY'28 AOP inputs.
  */
-function ReportCard({ f, byKey, unit, datasets, admin, first, last, onMove, onClose }) {
+function ReportCard({ f, byKey, unit, datasets, admin, picker, first, last, onMove, onClose }) {
   const [stack, setStack] = useState([{ key: f.key, params: {}, label: f.label }]);
   const [showData, setShowData] = useState(false);
   const top = stack[stack.length - 1];
@@ -142,6 +146,7 @@ function ReportCard({ f, byKey, unit, datasets, admin, first, last, onMove, onCl
     setStack((s) => [...s, { key, params, label: label ? `${byKey[key].label} · ${label}` : byKey[key].label }]);
   };
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
+  const inToolbar = TOOLBAR_HOSTS.has(top.key); // otherwise the picker sits in the title bar
   const sources = (SOURCES[top.key] || []).map((k) => datasets.find((d) => d.key === k)).filter(Boolean);
   return (
     <section className="mis mis-card" data-testid={`report-${f.key}`}>
@@ -163,6 +168,7 @@ function ReportCard({ f, byKey, unit, datasets, admin, first, last, onMove, onCl
         </span>
         {!cur.enabled && <span className="chip !text-[9.5px] !bg-transparent !text-amber-300 !border-amber-300/50"><EyeSlash size={10} />Hidden from users</span>}
         <div className="flex-1" />
+        {picker && !inToolbar && <span className="mis-title-picker">{picker}</span>}
         {sources.length > 0 && (
           <button className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 ${showData ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}
                   onClick={() => setShowData((x) => !x)} title="Data behind this report: download, bulk upload and FY'28 AOP inputs" data-testid={`data-${f.key}`}>
@@ -174,7 +180,11 @@ function ReportCard({ f, byKey, unit, datasets, admin, first, last, onMove, onCl
         <button className="text-white/70 hover:text-white" onClick={onClose} title="Close"><X size={13} /></button>
       </div>
       {showData && <DataPanel sources={sources} admin={admin} />}
-      <div className="p-2">{Body && <Body key={stack.length} unit={unit} params={top.params} onDrill={drill} />}</div>
+      <div className="p-2">
+        <ToolbarExtra.Provider value={inToolbar ? picker : null}>
+          {Body && <Body key={stack.length} unit={unit} params={top.params} onDrill={drill} />}
+        </ToolbarExtra.Provider>
+      </div>
     </section>
   );
 }
