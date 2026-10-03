@@ -9,14 +9,14 @@ import { SlidersHorizontal, TrendUp, Receipt, Buildings, LockKey, HardDrives } f
 export const SECTION_META = {
   aop_inputs:    { icon: SlidersHorizontal, title: "AOP inputs", subtitle: "Drivers for next year's plan — scenario (Low/Base/High), FX, escalation, PAX, rates, growth, allocations" },
   aop_revenue:   { icon: TrendUp,   title: "Revenue", subtitle: "CA (CUTE & Non-CUTE), Change Requests and Projects · airport & country mapping" },
-  aop_opex:      { icon: Receipt,   title: "Opex & POs", subtitle: "Direct third-party opex: forecast tracker (old ↔ new PO), budget lines and the PO register — click any PO number" },
+  aop_opex:      { icon: Receipt,   title: "Opex & POs", subtitle: "Direct third-party opex: forecast tracker (latest PO first), budget lines, PO links and the ZMM PO report — click any PO number; map new POs in Review" },
   aop_overheads: { icon: Buildings, title: "Overheads", subtitle: "Department overheads — original WBS / AOP-head budget, and next year's plan on Cost centre + GL" },
   aop_payroll:   { icon: LockKey,   title: "Payroll", subtitle: "Confidential · resource cost by project / department, active and to-be-hired" },
   aop_capex:     { icon: HardDrives, title: "Capex", subtitle: "Budgeted capex by department, location and sub-system" },
 };
 
 // Tabs order within a section (datasets not listed fall back to catalogue order)
-const ORDER = ["capex_lines", "capex_history", "opex_tracker", "opex_lines", "po_register", "overhead_plan", "overhead_lines", "cc_gl_map",
+const ORDER = ["capex_lines", "capex_history", "opex_tracker", "opex_lines", "po_links", "po_items", "po_register", "po_triage", "po_changes", "po_corrections", "zmm_runs", "overhead_plan", "overhead_lines", "cc_gl_map",
                "assumptions", "pl_other", "rev_cute", "rev_cute_drivers", "rev_noncute", "rev_projects", "project_master", "taxonomy_airports"];
 
 export default function AopSectionPage({ section }) {

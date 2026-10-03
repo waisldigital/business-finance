@@ -3,5 +3,5 @@ frontend/src/config/sections.js). AOP_SECTIONS are the Annual Operating Plan scr
 and also gates resource-cost lines in the P&L."""
 
 WORKSPACE = ["dashboard", "pipeline", "projects", "change_requests", "customer_profile", "wbs_budget"]
-AOP_SECTIONS = ["aop_pnl", "aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex", "aop_reports"]
+AOP_SECTIONS = ["aop_pnl", "aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex", "aop_reports", "aop_review"]
 SECTIONS = WORKSPACE + AOP_SECTIONS

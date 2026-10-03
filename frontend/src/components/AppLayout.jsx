@@ -8,9 +8,10 @@ import { usePermissions } from "@/lib/permissions";
 import {
   Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
   Gear, CaretDoubleLeft, CaretDoubleRight, Table, Gauge, FileArrowUp, CheckSquareOffset,
-  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple, CaretDown, CaretRight,
+  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple, CaretDown, CaretRight, ListChecks,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
+import { useReviewBadge } from "@/lib/review";
 import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
 import NotificationBell from "./NotificationBell";
 import Popover from "@/components/common/Popover";
@@ -20,7 +21,7 @@ import { useResizableColumns } from "@/lib/resizableColumns";
 
 // Two portals, split by path: /app (users — gated by section permissions) and /admin (system admin only)
 // Workspace sidebar: built from the section registry, plus the approvals inbox and the AOP change log
-const navItem = (x) => ({ to: x.path, label: x.nav.label, icon: x.nav.icon, testid: x.nav.testid,
+const navItem = (x) => ({ to: x.path, label: x.nav.label, icon: x.nav.icon, testid: x.nav.testid, review: x.nav.review,
                           ...(x.nav.sections ? { sections: x.nav.sections } : { section: x.key }), confidential: x.confidential });
 const USER_NAV = [
   { title: GROUPS.workspace, items: [
@@ -39,6 +40,7 @@ const ADMIN_NAV = [
     { to: "/admin/aop/data",      label: "Data manager",  icon: Database,        testid: "sidebar-admin-data" },
     { to: "/admin/aop/imports",   label: "Imports",       icon: FileArrowUp,     testid: "sidebar-admin-imports" },
     { to: "/admin/aop/approvals", label: "AOP approvals", icon: CheckSquareOffset, testid: "sidebar-admin-aop-approvals" },
+    { to: "/admin/aop/review",    label: "Review (POs)",  icon: ListChecks,      testid: "sidebar-admin-review", review: true },
     { to: "/admin/aop/pnl",       label: "P&L check",     icon: Table,           testid: "sidebar-admin-pnl" },
     { to: "/admin/aop/reports",   label: "AOP reports",   icon: PresentationChart, testid: "sidebar-admin-reports" },
     { to: "/admin/aop/settings",  label: "Plan settings", icon: GearSix,         testid: "sidebar-admin-plan" },
@@ -79,9 +81,12 @@ export default function AppLayout({ children, portal = "app" }) {
 
   const asideWidth = collapsed ? "w-16" : "w-64";
   const inbox = useApprovalsInbox({ enabled: portal === "app" });
+  const reviewOk = portal === "admin" || !!permissions?.aop_review?.can_view || !!permissions?.aop_opex?.can_edit;
+  const reviewBadge = useReviewBadge({ enabled: reviewOk });
   const onApprovals = typeof window !== "undefined" && window.location.pathname.startsWith("/app/approvals");
   const canSee = (n) => {
     if (n.approvals) return inbox.count > 0 || onApprovals; // shown while something waits for this user
+    if (n.review) return reviewOk;
     if (n.anyAop) return AOP_SECTION_KEYS.some((sec) => permissions?.[sec]?.can_view);
     if (n.sections) return n.sections.some((sec) => permissions?.[sec]?.can_view);
     return !!permissions?.[n.section]?.can_view;
@@ -127,6 +132,10 @@ export default function AppLayout({ children, portal = "app" }) {
                   {n.approvals && inbox.count > 0 && (
                     <span className="ml-auto text-[10px] font-bold px-1.5 min-w-[18px] text-center text-black" style={{ background: "var(--gold)" }}
                           data-testid="my-approvals-badge">{inbox.count}</span>
+                  )}
+                  {n.review && reviewBadge > 0 && (
+                    <span className="ml-auto text-[10px] font-bold px-1.5 min-w-[18px] text-center text-black" style={{ background: "var(--gold)" }}
+                          data-testid="review-badge" title="Open review items">{reviewBadge}</span>
                   )}
                 </NavLink>
               ))}

@@ -48,7 +48,7 @@ Two portals, split by path:
 | Path      | Who                    | What |
 |-----------|------------------------|------|
 | `/admin`  | system role `admin`    | Imports, Data manager (columns, upload add/replace/modify, download), AOP approvals, P&L check, Plan settings, users/roles/audit |
-| `/app`    | everyone else          | Workspace + AOP sections (P&L, Inputs, Revenue, Opex & POs, Overheads, Payroll, Capex), gated by role permissions |
+| `/app`    | everyone else          | Workspace + AOP sections (P&L, Inputs, Revenue, Opex & POs, Overheads, Payroll, Capex, Review), gated by role permissions |
 
 First-time load (admin): **Imports** → upload the consolidated AOP workbook, then the Opex forecast
 workbook. Sheets and columns are located by header text, so re-arranged workbooks still import.
@@ -60,6 +60,33 @@ per dataset in **Data manager → Columns**.
 
 Storage: `aop_rows` (all datasets, unique `dataset + key`), `aop_actuals` (the single actual source),
 `aop_dataset_meta` (columns), `aop_changes` (approval queue), `aop_history`, `aop_config`, `aop_imports`.
+
+### Opex lines, PO mapping and the ZMM (Review)
+
+Opex lines (`opex_lines`) and the forecast tracker (`opex_tracker`) share one column layout — the refined
+`Opex_Raw Data` format (`backend/aop/opex_schema.py`) — for upload, download and the grid. The SAP ZMM PO report
+is the only recurring input:
+
+* **Manual:** Admin → Imports → *ZMM PO report*, or Review → Upload log (admins, or roles with upload on Opex).
+* **E-mail:** the `finsight-zmm-fetch` Render cron job (`render.yaml`, daily 02:00 UTC = 07:30 IST) reads the
+  scheduled SAP e-mail and runs the same pipeline. Set `ZMM_FETCH_ENABLED=true`, `ZMM_MAILBOX`, `ZMM_SENDER`,
+  `ZMM_SUBJECT_CONTAINS` (and optionally `ZMM_ATTACHMENT_PATTERN`) plus the Graph app (`MS_TENANT_ID`,
+  `MS_CLIENT_ID`, `MS_CLIENT_SECRET`). Give that app the **Mail.Read** application permission and restrict it
+  to the report mailbox with an Exchange Application Access Policy
+  (`New-ApplicationAccessPolicy -AppId <MS_CLIENT_ID> -PolicyScopeGroupId <mailbox> -AccessRight RestrictAccess`).
+
+Each run rebuilds the PO items, flags changes on mapped POs (held until accepted), re-resolves the PO links and
+recalculates the forecast; the admins get an e-mail and an in-app notification. All human work sits in **Review**
+(To map · PO changes · Corrections · Checks · Upload log), open to admins and roles with edit on Opex (or the
+`aop_review` section).
+
+One-time setup for existing data:
+
+1. `cd backend && python scripts/migrate_opex_columns.py --dry-run`, then `--apply` (backs up `aop_rows` of both
+   datasets, renames legacy keys, rewrites the column lists).
+2. Admin → Imports → *Opex forecast workbook* with `Opex_Forecast`, `PO_Links`, `Line_Status` and
+   `ZMM_PO_Report` sheets (lines are upserted by S. No.; rows without one are listed and skipped).
+3. Work the To map backlog in Review.
 
 ## Logins
 

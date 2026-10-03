@@ -19,6 +19,7 @@ import os
 import re
 import tempfile
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
@@ -35,7 +36,11 @@ from .actuals_import import (import_mis_working, import_project_health, import_r
                              pax_driver_key)
 from .periods import shift_fy
 from .periods import fy_months, fy_of_period as fy_of, period_label
-from .opex import INPUT_FIELDS as TRACKER_INPUTS, forecast_line
+from .opex import input_fields as tracker_inputs
+from . import opex_schema
+from . import po as PO
+from .po_pipeline import PO_META, OpexEngine, notify_zmm
+from .review import register_review
 from .plan import build_draft, default_drivers
 from . import reports as rep
 from .pnl import Filters, PnLEngine
@@ -57,7 +62,11 @@ DEFAULT_CONFIG = {
     "id": "aop", "base_fy": "FY26", "plan_fy": "FY27", "draft_fy": "FY28",
     "cutoffs": {"default": "2025-12", "overhead": "2025-11"}, "tax_rate": 0.25,
     "edit_modes": {s: "approval" for s in AOP_SECTIONS}, "data_version": 0,
+    "po_change_mode": "hold", "po_nature_prefix": dict(PO.DEFAULT_PREFIX),
 }
+OPEX_DATASETS = ("opex_lines", "opex_tracker")
+# PO datasets the system writes (read-only in the grid; edited through Review)
+READONLY_DATASETS = {"po_register", "po_items", "po_changes", "zmm_runs"}
 
 
 # opex / capex / overhead lines: department budget inputs for the draft year (FY'28 while FY'27 is the plan year)
@@ -115,7 +124,7 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
+def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> APIRouter:
     r = APIRouter(prefix="/aop", tags=["aop"])
     # Per-process cache of the datasets and actuals the P&L engine reads. It is keyed on aop_config.data_version,
     # a counter in MongoDB bumped by every write (bump_version), so with several workers or instances each one
@@ -233,7 +242,15 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             meta = await db.aop_dataset_meta.find_one({"dataset": ACTUALS}, {"_id": 0})
             return (meta or {}).get("columns") or ACTUAL_COLUMNS
         meta = await db.aop_dataset_meta.find_one({"dataset": dataset}, {"_id": 0})
-        return (meta or {}).get("columns") or []
+        stored = (meta or {}).get("columns") or []
+        if dataset in OPEX_DATASETS:  # one layout for both, labelled with today's FYs
+            return opex_schema.meta_columns(dataset, await get_config(), stored)
+        if dataset in PO_META:
+            known = {c["key"] for c in PO_META[dataset]}
+            prev = {c["key"]: c for c in stored}
+            return [{**c, **{k: prev[c["key"]][k] for k in ("hidden", "width") if c["key"] in prev and k in prev[c["key"]]}}
+                    for c in PO_META[dataset]] + [c for c in stored if c.get("custom") and c["key"] not in known]
+        return stored
 
     async def draft_version() -> str:
         cfg = await get_config()
@@ -308,37 +325,16 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if dataset != ACTUALS and dataset not in SPECS:
             raise HTTPException(404, f"Unknown dataset {dataset}")
 
-    async def fill_new_po(key: str):
-        """Tracker line mapped to new PO number(s): pull supplier, value, period and GRN status from the PO register."""
-        doc = await db.aop_rows.find_one({"dataset": "opex_tracker", "key": key}, {"_id": 0, "fields": 1})
-        f = (doc or {}).get("fields") or {}
-        import re as _re
-        pos = [x for x in _re.split(r"[,;/\s]+", str(f.get("mapped_new_pos") or f.get("new_po") or "")) if x.isdigit()]
-        if not pos:
-            return
-        items = [d["fields"] async for d in db.aop_rows.find({"dataset": "po_register", "fields.purchase_order": {"$in": pos}},
-                                                             {"_id": 0, "fields": 1})]
-        if not items:
-            return
-        starts = [str(i.get("start_date_for_period_of_performance"))[:10] for i in items if i.get("start_date_for_period_of_performance")]
-        ends = [str(i.get("end_date_for_period_of_performance"))[:10] for i in items if i.get("end_date_for_period_of_performance")]
-        upd = {"new_po_supplier": items[0].get("supplier_name"), "new_po_date": str(items[0].get("created_on") or "")[:10] or None,
-               "new_po_amount": round(sum(float(i.get("final_value") or 0) for i in items), 2),
-               "new_po_grn": round(sum(float(i.get("gr_amount_in_lc") or 0) for i in items), 2),
-               "new_po_pending": round(sum(float(i.get("pending_gr_amount_in_lc") or 0) for i in items), 2),
-               "new_po_start": min(starts) if starts else None, "new_po_end": max(ends) if ends else None}
-        upd = {k: v for k, v in upd.items() if v not in (None, "")}  # never blank out what the register doesn't have
-        await db.aop_rows.update_one({"dataset": "opex_tracker", "key": key}, {"$set": {f"fields.{k}": v for k, v in upd.items()}})
+    async def fx_for(currency: str) -> Optional[float]:
+        data, _, cfg = await load_all()
+        return fx_rate(data, currency, [cfg["plan_fy"], cfg["base_fy"]])
+
+    engine = OpexEngine(db, get_config, fx_for, storage=storage, bump=bump_version)
 
     async def recalc_tracker(keys: Optional[List[str]] = None):
-        """Recompute the forecast months of tracker lines (all lines when keys is None)."""
-        cfg = await get_config()
-        q: Dict[str, Any] = {"dataset": "opex_tracker"}
-        if keys is not None:
-            q["key"] = {"$in": list(keys)}
-        async for d in db.aop_rows.find(q, {"_id": 0, "key": 1, "fields": 1}):
-            fc = forecast_line(d.get("fields") or {}, cfg["plan_fy"])
-            await db.aop_rows.update_one({"dataset": "opex_tracker", "key": d["key"]}, {"$set": {f"fields.{k}": v for k, v in fc.items()}})
+        """Resolve the PO links and recompute the forecast months and PO display fields of tracker lines (all lines
+        when keys is None)."""
+        return await engine.resolve_all(list(keys) if keys is not None else None)
 
     async def recalc_budget(dataset: str, changed: List[tuple]):
         """Department budget inputs → the draft year's budget. Qty × unit price × FX (from the assumptions unless finance
@@ -383,12 +379,17 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
 
     async def after_edit(dataset: str, changed: List[tuple]):
         await recalc_budget(dataset, changed)
-        if dataset != "opex_tracker" or not changed:
+        if not changed:
             return
-        po_keys = {k for k, fld in changed if fld in ("new_po", "mapped_new_pos")}
-        for k in po_keys:
-            await fill_new_po(k)
-        keys = {k for k, fld in changed if fld in TRACKER_INPUTS} | po_keys
+        if dataset == "po_links":  # allocation is shared across lines: re-resolve every line
+            for k in {k for k, fld in changed if fld == "alloc_pct"}:  # a user-entered % is never changed by the system
+                await db.aop_rows.update_one({"dataset": "po_links", "key": k}, {"$set": {"fields.alloc_auto": False}})
+            await recalc_tracker()
+            return
+        if dataset != "opex_tracker":
+            return
+        cfg = await get_config()
+        keys = {k for k, fld in changed if fld in tracker_inputs(cfg["plan_fy"])}
         if keys:
             await recalc_tracker(list(keys))
 
@@ -578,7 +579,40 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                 d["pending"] = pending[d["key"]]
         if dataset in ACTUAL_LINKS and docs:
             await actual_months(dataset, docs)
+        if dataset == "opex_tracker" and docs:  # add-on lines sort under their parent
+            kids: Dict[str, List[Dict[str, Any]]] = {}
+            for d in docs:
+                par = (d.get("fields") or {}).get("parent_line_id")
+                if par:
+                    kids.setdefault(par, []).append(d)
+            if kids:
+                keys_here = {d["key"] for d in docs}
+                ordered = []
+                for d in docs:
+                    par = (d.get("fields") or {}).get("parent_line_id")
+                    if par and par in keys_here:
+                        continue
+                    ordered.append(d)
+                    ordered += kids.get(d["key"], [])
+                docs = ordered
+        if dataset in OPEX_DATASETS and docs:  # computed columns (YTD, totals, variance, bridge check)
+            cfg = await get_config()
+            acts = await opex_actuals([d["key"] for d in docs]) if dataset == "opex_lines" else {}
+            for d in docs:
+                d["fields"] = {**d.get("fields", {}), **opex_schema.derive(d.get("fields") or {}, dataset, cfg, acts.get(d["key"]))}
         return {"total": total, "rows": docs}
+
+    async def opex_actuals(keys: Optional[List[str]] = None) -> Dict[str, Dict[str, float]]:
+        """Booked opex actuals per opex line (ref = line id) for the base year."""
+        cfg = await get_config()
+        q: Dict[str, Any] = {"domain": "opex", "period": {"$in": fy_months(cfg["base_fy"])}}
+        if keys is not None:
+            q["ref"] = {"$in": keys}
+        out: Dict[str, Dict[str, float]] = {}
+        async for a in db.aop_actuals.find(q, {"_id": 0, "ref": 1, "period": 1, "amount": 1}):
+            m = out.setdefault(a.get("ref"), {})
+            m[a["period"]] = m.get(a["period"], 0.0) + float(a.get("amount") or 0)
+        return out
 
     @r.patch("/datasets/{dataset}/rows")
     async def edit_cells(dataset: str, edits: List[Dict[str, Any]] = Body(...), user: dict = Depends(get_current_user)):
@@ -586,6 +620,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         ensure_ds(dataset)
         if dataset == ACTUALS:
             require_admin(user)
+        if dataset in READONLY_DATASETS:
+            raise HTTPException(400, "This dataset is written by the ZMM run — change it through Review")
         p = await perms_for(user)
         if not await can(user, dataset, "edit"):
             raise HTTPException(403, "You don't have edit rights on this section")
@@ -600,6 +636,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             col = cols.get(fld)
             if not col or col.get("actual"):
                 rejected.append({"key": key, "field": fld, "reason": "unknown column" if not col else "actuals come from the actual source"}); continue
+            if col.get("role") in ("computed", "system", "key"):
+                rejected.append({"key": key, "field": fld, "reason": "computed column"}); continue
             if not p["admin"] and not col.get("user_editable"):
                 rejected.append({"key": key, "field": fld, "reason": "column is not editable"}); continue
             if spec and fld in spec.key_fields:
@@ -662,7 +700,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
 
     # ------------------------------------------------------------------ upload / download (admin only)
     async def upsert_rows(dataset: str, incoming: List[Dict[str, Any]], mode: str, user: dict,
-                          scope: Optional[List[str]] = None) -> Dict[str, Any]:
+                          scope: Optional[List[str]] = None, add_columns: bool = True) -> Dict[str, Any]:
         spec = SPECS[dataset]
         cols = {c["key"]: c for c in await columns_with_draft(dataset)}
         scoped = scope is not None and dataset in dept_scope.SCOPED_DATASETS
@@ -725,7 +763,7 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         await recalc_budget(dataset, touched)
         # unseen columns in an upload are appended to the column list (admins can tidy them later)
         unknown = sorted({k for raw in incoming for k in raw if k not in cols and k not in ("key", "_key")})
-        if unknown:
+        if unknown and add_columns:
             meta_cols = list(cols.values()) + [column(slug(k), k) | {"custom": True} for k in unknown]
             await db.aop_dataset_meta.update_one({"dataset": dataset}, {"$set": {"columns": meta_cols, "updated_at": now_iso()}}, upsert=True)
         await bump_version()
@@ -769,15 +807,103 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             raise HTTPException(403, "Bulk upload needs the upload permission for this section — ask an administrator")
         if mode == "replace" and user.get("role") != "admin":
             raise HTTPException(403, "Only an administrator can replace a whole dataset")
+        if dataset in READONLY_DATASETS:
+            raise HTTPException(400, "This dataset is written by the ZMM run — upload the ZMM report under Imports")
         content = await file.read()
+        if dataset in OPEX_DATASETS:
+            return await upload_opex(dataset, content, file.filename or "upload.xlsx", mode, user)
         cols = await columns_with_draft(dataset)
         incoming = read_table(content, file.filename or "upload.csv", cols)
+        if dataset == "po_links":  # numbers as digit strings, S. No. → line id, so keys match line|po|material|item
+            for raw in incoming:
+                for k in ("po", "material", "po_item"):
+                    raw[k] = opex_schema.po_str(raw.get(k)) or ""
+                lid = raw.get("line_id")
+                raw["line_id"] = opex_schema.line_id_from_sno(lid) if isinstance(lid, (int, float)) or str(lid or "").isdigit() else lid
         if dataset == ACTUALS:
             return await upsert_actuals(incoming, mode, user)
         p = await perms_for(user)
         res = await upsert_rows(dataset, incoming, mode, user, p.get("departments"))
+        if dataset == "po_links":
+            for raw in incoming:  # an uploaded % is the user's
+                if raw.get("alloc_pct") not in (None, ""):
+                    k = PO.link_key(str(raw.get("line_id") or ""), raw["po"], raw["material"], raw["po_item"])
+                    await db.aop_rows.update_one({"dataset": "po_links", "key": k}, {"$set": {"fields.alloc_auto": False}})
+            await recalc_tracker()
+        return res
+
+    def sheet_rows(content: bytes, filename: str, prefer: Optional[str] = None) -> List[tuple]:
+        if filename.lower().endswith((".xlsx", ".xlsm")):
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            name = next((n for n in wb.sheetnames if prefer and norm(n).replace(" ", "_") == norm(prefer)), None)
+            ws = wb[name] if name else wb.worksheets[0]
+            return [tuple(x) for x in ws.iter_rows(values_only=True)]
+        text = content.decode("utf-8-sig", errors="replace")
+        return [tuple(x) for x in csv.reader(io.StringIO(text))]
+
+    async def upload_opex(dataset: str, content: bytes, filename: str, mode: str, user: dict) -> Dict[str, Any]:
+        """Opex lines / tracker upload in the one Opex layout: unknown headers are reported (never added as columns),
+        computed columns and next-FY months are ignored, opex_lines' current-FY months split into actuals (to the
+        cut-off) and forecast, and for SAP POs in the ZMM the ZMM value wins over an uploaded one (warned)."""
+        cfg = await get_config()
+        cur, nxt = opex_schema.fys_for(dataset, cfg)
+        try:
+            parsed = opex_schema.read_lines(sheet_rows(content, filename, dataset), dataset)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        warnings: List[str] = []
+        cw = opex_schema.crore_months_warning(parsed["lines"], nxt)
+        if cw and nxt in parsed["months"]:
+            warnings.append(cw)
+        zmm_pos = {d["fields"].get("po") async for d in db.aop_rows.find({"dataset": "po_items"}, {"_id": 0, "fields.po": 1})}
+        existing = {d["key"]: d.get("fields") or {} async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1})}
+        cut = (cfg.get("cutoffs") or {}).get("default") or ""
+        incoming, acts = [], []
+        auto_n = 0
+        for f in parsed["lines"]:
+            months = f.pop("_months", {})
+            row_n = f.pop("_row")
+            sno = f.pop("_sno", None)
+            if not f.get("line_id") and dataset == "opex_tracker" and sno not in (None, ""):
+                f["line_id"] = opex_schema.line_id_from_sno(sno)
+            if not f.get("line_id") and mode != "modify":  # new line: its id now, so its booked months can follow it
+                auto_n += 1
+                f["line_id"] = f"{SPECS[dataset].auto_prefix}-N{datetime.now().strftime('%y%m%d%H%M%S')}{auto_n:04d}"
+            po = f.get("po")
+            if po in zmm_pos:
+                old = existing.get(f.get("line_id") or "", {})
+                for k in opex_schema.ZMM_KEYS:
+                    if k in f:
+                        v = f.pop(k)
+                        if old.get(k) not in (None, "") and old.get(k) != v:
+                            warnings.append(f"Row {row_n}: {k} differs from the ZMM for PO {po} — ZMM value kept")
+            if dataset == "opex_lines":
+                for p_ in fy_months(cur):
+                    if p_ in months:
+                        if p_ <= cut:
+                            acts.append((f, p_, months[p_]))
+                        else:
+                            f[f"F{cur[2:]}__{p_}"] = months[p_]
+                opex_schema.phase_budget(f, nxt)
+            elif dataset == "opex_tracker":
+                opex_schema.phase_budget(f, nxt)
+            incoming.append(f)
+        p = await perms_for(user)
+        res = await upsert_rows(dataset, incoming, mode, user, p.get("departments"), add_columns=False)
+        if acts:
+            for f, per, amt in acts:
+                lid = f.get("line_id")
+                if not lid:
+                    continue
+                dims = {k: f.get(k) for k in ("category", "geo", "tag", "aop_code", "wbs", "po", "vendor", "cost_centre")}
+                await db.aop_actuals.update_one({"uid": f"opex|{lid}|{per}"},
+                                                {"$set": {"domain": "opex", "ref": lid, "period": per, "amount": float(amt),
+                                                          "dims": dims, "source": "upload", "uid": f"opex|{lid}|{per}"}}, upsert=True)
+            await bump_version()
         if dataset == "opex_tracker":
             await recalc_tracker()
+        res.update(ignored_columns=parsed["ignored"], dropped_columns=parsed["dropped"], warnings=warnings[:200],
+                   header_row=parsed["header_row"])
         return res
 
     async def upsert_actuals(incoming: List[Dict[str, Any]], mode: str, user: dict):
@@ -825,6 +951,8 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         if not (await can(user, dataset, "upload") or (dataset != ACTUALS and await can(user, dataset, "view"))):
             raise HTTPException(403, "Not allowed")
         ensure_ds(dataset)
+        if dataset in OPEX_DATASETS:
+            return await download_opex(dataset, fmt, template, user)
         cols = [c for c in await columns_with_draft(dataset) if not c.get("actual")]
         spec = SPECS.get(dataset)
         if spec and spec.auto_prefix and "line_id" not in {c["key"] for c in cols}:
@@ -860,9 +988,71 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                  headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
 
+    async def download_opex(dataset: str, fmt: str, template: bool, user: dict):
+        """Exactly the §3.2 order with today's FY labels; computed columns included (shaded grey) so the file
+        round-trips through upload."""
+        cfg = await get_config()
+        lay = opex_schema.layout(dataset, cfg)
+        custom = [c for c in await columns_for(dataset) if c.get("custom")]
+        lay += [{"key": c["key"], "label": c["label"], "type": c.get("type", "text"), "role": "input"} for c in custom]
+        rows_out: List[List[Any]] = []
+        if not template:
+            acts = await opex_actuals() if dataset == "opex_lines" else {}
+            scope = (await perms_for(user)).get("departments")
+            async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1}).sort("seq", 1):
+                f = d.get("fields") or {}
+                if not dept_scope.row_allowed(scope, dataset, f):
+                    continue
+                f = {**f, **opex_schema.derive(f, dataset, cfg, acts.get(d["key"]))}
+                rows_out.append([f.get(c["key"]) for c in lay])
+        name = f"{dataset}{'_template' if template else ''}"
+        if fmt == "csv":
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow([c["month"] if c.get("month") else c["label"] for c in lay])
+            w.writerows(rows_out)
+            return StreamingResponse(io.BytesIO(buf.getvalue().encode("utf-8-sig")), media_type="text/csv",
+                                     headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
+        from openpyxl.styles import Font, PatternFill
+        from openpyxl.cell import WriteOnlyCell
+        wb = openpyxl.Workbook(write_only=True)
+        ws = wb.create_sheet(dataset[:31])
+        grey = PatternFill("solid", fgColor="E5E7EB")
+        head = PatternFill("solid", fgColor="0A1628")
+        computed = [c.get("role") in ("computed", "system") for c in lay]
+        hdr = []
+        for c, comp in zip(lay, computed):
+            cell = WriteOnlyCell(ws, value=datetime(int(c["month"][:4]), int(c["month"][5:]), 1) if c.get("month") else c["label"])
+            if c.get("month"):
+                cell.number_format = "mmm-yy"
+            cell.font = Font(bold=True, color="FFFFFF" if not comp else "374151")
+            cell.fill = grey if comp else head
+            hdr.append(cell)
+        ws.append(hdr)
+        for row in rows_out:
+            out_row = []
+            for v, comp in zip(row, computed):
+                if isinstance(v, list):
+                    v = ", ".join(str(x) for x in v)
+                if comp:
+                    cell = WriteOnlyCell(ws, value=v)
+                    cell.fill = grey
+                    out_row.append(cell)
+                else:
+                    out_row.append(v)
+            ws.append(out_row)
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
+
     # ------------------------------------------------------------------ workbook import (admin)
     async def write_result(res: Result, user: dict, replace_actual_domains: Optional[List[str]] = None):
         for ds, payload in res.datasets.items():
+            if payload.get("upsert"):
+                await upsert_import(ds, payload["rows"], user)
+                continue
             await db.aop_rows.delete_many({"dataset": ds})
             docs = []
             for i, f in enumerate(payload["rows"], start=1):
@@ -879,6 +1069,18 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
                 a["source"] = "import"
             for j in range(0, len(res.actuals), 2000):
                 await db.aop_actuals.insert_many([dict(a) for a in res.actuals[j:j + 2000]])
+
+    async def upsert_import(ds: str, rows_in: List[Dict[str, Any]], user: dict):
+        """Re-import without wiping portal work: lines upserted by key (file fields set, portal-only fields kept);
+        lines missing from the file get in_last_import = false."""
+        keys = []
+        upd = {}
+        for f in rows_in:
+            k = f.pop("_key")
+            keys.append(k)
+            upd[k] = {**{x: v for x, v in f.items() if not x.startswith("_")}, "in_last_import": True}
+        await engine.bulk_set(ds, upd, upsert=True, by=user.get("email") or "import")
+        await db.aop_rows.update_many({"dataset": ds, "key": {"$nin": keys}}, {"$set": {"fields.in_last_import": False}})
 
     async def save_upload(file: UploadFile) -> str:
         fd, path = tempfile.mkstemp(suffix=".xlsx")
@@ -923,13 +1125,64 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         except Exception as e:  # noqa: BLE001
             raise HTTPException(400, f"Could not read the Opex workbook: {e}")
         finally:
+            with open(path, "rb") as fh:
+                workbook_bytes = fh.read()
             os.unlink(path)
-        await write_result(res, user, replace_actual_domains=["capex"])
+        await write_result(res, user)
+        # links (upsert — portal-made links are kept) and line statuses
+        tracker_keys = {d["key"] async for d in db.aop_rows.find({"dataset": "opex_tracker"}, {"_id": 0, "key": 1})}
+        link_upd, unknown_lines = {}, set()
+        for ln in res.links:
+            if ln["line_id"] not in tracker_keys:
+                unknown_lines.add(ln["line_id"])
+                continue
+            k = PO.link_key(ln["line_id"], ln["po"], ln.get("material"), ln.get("po_item"))
+            link_upd[k] = {x: v for x, v in ln.items() if not x.startswith("_") and (v is not None or x in ("material", "po_item"))}
+            link_upd[k]["material"] = ln.get("material") or ""
+            link_upd[k]["po_item"] = ln.get("po_item") or ""
+        await engine.bulk_set("po_links", link_upd, upsert=True, by=user.get("email"))
+        st_upd = {k: v for k, v in res.statuses.items() if k in tracker_keys}
+        await engine.bulk_set("opex_tracker", st_upd, by=user.get("email"))
+        if unknown_lines:
+            res.rejected.append(f"Links to lines not in the tracker: {', '.join(sorted(unknown_lines)[:30])}")
+        zmm = None
+        if res.has_zmm:
+            last = await db.aop_rows.find_one({"dataset": "zmm_runs", "fields.status": "processed"}, {"_id": 0, "fields": 1},
+                                              sort=[("fields.processed_at", -1)])
+            zmm = await engine.run_zmm_pipeline(workbook_bytes, file.filename, "workbook", by=user.get("email"))
+            if last and zmm.get("snapshot") and (last["fields"].get("snapshot") or "") > zmm["snapshot"]:
+                res.warnings.append("The workbook's ZMM sheet is older than the stored snapshot")
+        else:
+            await recalc_tracker()
         await bump_version()
+        counts = {"opex_tracker": len(res.datasets["opex_tracker"]["rows"]), "po_links": len(link_upd), "line_status": len(st_upd)}
         await db.aop_imports.insert_one({"id": gen_id(), "kind": "opex", "file": file.filename, "at": now_iso(), "by": user.get("email"),
-                                         "meta": res.meta, "warnings": res.warnings,
-                                         "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}})
-        return {"meta": res.meta, "warnings": res.warnings, "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}}
+                                         "meta": res.meta, "warnings": res.warnings, "rejected": res.rejected, "counts": counts})
+        await write_audit(db, entity_type="aop_import", entity_id="opex", action="import", user=user,
+                          field_changes={"file": file.filename, **counts})
+        return {"meta": res.meta, "warnings": res.warnings, "rejected": res.rejected, "counts": counts,
+                "zmm": {k: zmm.get(k) for k in ("run_id", "status", "error", "rows", "po_items", "to_map", "changes_flagged",
+                                                "forecast_delta")} if zmm else None}
+
+    @r.post("/import/zmm")
+    async def import_zmm(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        """Manual ZMM run — admins, or roles with upload on the PO register's section."""
+        if not await can(user, "po_register", "upload"):
+            raise HTTPException(403, "Uploading the ZMM report needs the upload permission on Opex")
+        content = await file.read()
+        if not content:
+            raise HTTPException(400, "Empty file")
+        run = await engine.run_zmm_pipeline(content, file.filename or "zmm.xlsx", "manual", by=user.get("email"))
+        await write_audit(db, entity_type="aop_import", entity_id="zmm", action="import", user=user,
+                          field_changes={"file": file.filename, "run": run["run_id"], "status": run["status"]})
+        if run["status"] == "failed":
+            await notify_run(run)
+            raise HTTPException(400, f"ZMM run failed: {run.get('error')}")
+        await notify_run(run)
+        return run
+
+    async def notify_run(run: Dict[str, Any]):
+        await notify_zmm(db, run)
 
     # ------------------------------------------------------------------ monthly actuals (single actual source)
     async def replace_source(res: Result, source: str, user: dict):
@@ -1483,34 +1736,6 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
         out.update(base_fy=cfg["base_fy"], plan_fy=cfg["plan_fy"], draft_fy=cfg.get("draft_fy"))
         return out
 
-    # ------------------------------------------------------------------ PO drill-down
-    @r.get("/po/{po}")
-    async def po_detail(po: str, user: dict = Depends(get_current_user)):
-        p = await perms_for(user)
-        if not (p["admin"] or p["sections"]["aop_opex"]["can_view"]):
-            raise HTTPException(403, "Not allowed")
-        po = po.strip()
-        items = [d["fields"] async for d in db.aop_rows.find({"dataset": "po_register", "fields.purchase_order": po}, {"_id": 0, "fields": 1})]
-        import re as _re
-        rx = {"$regex": f"(^|[^0-9]){_re.escape(po)}([^0-9]|$)"}
-        tracker = [d["fields"] async for d in db.aop_rows.find(
-            {"dataset": "opex_tracker", "$or": [{"fields.old_po": po}, {"fields.new_po": po}, {"fields.po_ref": po},
-                                                {"fields.mapped_new_pos": rx}]}, {"_id": 0, "fields": 1})]
-        lines = [d["fields"] async for d in db.aop_rows.find({"dataset": "opex_lines", "fields.po": {"$in": [po, _maybe_int(po)]}},
-                                                              {"_id": 0, "fields": 1})]
-        head = items[0] if items else {}
-        summary = {
-            "purchase_order": po, "supplier": head.get("supplier_name"), "supplier_code": head.get("supplier"),
-            "created_on": head.get("created_on"), "currency": head.get("currency"),
-            "po_value": sum(_num(i.get("final_value")) for i in items),
-            "grn_amount": sum(_num(i.get("gr_amount_in_lc")) for i in items),
-            "pending_grn": sum(_num(i.get("pending_gr_amount_in_lc")) for i in items),
-            "invoiced": sum(_num(i.get("invoiced_value_base_value")) for i in items),
-            "wbs": sorted({str(i.get("wbs_element")) for i in items if i.get("wbs_element")}),
-            "items": len({i.get("purchase_order_item") for i in items}),
-        }
-        return {"summary": summary, "items": items, "tracker": tracker, "opex_lines": lines}
-
     # ------------------------------------------------------------------ approvals of user edits
     @r.get("/changes")
     async def changes(status: str = "pending", user: dict = Depends(get_current_user)):
@@ -1554,18 +1779,9 @@ def build_router(db, get_current_user, write_audit, gen_id) -> APIRouter:
             raise HTTPException(403, "Not allowed")
         return [d async for d in db.aop_history.find({"dataset": dataset, "key": key}, {"_id": 0}).sort("at", -1).limit(200)]
 
+    # Review (To map, PO changes, Corrections, Checks, Upload log), PO / line history drawers, add-ons
+    register_review(r, SimpleNamespace(db=db, engine=engine, get_current_user=get_current_user, perms_for=perms_for,
+                                       get_config=get_config, write_audit=write_audit, bump_version=bump_version,
+                                       recalc_tracker=recalc_tracker, storage=storage, notify_run=notify_run))
     return r
 
-
-def _num(v) -> float:
-    try:
-        return float(v or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _maybe_int(s: str):
-    try:
-        return int(s)
-    except ValueError:
-        return s

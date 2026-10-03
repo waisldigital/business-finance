@@ -21,7 +21,10 @@ import openpyxl
 
 from .datasets import (CUTE_LEAD, DRIVER_LEAD, SPECS, build_key, column, slug, vkey, wide_columns, widen_cute,
                        widen_drivers)
-from .periods import fy_months, fy_of_period, period_label, to_iso_date, to_period
+from . import opex_schema
+from .datasets import coerce
+from .periods import fy_months, fy_of_period, period_label, shift_fy, to_iso_date, to_period
+from .po import parse_po_tokens, status_from_text
 
 Row = Tuple[Any, ...]
 
@@ -477,63 +480,46 @@ def _import_project_master(book, res, base, plan):
 
 # ---------------- Opex lines ----------------
 
-OPEX_ALIASES = {
-    "fy_label": ["Financial Year"], "po": ["PO"], "status": ["Status"], "aop_code": ["AOP Code"],
-    "wbs": ["WBS Element_Old", "WBS Element"], "wbs_l1": ["WBS-L1"], "wbs_name": ["WBS Name (Nature)"],
-    "wbs_desc": ["WBS Description"], "head": ["Head"], "sub_head": ["Sub Head"], "geo": ["P&L Head"],
-    "region": ["P&L Region"], "grouping": ["Project Grouping"], "location": ["Location"],
-    "category": ["Category - 1 (CA/CR/Others)"], "category2": ["Category - 2 (Digital/Non-Digital)"],
-    "tag": ["Reporting Tag"], "bau_growth": ["Retro P&L Tagging"], "vendor": ["Vendor Name_Override", "Vendor Name"],
-    "cost_centre": ["Cost centre 1"], "sub_system": ["Sub-Systems"], "po_nature": ["Nature of the PO"],
-    "po_date": ["Date of PO issue"], "po_start": ["PO Start Date"], "po_end": ["PO End Date"],
-    "po_amount": ["PO AMOUNT"], "net_po": ["Net PO"], "recurring": ["Nature of Expense"],
-    "increment_pct": ["% increment"], "carry_forward": ["Carry Forward in FY27 (Yes/No)"],
-    "package_l1": ["Package L-1"], "package_l2": ["Package L-2"], "package_l3": ["Package L-3"],
-    "owner": ["Owner Name"], "cost_nature": ["Cost Nature"],
-}
-
-
 def _import_opex(book, res, base, plan, cutoff, F, B):
+    """Opex_Raw Data in the refined layout (opex_schema): base-year months → actuals to the cut-off, forecast after;
+    Budgeted FY'<plan> phased evenly (the plan-year monthly columns are ignored — the sample has them in ₹ crore)."""
     sheet = book.find("Opex_Raw Data")
     rows = book.rows(sheet, max_col=150)
-    hi = find_header_row(rows, ["AOP Code", "PO AMOUNT"])
-    h = Header(rows[hi])
-    base_m = [(i, p) for i, p in h.months() if fy_of_period(p) == base]
-    bud_i = h.idx(f"Budgeted FY'{plan[2:]}", f"Budgeted {plan}")
-    final_i = h.idx(f"B FY{plan[2:]} - Final")
-    skip = {i for i, _ in h.months()}
-    gen = h.generic_columns(skip)
+    parsed = opex_schema.read_lines(rows, "opex_lines")
     out = []
-    for r in rows[hi + 1:]:
-        if not any(v is not None for v in r[:40]):
-            continue
-        f = generic_fields(h, r, gen)
-        apply_aliases(h, r, OPEX_ALIASES, f, dates=("po_date", "po_start", "po_end"))
-        f["recurring"] = "Recurring" if str(f.get("recurring") or "").lower().startswith("recurring") else ("Non-Recurring" if f.get("recurring") else None)
-        f["_r"] = r
+    for f in parsed["lines"]:
+        f.pop("_row", None)
+        f.pop("_sno", None)
         out.append(f)
+    _schema_warnings(res, "opex_lines", parsed, plan)
     res.add("opex_lines", out, [])
     for f in res.datasets["opex_lines"]["rows"]:
-        r = f.pop("_r")
+        months = f.pop("_months", {})
         ref = f["line_id"]
         dims = {k: f.get(k) for k in ("category", "geo", "tag", "aop_code", "wbs", "po", "vendor", "cost_centre")}
-        for i, p in base_m:
-            v = num(r[i])
+        for p in fy_months(base):
+            v = months.get(p)
+            if v is None:
+                continue
             if p <= cutoff:
                 res.actual("opex", ref, p, v, dims)
             else:
                 f[vkey(F, p)] = v
-        annual = num(r[bud_i]) if bud_i is not None else 0.0
-        f[vkey(B, "annual")] = annual
-        for p in fy_months(plan):  # the approved plan phases the annual opex budget evenly
-            f[vkey(B, p)] = annual / 12
-        if final_i is not None:
-            f[vkey(B, "final")] = num(r[final_i])
-    alias_cols = [alias_column(k) for k in OPEX_ALIASES]
-    res.datasets["opex_lines"]["columns"] = [column("line_id", "Line ID")] + alias_cols + \
-        [column(vkey(B, "annual"), f"{B} annual", "number"), column(vkey(B, "final"), f"{B} final", "number")] + \
-        [c for c in (column(k, lbl) for _, k, lbl in gen) if c["key"] not in OPEX_ALIASES] + \
-        plan_columns({F: [p for _, p in base_m if p > cutoff], B: fy_months(plan)})
+        f.setdefault(vkey(B, "annual"), 0.0)
+        opex_schema.phase_budget(f, plan)
+    cfg = {"base_fy": base, "plan_fy": plan, "cutoffs": {"default": cutoff}}
+    res.datasets["opex_lines"]["columns"] = opex_schema.meta_columns("opex_lines", cfg)
+
+
+def _schema_warnings(res, dataset, parsed, next_fy):
+    if parsed["ignored"]:
+        res.warnings.append(f"{dataset}: ignored columns (not in the Opex layout): {', '.join(parsed['ignored'])}")
+    if parsed["dropped"]:
+        res.warnings.append(f"{dataset}: dropped columns: {', '.join(parsed['dropped'])}")
+    w = opex_schema.crore_months_warning(parsed["lines"], next_fy)
+    if w and next_fy in parsed["months"]:
+        res.warnings.append(f"{dataset}: {w}")
+    res.meta.setdefault("schema", {})[dataset] = {k: parsed[k] for k in ("header_row", "ignored", "dropped", "computed")}
 
 
 # ---------------- Payroll ----------------
@@ -841,84 +827,114 @@ def _seed_taxonomy(res: Result):
 # Opex forecast workbook (tracker + ZMM PO register)
 # =====================================================================================
 
-TRK_ALIASES = {
-    "sno": ["S. No."], "po_ref": ["PO_As per Atul Sheet"], "old_po": ["Old PO_Unique"], "new_po": ["New PO No. (SAP)"],
-    "new_pr": ["New PR (for Ref. only)"], "old_po_ref": ["Old PO Reference"], "status": ["Status"], "aop_code": ["AOP Code"],
-    "wbs": ["WBS Element"], "wbs_name": ["WBS Name (Nature)"], "geo": ["P&L Head"], "category": ["Category - 1 (CA/CR/Others)"],
-    "tag": ["Reporting Tag"], "vendor": ["Vendor Name_Override", "Vendor Name"], "supplier_code": ["Supplier Code"],
-    "po_nature": ["Nature of the PO"], "po_start": ["PO Start Date"], "po_end": ["PO End Date"], "po_amount": ["PO AMOUNT"],
-    "net_po": ["Net PO"], "recurring": ["PO Nature", "Nature of Expense"], "budget_plan": ["Budgeted FY'27"],
-    "budget_final": ["B FY27 - Final"], "mapped_new_pos": ["New PO(s) mapped (ZMM)"], "new_po_supplier": ["New PO Supplier"],
-    "new_po_date": ["New PO Issue Date"], "new_po_amount": ["New PO Amount (Full)"], "new_po_start": ["New PO Start (Full)"],
-    "new_po_end": ["New PO End (Full)"], "new_po_grn": ["New PO GRN Amount"], "new_po_pending": ["New PO Pending (SRN)"],
-    "override_amount": ["Override Amount (INPUT)"], "override_start": ["Override Start (INPUT)"], "override_end": ["Override End (INPUT)"],
-    "saving_target": ["Saving Target"], "revised_value": ["Revised Value"], "responsibility": ["Responsibility"],
-}
+LINK_TEXT_COLUMNS = ("New PO(s) mapped (ZMM)", "New PO No. (SAP)")
+PO_LINK_ALIASES = {"line": ["S. No.", "Line ID"], "po": ["New PO No.", "PO"], "material": ["Material code (optional)", "Material Code"],
+                   "po_item": ["PO item (optional)", "PO item"], "alloc_pct": ["Allocation %"],
+                   "coverage_from": ["Coverage from (optional)", "Coverage from"],
+                   "coverage_to": ["Coverage to (optional)", "Coverage to"], "status": ["Link status"], "remarks": ["Remarks"],
+                   "check": ["Check"]}
+LINE_STATUS_ALIASES = {"line": ["S. No.", "Line ID"], "mapping_status": ["Mapping status"], "merged_into_po": ["Merged into PO"],
+                       "remarks": ["Remarks"]}
+
+
+def _sheet_table(book: "Book", sheet: str, aliases: Dict[str, List[str]], must: str) -> List[Dict[str, Any]]:
+    rows = book.rows(sheet, max_col=40)
+    hi = next((i for i, r in enumerate(rows[:12]) if _n(must) in {_n(c) for c in r if isinstance(c, str)}), None)
+    if hi is None:
+        raise ValueError(f"{sheet}: header with '{must}' not found in the first 12 rows")
+    h = Header(rows[hi])
+    out = []
+    for n, r in enumerate(rows[hi + 1:], start=hi + 2):
+        f: Dict[str, Any] = {"_row": n}
+        for k, names in aliases.items():
+            i = h.idx(*names)
+            if i is not None and i < len(r) and r[i] not in (None, ""):
+                f[k] = r[i]
+        if len(f) > 1:
+            out.append(f)
+    return out
+
+
+def read_po_links(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """PO_Links rows → link records keyed line|po|material|item. Pre-filled auto-split % (Check says auto-split)
+    are kept but marked alloc_auto so the portal may re-split them."""
+    out, errors = [], []
+    for f in rows:
+        lid = opex_schema.line_id_from_sno(f.get("line"))
+        po = opex_schema.po_str(f.get("po"))
+        if not lid or not po:
+            errors.append(f"PO_Links row {f['_row']}: line and PO are required")
+            continue
+        mat = opex_schema.po_str(f.get("material"))
+        item = opex_schema.po_str(f.get("po_item"))
+        pct = coerce("percent", f.get("alloc_pct"))
+        if pct is not None and pct > 1.5:
+            pct = pct / 100
+        status = str(f.get("status") or "Active").strip() or "Active"
+        out.append({"line_id": lid, "po": po, "material": mat, "po_item": item, "alloc_pct": pct,
+                    "alloc_auto": bool(pct is not None and "auto-split" in str(f.get("check") or "").lower()),
+                    "coverage_from": to_iso_date(f.get("coverage_from")), "coverage_to": to_iso_date(f.get("coverage_to")),
+                    "status": status, "remarks": txt(f.get("remarks")), "source": "PO_Links"})
+    return out, errors
 
 
 def import_opex_workbook(path_or_file, plan: str = "FY27") -> Result:
+    """One-time Opex forecast workbook load (§11): tracker lines through the Opex schema (upserted by line id — a row
+    without S. No. / Line ID is rejected), links from a PO_Links sheet else parsed from the old mapping text, mapping
+    status from a Line_Status sheet else from that text. The ZMM sheet, if present, is run through the ZMM pipeline
+    by the caller."""
     book = Book(path_or_file)
     res = Result()
-    sheet = book.find("Opex_Forecast")
-    rows = book.rows(sheet, max_col=215)
-    hi = find_header_row(rows, ["AOP Code", "Old PO_Unique"])
-    h = Header(rows[hi])
-    # Forecast block = the last 12 month columns in the plan FY
-    plan_m = [(i, p) for i, p in h.months() if fy_of_period(p) == plan][-12:]
-    skip = {i for i, _ in h.months()}
-    gen = h.generic_columns(skip)
-    out = []
-    for r in rows[hi + 1:]:
-        if not any(v is not None for v in r[:45]):
+    sheet = book.find("Opex_Forecast", "Opex forecast tracker", "opex_tracker", "Opex_Raw Data")
+    rows = book.rows(sheet, max_col=230)
+    parsed = opex_schema.read_lines(rows, "opex_tracker", capture=LINK_TEXT_COLUMNS)
+    _schema_warnings(res, "opex_tracker", parsed, shift_fy(plan, 1))
+    lines, rejected = [], []
+    text_links: List[Dict[str, Any]] = []
+    statuses: Dict[str, Dict[str, Any]] = {}
+    for f in parsed["lines"]:
+        lid = f.get("line_id") or opex_schema.line_id_from_sno(f.get("_sno"))
+        if not lid:
+            rejected.append(f"Row {f['_row']}: no S. No. / Line ID — give the line a number and re-upload")
             continue
-        f = generic_fields(h, r, gen)
-        apply_aliases(h, r, TRK_ALIASES, f, dates=("po_start", "po_end", "new_po_date", "new_po_start", "new_po_end",
-                                                   "override_start", "override_end"))
-        f["recurring"] = "Recurring" if str(f.get("recurring") or "").lower().startswith("recurring") else ("Non-Recurring" if f.get("recurring") else None)
-        if f.get("sno") not in (None, ""):
-            f["line_id"] = f"TRK-{int(num(f['sno'])):05d}" if isinstance(f["sno"], (int, float)) else f"TRK-{f['sno']}"
-        for i, p in plan_m:
-            f[vkey("F" + plan[2:], p)] = num(r[i])
-        for k in ("old_po", "new_po", "mapped_new_pos", "po_ref"):
-            if f.get(k) is not None:
-                f[k] = txt(f[k])
-        out.append(f)
-    alias_cols = [alias_column(k, editable=k.startswith("override") or k in ("new_po", "mapped_new_pos", "recurring", "responsibility"))
-                  for k in TRK_ALIASES]
-    cols = [column("line_id", "Line ID")] + alias_cols + \
-        [c for c in (column(k, lbl) for _, k, lbl in gen) if c["key"] not in TRK_ALIASES] + \
-        plan_columns({"F" + plan[2:]: [p for _, p in plan_m]})
-    res.add("opex_tracker", out, cols)
-
-    zs = book.find("ZMM_PO_Report", required=False)
-    if zs:
-        zrows = book.rows(zs, max_col=70)
-        zi = find_header_row(zrows, ["Purchase Order", "Purchase Order Item"])
-        zh = Header(zrows[zi])
-        zgen = zh.generic_columns([])
-        zout = []
-        for r in zrows[zi + 1:]:
-            if r[0] is None:
-                continue
-            f = generic_fields(zh, r, zgen)
-            for k in ("purchase_order", "purchase_order_item", "supplier"):
-                if f.get(k) is not None:
-                    f[k] = txt(f[k])
-            for k in ("created_on", "delivery_date", "start_date_for_period_of_performance",
-                      "end_date_for_period_of_performance", "grn_posting_date", "invoice_posting_date"):
-                if f.get(k) is not None:
-                    f[k] = to_iso_date(f[k]) or f[k]
-            zout.append(f)
-            # capex GRNs are the actual source for capex spend
-            if str(f.get("nature_opex_capex_oh") or "").lower() == "capex" and num(f.get("gr_amount_in_lc")):
-                per = to_period(f.get("grn_posting_date"))
-                if per:
-                    ref = f"{f.get('purchase_order')}|{f.get('purchase_order_item')}|{f.get('migo_no') or ''}|{f.get('migo_line_item_no') or ''}"
-                    res.actual("capex", ref, per, num(f["gr_amount_in_lc"]),
-                               {"tag": f.get("location"), "po": f.get("purchase_order"), "wbs": f.get("wbs_element"),
-                                "vendor": f.get("supplier_name"), "department": f.get("department")},
-                               entry_type="grn", date=f.get("grn_posting_date"),
-                               uid=f"capex|{ref}|{len(res.actuals)}")
-        res.add("po_register", zout, [column(k, lbl) for _, k, lbl in zgen])
-    res.meta.update(tracker_rows=len(out), plan_fy=plan)
+        f["line_id"] = lid
+        extra = f.pop("_extra", {})
+        f.pop("_months", None)
+        f.pop("_sno", None)
+        n = f.pop("_row")
+        text = next((extra[c] for c in LINK_TEXT_COLUMNS if extra.get(c) not in (None, "")), None)
+        toks, rest = parse_po_tokens(text)
+        for po, mat in toks:
+            text_links.append({"line_id": lid, "po": po, "material": mat, "po_item": None, "alloc_pct": None,
+                               "alloc_auto": False, "status": "Active", "source": "mapping text", "_row": n})
+        if not toks:
+            st, merged = status_from_text(" ".join(rest) if rest else text)
+            statuses[lid] = {"mapping_status": st, **({"merged_into_po": merged} if merged else {})}
+        opex_schema.phase_budget(f, shift_fy(plan, 1))
+        f["_key"] = lid
+        lines.append(f)
+    seen: Counter = Counter(f["line_id"] for f in lines)
+    dup = [k for k, v in seen.items() if v > 1]
+    if dup:
+        rejected.append(f"Duplicate line ids (later rows win): {', '.join(dup[:20])}")
+    res.datasets["opex_tracker"] = {"rows": list({f["line_id"]: f for f in lines}.values()), "columns": [], "upsert": True}
+    links = text_links
+    ls = book.find("PO_Links", required=False)
+    if ls:
+        links, errs = read_po_links(_sheet_table(book, ls, PO_LINK_ALIASES, "New PO No."))
+        rejected += errs
+    st = book.find("Line_Status", required=False)
+    if st:
+        statuses = {}
+        for f in _sheet_table(book, st, LINE_STATUS_ALIASES, "Mapping status"):
+            lid = opex_schema.line_id_from_sno(f.get("line"))
+            if lid and f.get("mapping_status"):
+                statuses[lid] = {"mapping_status": str(f["mapping_status"]).strip(),
+                                 **({"merged_into_po": opex_schema.po_str(f["merged_into_po"])} if f.get("merged_into_po") else {})}
+    res.links = links
+    res.statuses = statuses
+    res.rejected = rejected
+    res.has_zmm = bool(book.find("ZMM_PO_Report", required=False))
+    res.meta.update(tracker_rows=len(lines), plan_fy=plan, links=len(links), lines_with_links=len({x["line_id"] for x in links}),
+                    statuses=len(statuses), rejected=len(rejected), link_source="PO_Links" if ls else "mapping text")
     return res

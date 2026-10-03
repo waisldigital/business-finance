@@ -43,30 +43,34 @@ def margin_profile(data, actuals, cfg, block: str, tags: List[str], payroll_visi
 
 
 def opex_forecast(tracker: List[Dict[str, Any]], plan_fy: str, group_by: str) -> Dict[str, Any]:
+    """Tracker lines grouped: budget (Budgeted FY'<plan>), forecast, and how many lines have a new PO linked or are
+    not migrated (mapping status)."""
     F = "F" + plan_fy[2:]
     months = fy_months(plan_fy)
     groups: Dict[str, Dict[str, Any]] = {}
     for r in tracker:
         g = str(r.get(group_by) or "(blank)")
         fc = sum(float(r.get(vkey(F, p)) or 0) for p in months)
-        bud = float(r.get("budget_plan") or 0)
+        bud = float(r.get(vkey("B" + plan_fy[2:], "annual"), r.get("budget_plan")) or 0)
         e = groups.setdefault(g, {"group": g, "lines": 0, "budget": 0.0, "forecast": 0.0, "new_po_mapped": 0,
                                   "not_migrated": 0, "recurring": 0, "one_time": 0, "items": []})
         e["lines"] += 1
         e["budget"] += bud
         e["forecast"] += fc
-        mapped = str(r.get("mapped_new_pos") or r.get("new_po") or "")
-        if mapped and "not migrated" not in mapped.lower():
+        status = str(r.get("mapping_status") or "")
+        if (r.get("active_po_count") or 0) > 0:
             e["new_po_mapped"] += 1
-        if "not migrated" in mapped.lower():
+        if status.lower().startswith("not migrated"):
             e["not_migrated"] += 1
         if str(r.get("recurring") or "").lower().startswith("recurring"):
             e["recurring"] += 1
         else:
             e["one_time"] += 1
-        e["items"].append({"line_id": r.get("line_id"), "old_po": r.get("old_po"), "new_po": r.get("new_po"),
-                           "vendor": r.get("vendor"), "aop_code": r.get("aop_code"), "category": r.get("category"),
-                           "tag": r.get("tag"), "recurring": r.get("recurring"), "budget": bud, "forecast": fc,
+        e["items"].append({"line_id": r.get("line_id"), "old_po": r.get("previous_po") or r.get("po"),
+                           "new_po": r.get("latest_po") if (r.get("active_po_count") or 0) > 0 else None,
+                           "vendor": r.get("vendor") or r.get("supplier_name"), "aop_code": r.get("aop_code"),
+                           "category": r.get("category"), "tag": r.get("tag"), "recurring": r.get("recurring"),
+                           "mapping_status": status or None, "budget": bud, "forecast": fc,
                            "override": bool(r.get("override_amount"))})
     rows = sorted(groups.values(), key=lambda x: -x["budget"])
     for e in rows:

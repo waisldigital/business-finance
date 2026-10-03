@@ -12,10 +12,14 @@ import { useGridView, arrangeColumns, applyView, cellValue, isMonthCol } from ".
 import { csvDownload } from "./mis";
 import ColumnManager from "./ColumnManager";
 import UploadDialog from "./UploadDialog";
-import PoDrawer from "./PoDrawer";
+import PoDrawer, { reviewBase } from "./PoDrawer";
+import PoHistoryDrawer from "./PoHistoryDrawer";
 import { download } from "./format";
 
-const PO_COLUMNS = ["po", "old_po", "new_po", "mapped_new_pos", "po_ref", "purchase_order", "dims.po"];
+const PO_COLUMNS = ["po", "latest_po", "previous_po", "merged_into_po", "purchase_order", "linked_old_po", "linked_forecast_s_no", "dims.po"];
+// clicks that open a line's PO history instead of a single PO
+const HISTORY_COLUMNS = { opex_tracker: ["po", "previous_po"], po_register: ["linked_old_po", "linked_forecast_s_no"],
+                          po_links: ["line_id"] };
 const PAGE = 5000; // datasets up to this size load whole, so sort / filter / pivot work on every row
 
 // Column groups are plan versions (F26 = FY26 forecast, B27 = FY27 budget …); "" = descriptive fields.
@@ -40,6 +44,24 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   const [showCols, setShowCols] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [po, setPo] = useState(null);
+  const [hist, setHist] = useState(null);
+  const [review, setReview] = useState(null);
+  useEffect(() => {
+    if (dataset.key !== "opex_tracker") return;
+    api.get("/aop/review/summary").then((r) => setReview(r.data)).catch(() => {});
+  }, [dataset.key]);
+  const openLink = (c, row) => {
+    const f = row.fields || {};
+    const first = (v) => String(v ?? "").split(/[,;/\s]+/).filter(Boolean)[0];
+    if ((HISTORY_COLUMNS[dataset.key] || []).includes(c.key)) {
+      if (dataset.key === "opex_tracker") return setHist({ lineId: row.key, po: first(f[c.key]) });
+      if (dataset.key === "po_links") return setHist({ lineId: f.line_id, po: f.po });
+      const lid = first(f.linked_forecast_s_no);
+      if (lid) return setHist({ lineId: lid, po: c.key === "linked_old_po" ? first(f.linked_old_po) : f.purchase_order });
+    }
+    const p = first(f[c.key]);
+    if (p) setPo(p);
+  };
   const [selected, setSelected] = useState(new Set());
   const [groups, setGroups] = useState(null);
   const [view, updateView, resetView, sharedView] = useGridView(`aop_grid_${dataset.key}_v1`, {});
@@ -183,6 +205,13 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
 
   return (
     <div className="space-y-2" data-testid={`dataset-${dataset.key}`}>
+      {review?.changes > 0 && (
+        <a href={`${reviewBase()}?tab=changes`} className="flex items-center gap-2 border border-[var(--warning)] bg-[var(--surface)] px-3 py-1.5 text-xs" data-testid="tracker-review-banner">
+          <WarningCircle size={14} className="text-[var(--warning)]" />
+          <span><b>{review.changes}</b> pending PO change{review.changes > 1 ? "s" : ""}, ₹{((review.pending_fy_impact || 0) / 1e5).toLocaleString("en-IN", { maximumFractionDigits: 2 })} L FY impact — the forecast keeps the accepted values until reviewed</span>
+          <span className="ml-auto text-[var(--gold)] font-semibold">Review →</span>
+        </a>
+      )}
       <div className="flex items-center gap-1.5 flex-wrap">
         <form className="relative" onSubmit={(e) => { e.preventDefault(); setOffset(0); setQuery(q); }}>
           <MagnifyingGlass size={12} className="absolute left-2 top-2 text-[var(--muted)]" />
@@ -248,8 +277,8 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
         renderHeader={(c) => <ColumnHeader col={c} rows={rowsV} view={view} update={updateView} align={c.type === "number" || c.type === "percent" ? "right" : "left"} testid={`ds-h-${c.key}`} />}
         canEdit={canEdit}
         onCommit={onCommit}
-        linkColumns={PO_COLUMNS}
-        onCellLink={(c, row) => setPo(String(row.fields[c.key]).split(/[,;/\s]+/)[0])}
+        linkColumns={[...PO_COLUMNS, ...(HISTORY_COLUMNS[dataset.key] || [])]}
+        onCellLink={openLink}
         selectable={admin}
         selected={selected}
         onSelect={setSelected}
@@ -258,7 +287,8 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
 
       {showCols && <ColumnManager dataset={dataset} columns={columns} keyFields={dataset.key_fields} onClose={() => setShowCols(false)} onSaved={load} />}
       {showUpload && <UploadDialog dataset={dataset} keyFields={dataset.key_fields} admin={admin} onClose={() => setShowUpload(false)} onDone={() => { load(); onChanged?.(); }} />}
-      {po && <PoDrawer po={po} onClose={() => setPo(null)} onOpenPo={setPo} />}
+      {po && <PoDrawer po={po} onClose={() => setPo(null)} onOpenPo={setPo} onOpenLine={(lineId, p) => { setPo(null); setHist({ lineId, po: p }); }} />}
+      {hist && <PoHistoryDrawer lineId={hist.lineId} po={hist.po} onClose={() => setHist(null)} />}
     </div>
   );
 }
