@@ -579,6 +579,22 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                 d["pending"] = pending[d["key"]]
         if dataset in ACTUAL_LINKS and docs:
             await actual_months(dataset, docs)
+        if dataset == "opex_tracker" and docs:  # add-on lines sort under their parent
+            kids: Dict[str, List[Dict[str, Any]]] = {}
+            for d in docs:
+                par = (d.get("fields") or {}).get("parent_line_id")
+                if par:
+                    kids.setdefault(par, []).append(d)
+            if kids:
+                keys_here = {d["key"] for d in docs}
+                ordered = []
+                for d in docs:
+                    par = (d.get("fields") or {}).get("parent_line_id")
+                    if par and par in keys_here:
+                        continue
+                    ordered.append(d)
+                    ordered += kids.get(d["key"], [])
+                docs = ordered
         if dataset in OPEX_DATASETS and docs:  # computed columns (YTD, totals, variance, bridge check)
             cfg = await get_config()
             acts = await opex_actuals([d["key"] for d in docs]) if dataset == "opex_lines" else {}
@@ -798,6 +814,12 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             return await upload_opex(dataset, content, file.filename or "upload.xlsx", mode, user)
         cols = await columns_with_draft(dataset)
         incoming = read_table(content, file.filename or "upload.csv", cols)
+        if dataset == "po_links":  # numbers as digit strings, S. No. → line id, so keys match line|po|material|item
+            for raw in incoming:
+                for k in ("po", "material", "po_item"):
+                    raw[k] = opex_schema.po_str(raw.get(k)) or ""
+                lid = raw.get("line_id")
+                raw["line_id"] = opex_schema.line_id_from_sno(lid) if isinstance(lid, (int, float)) or str(lid or "").isdigit() else lid
         if dataset == ACTUALS:
             return await upsert_actuals(incoming, mode, user)
         p = await perms_for(user)
@@ -805,8 +827,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         if dataset == "po_links":
             for raw in incoming:  # an uploaded % is the user's
                 if raw.get("alloc_pct") not in (None, ""):
-                    k = PO.link_key(str(raw.get("line_id") or ""), opex_schema.po_str(raw.get("po")) or "",
-                                    opex_schema.po_str(raw.get("material")), opex_schema.po_str(raw.get("po_item")))
+                    k = PO.link_key(str(raw.get("line_id") or ""), raw["po"], raw["material"], raw["po_item"])
                     await db.aop_rows.update_one({"dataset": "po_links", "key": k}, {"$set": {"fields.alloc_auto": False}})
             await recalc_tracker()
         return res
@@ -838,12 +859,16 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         existing = {d["key"]: d.get("fields") or {} async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1})}
         cut = (cfg.get("cutoffs") or {}).get("default") or ""
         incoming, acts = [], []
+        auto_n = 0
         for f in parsed["lines"]:
             months = f.pop("_months", {})
             row_n = f.pop("_row")
             sno = f.pop("_sno", None)
             if not f.get("line_id") and dataset == "opex_tracker" and sno not in (None, ""):
                 f["line_id"] = opex_schema.line_id_from_sno(sno)
+            if not f.get("line_id") and mode != "modify":  # new line: its id now, so its booked months can follow it
+                auto_n += 1
+                f["line_id"] = f"{SPECS[dataset].auto_prefix}-N{datetime.now().strftime('%y%m%d%H%M%S')}{auto_n:04d}"
             po = f.get("po")
             if po in zmm_pos:
                 old = existing.get(f.get("line_id") or "", {})

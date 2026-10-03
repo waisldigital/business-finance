@@ -5,7 +5,7 @@
 //   group     — sidebar group                            confidential — shown with a lock in the sidebar
 import {
   SquaresFour, FunnelSimple, FolderSimple, GitPullRequest, UsersThree, Stack, PresentationChart, SlidersHorizontal,
-  TrendUp, Receipt, Buildings, UsersFour, HardDrives,
+  TrendUp, Receipt, Buildings, UsersFour, HardDrives, ListChecks,
 } from "@phosphor-icons/react";
 
 export const GROUPS = { workspace: "Projects and CR", aop: "Annual Operating Plan" };
@@ -39,6 +39,9 @@ export const SECTIONS = [
   { key: "aop_capex", label: "AOP · Capex", path: "/app/aop/capex", group: "aop", landing: 8,
     nav: { label: "Capex", icon: HardDrives, testid: "sidebar-aop-capex" } },
   { key: "aop_reports", label: "AOP · Reports", path: "/app/aop/reports", group: "aop", landing: 9 },
+  // Review: PO mapping, PO changes, corrections and checks — also open to roles with edit on Opex
+  { key: "aop_review", label: "AOP · Review (PO mapping)", path: "/app/aop/review", group: "aop", landing: 15,
+    nav: { label: "Review", icon: ListChecks, testid: "sidebar-aop-review", sections: ["aop_review"], review: true } },
 ];
 
 export const SECTION_KEYS = SECTIONS.map((s) => s.key);

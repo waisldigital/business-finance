@@ -69,7 +69,8 @@ SPECS: Dict[str, DatasetSpec] = {s.key: s for s in [
                 versions=["F26", "B27", "B28"]),
     DatasetSpec("opex_tracker", "Opex forecast tracker", "aop_opex", "Opex",
                 auto_prefix="TRK",
-                description="Old PO ↔ new PO mapping, overrides and the running FY forecast.",
+                description="Living Opex lines (one Opex layout): latest / previous PO from the PO links, overrides, mapping "
+                            "status, the running FY forecast and next year's AOP inputs.",
                 versions=["F27"]),
     DatasetSpec("po_register", "PO register (ZMM)", "aop_opex", "Opex",
                 key_fields=["purchase_order", "purchase_order_item", "row_n"],

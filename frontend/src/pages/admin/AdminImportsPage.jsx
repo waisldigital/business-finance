@@ -6,8 +6,10 @@ import { FileArrowUp, FileXls, CheckCircle, Warning, ClockCounterClockwise } fro
 const KINDS = [
   { key: "aop", url: "/aop/import/aop-workbook", title: "Consolidated AOP workbook",
     help: "Reads Assumptions, CUTE / Non-CUTE / CR & Project revenue, Opex_Raw Data, Resource Dashboard, Overhead_Inputs + Indirect Cost ledger, Budgeted CAPEX and the WAISL P&L. Replaces those datasets and the imported actuals." },
-  { key: "opex", url: "/aop/import/opex-workbook", title: "Opex forecast workbook",
-    help: "Reads the Opex_Forecast tab (old ↔ new PO mapping, overrides, forecast) and the ZMM_PO_Report (PO register)." },
+  { key: "zmm", url: "/aop/import/zmm", title: "ZMM PO report", zmm: true,
+    help: "The SAP PO dump (sheet ZMM_PO_Report, else the first sheet). Rebuilds PO items, flags changes on mapped POs, re-resolves links and recalculates the Opex forecast. The same file twice changes nothing. New POs and changes land in Review." },
+  { key: "opex", url: "/aop/import/opex-workbook", title: "Opex forecast workbook (one-time setup)",
+    help: "Tracker lines from Opex_Forecast (upserted by S. No. — portal edits are kept), links from PO_Links (else the old mapping text), statuses from Line_Status, and the ZMM_PO_Report sheet if present. Rows without S. No. are rejected." },
   { key: "mis", url: "/aop/import/mis-actuals", title: "Monthly actuals — MIS working file", monthly: true,
     help: "SAP_Revenue + SAP_Expense classified with the Mapping sheet → revenue, revenue share, opex, overheads and finance-cost actuals of the plan year, line by line. Replaces only the months in the file and moves the actual cut-off." },
   { key: "resource", url: "/aop/import/resource-cost", title: "Monthly actuals — resource cost file", monthly: true,
@@ -59,7 +61,7 @@ function ImportCard({ kind, onDone }) {
   const [res, setRes] = useState(null);
   const [err, setErr] = useState("");
   const run = async () => {
-    const msg = kind.monthly ? `Import "${file.name}"? Actuals of the months it contains are replaced.` : `Import "${file.name}"? The datasets it contains will be replaced.`;
+    const msg = kind.zmm ? `Run the ZMM pipeline on "${file.name}"?` : kind.monthly ? `Import "${file.name}"? Actuals of the months it contains are replaced.` : `Import "${file.name}"? The datasets it contains will be replaced.`;
     if (!file || !window.confirm(msg)) return;
     setBusy(true); setErr(""); setRes(null);
     try {
@@ -85,7 +87,15 @@ function ImportCard({ kind, onDone }) {
         </button>
       </div>
       {err && <div className="text-[var(--danger)]">{String(err)}</div>}
-      {res && (
+      {res && kind.zmm && (
+        <div className="text-[var(--success)] flex items-start gap-1"><CheckCircle size={13} className="mt-0.5" />
+          <span>{res.rows} rows · {res.po_items} PO items · {res.new_pos} new POs · {res.to_map} to map · {res.changes_flagged} changes flagged · forecast Δ ₹{((res.forecast_delta || 0) / 1e5).toFixed(2)} L — see <a className="underline" href="/admin/aop/review">Review</a></span>
+        </div>
+      )}
+      {res && (res.rejected?.length > 0 || res.warnings?.length > 0) && (
+        <div className="text-[var(--warning)] space-y-0.5">{[...(res.rejected || []), ...(res.warnings || [])].slice(0, 12).map((w, i) => <div key={i} className="flex items-center gap-1"><Warning size={11} />{w}</div>)}</div>
+      )}
+      {res && !kind.zmm && (
         <div className="text-[var(--success)] flex items-start gap-1"><CheckCircle size={13} className="mt-0.5" />
           <span>{Object.entries(res.counts || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}{res.actuals ? ` · ${res.actuals} actuals` : ""}
             {res.periods ? ` · months ${res.periods.join(", ")}` : ""}{res.pax_rows ? ` · ${res.pax_rows} PAX rows` : ""}{res.matched !== undefined ? ` · ${res.matched}/${res.projects} projects matched` : ""}</span>

@@ -206,6 +206,20 @@ class OpexEngine:
         return {"lines": len(out["line_upd"]), "links": len(link_upd),
                 "forecast_total": round(sum(out["forecasts"].values()), 2), "forecasts": out["forecasts"]}
 
+    async def store_change_impacts(self):
+        """FY impact of every open PO change (dry run per PO) — shown in Review and the tracker banner."""
+        st = await self.load_state()
+        if not st["open_changes"]:
+            return
+        base = self.compute(st, details=False)["forecasts"]
+        by_po: Dict[str, set] = defaultdict(set)
+        for c in st["open_changes"]:
+            by_po[c.get("po")].add(f"{c.get('po')}|{c.get('item')}")
+        impact = {po: self.change_impact(st, sorted(keys), base)[0] for po, keys in by_po.items()}
+        upd = {k: {"fy_impact": impact.get(c.get("po"))}
+               for k, c in (await self.fields("po_changes", {"fields.status": "Open"})).items()}
+        await self.bulk_set("po_changes", upd)
+
     def change_impact(self, st: Dict[str, Any], keys: List[str], base: Optional[Dict[str, float]] = None) -> Tuple[float, Dict[str, float]]:
         """FY forecast impact of taking SAP's latest values for these items (dry run): (Σ Δ, {line: Δ})."""
         if base is None:
@@ -220,8 +234,11 @@ class OpexEngine:
                 if f"latest_{f}" in raw:
                     latest[f"accepted_{f}"] = raw[f"latest_{f}"]
             items[k] = P.effective(latest, st["overrides"].get(k))
-        after = self.compute(st, items=items, details=False)["forecasts"]
-        delta = {lid: round(after.get(lid, 0) - base.get(lid, 0), 2) for lid in set(after) | set(base)}
+        pos = {k.split("|", 1)[0] for k in keys}
+        affected = {ln["line_id"] for ln in st["links"] if str(ln.get("po")) in pos} | \
+            {lid for lid, f in st["lines"].items() if str(f.get("po") or "") in pos}
+        after = self.compute(st, items=items, only=affected, details=False)["forecasts"]
+        delta = {lid: round(after.get(lid, 0) - base.get(lid, 0), 2) for lid in after}
         delta = {k: v for k, v in delta.items() if abs(v) >= 1}
         return round(sum(delta.values()), 2), delta
 
@@ -367,6 +384,7 @@ class OpexEngine:
         # 6–7. links + forecast
         res = await self.resolve_all()
         after = res.get("forecast_total", 0.0)
+        await self.store_change_impacts()
         # 8. derived columns back onto po_register
         await self._write_back(docs)
         to_map = await self.count_to_map()

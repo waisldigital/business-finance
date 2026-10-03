@@ -90,11 +90,11 @@ def register_review(r, ctx: SimpleNamespace):
         changes = await engine.fields("po_changes", {"fields.status": "Open"})
         cors = [c for c in (await engine.fields("po_corrections")).values() if c.get("status") != "Resolved"]
         checks = [c for c in await build_checks() if not c.get("acknowledged")]
-        impact = sum(_num(c.get("fy_impact")) for c in changes.values())
+        impact = sum(_num(v) for v in {c.get("po"): c.get("fy_impact") for c in changes.values()}.values())  # one per PO
         last = await db.aop_rows.find_one({"dataset": "zmm_runs"}, {"_id": 0, "fields": 1}, sort=[("fields.received_at", -1)])
         out = {"to_map": to_map["pos"], "to_map_items": to_map["items"], "changes": len(changes),
                "pending_fy_impact": round(impact, 2), "corrections": len(cors), "checks": len(checks),
-               "last_run": (last or {}).get("fields")}
+               "last_run": {k: v for k, v in ((last or {}).get("fields") or {}).items() if k != "header"}}
         out["badge"] = out["to_map"] + out["changes"] + out["corrections"] + out["checks"]
         return out
 
@@ -250,9 +250,7 @@ def register_review(r, ctx: SimpleNamespace):
                 elif typ == "Overheads":
                     base.update(department=d.get("department"), budgeted=bool(d.get("budgeted", True)))
                     if d.get("budgeted", True):
-                        if not d.get("budget_code"):
-                            raise HTTPException(400, f"PO {po}: pick the overhead budget line")
-                        base["budget_code"] = d["budget_code"]
+                        base["budget_code"] = d.get("budget_code")  # may follow later (bulk confirm sets the type only)
                     else:
                         oh_key = await new_overhead_line(po, its, d, user)
                         base.update(budget_code=oh_key, cost_centre=d.get("cost_centre"), gl=d.get("gl"),
@@ -563,6 +561,9 @@ def register_review(r, ctx: SimpleNamespace):
 
     async def po_payload(po: str) -> Dict[str, Any]:
         items = sorted((await engine.fields("po_items", {"fields.po": po})).values(), key=lambda x: str(x.get("item")))
+        for i in items:  # show what the forecast uses (accepted), and SAP's value where it differs
+            i["sap_now"] = {f: i.get(f"latest_{f}") for f in P.FLAGGED if f"accepted_{f}" in i and i.get(f"latest_{f}") != i.get(f"accepted_{f}")}
+            i.update({f: i[f"accepted_{f}"] for f in P.TRACKED if f"accepted_{f}" in i})
         reg = [f for f in (await engine.fields("po_register", {"fields.purchase_order": po})).values()]
         grn, inv, seen_g, seen_i = [], [], set(), set()
         for f in sorted(reg, key=lambda x: str(x.get("grn_posting_date") or "")):
@@ -605,8 +606,6 @@ def register_review(r, ctx: SimpleNamespace):
                    "allocated": round(alloc_total, 2),
                    "allocation_warning": (f"Allocated ₹{alloc_total:,.0f} of ₹{value:,.0f}" if links and value and
                                           abs(alloc_total - value) > max(1.0, value * 0.005) else None)}
-        for i in items:
-            i["sap_now"] = {f: i.get(f"latest_{f}") for f in P.FLAGGED if i.get(f"latest_{f}") != i.get(f"accepted_{f}")}
         return {"summary": summary, "items": items, "grn": grn, "invoices": inv, "links": links, "own_lines": own,
                 "opex_lines": opex_lines, "triage": triage, "changes": chs, "corrections": cors}
 

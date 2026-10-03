@@ -29,3 +29,42 @@ services:
         value: https://business-finance-[a-z0-9-]+-waisldigital-5107\.vercel\.app
       - key: NOTIFY_ENABLED
         value: "false"
+
+  # Scheduled fetch of the SAP ZMM PO report from the report mailbox → the same pipeline as the manual upload.
+  # 02:00 UTC = 07:30 IST daily; change the schedule here (Render reads it from this file / the dashboard).
+  - type: cron
+    name: finsight-zmm-fetch
+    runtime: python
+    rootDir: backend
+    schedule: "0 2 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m aop.jobs.fetch_zmm
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: crackerpro
+      - key: FILE_STORAGE
+        value: gridfs
+      - key: ZMM_FETCH_ENABLED
+        value: "false"
+      - key: ZMM_MAILBOX
+        sync: false
+      - key: ZMM_SENDER
+        sync: false
+      - key: ZMM_SUBJECT_CONTAINS
+        sync: false
+      - key: ZMM_ATTACHMENT_PATTERN
+        value: "*.xlsx"
+      - key: MS_TENANT_ID
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false
+      - key: MS_SENDER_EMAIL
+        sync: false
+      - key: NOTIFY_ENABLED
+        value: "false"
