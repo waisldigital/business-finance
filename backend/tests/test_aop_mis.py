@@ -91,7 +91,7 @@ def test_mis_reports_on_synthetic_data():
     cfg = {**CFG, "cutoffs": {"default": "2026-05", "overhead": "2026-05"}}
     data = {**DATA,
             "overhead_lines": [{"pl_tag": "Admin", "final_tag": "Office Rent", "geo": "India", "aop_head": "OH1", **_b(4.0)}],
-            "opex_lines": [{"category": "CA", "geo": "India", "tag": "DIAL", "nature_of_expense_2": "AMC & CMC", **_b(3.0)}]}
+            "opex_lines": [{"category": "CA", "geo": "India", "tag": "DIAL", "nature_of_expense": "AMC & CMC", **_b(3.0)}]}
     acts = [{"domain": "overhead", "period": "2026-04", "amount": 5.0, "dims": {"pl_tag": "Admin", "nature": "Office Rent", "segment": "CA+CR"}},
             {"domain": "opex", "period": "2026-04", "amount": 2.0, "dims": {"category": "CA", "geo": "India", "tag": "DIAL", "nature": "AMC/CMC"}}]
     s = mr.overheads_summary(data, acts, cfg)

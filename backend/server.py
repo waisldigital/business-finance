@@ -172,6 +172,10 @@ EXTRA_INDEXES = [
     ("audit_logs", [("entity_type", 1), ("entity_id", 1), ("timestamp", -1)], {}),
     ("documents", [("project_id", 1), ("uploaded_at", -1)], {}),
     ("cr_attachments", [("cr_id", 1)], {}),
+    # AOP rows (dataset+key, seq and purchase_order are created in on_startup): PO datasets by PO, line and status
+    ("aop_rows", [("dataset", 1), ("fields.po", 1)], {}),
+    ("aop_rows", [("dataset", 1), ("fields.line_id", 1)], {}),
+    ("aop_rows", [("dataset", 1), ("fields.status", 1)], {}),
 ]
 
 
@@ -3170,7 +3174,7 @@ async def health():
 
 # AOP module (Annual Operating Plan: datasets, imports, P&L engine)
 from aop.router import build_router as build_aop_router  # noqa: E402
-api.include_router(build_aop_router(db, get_current_user, write_audit, gen_id))
+api.include_router(build_aop_router(db, get_current_user, write_audit, gen_id, storage=storage))
 
 # Register router & CORS
 app.include_router(api)

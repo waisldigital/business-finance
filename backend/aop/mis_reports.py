@@ -347,7 +347,7 @@ def opex_analysis(data, actuals, cfg) -> Dict[str, Any]:
     for r in data.get("opex_lines", []):
         if norm(r.get("category")) != "ca":
             continue
-        c = opex_category(r.get("nature_of_expense_2"))
+        c = opex_category(r.get("nature_of_expense") or r.get("nature_of_expense_2"))  # _2: pre-migration key
         for p in pm_:
             cat_aop[c][p] += _n(r.get(vkey(B, p)))
     cat_act: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
