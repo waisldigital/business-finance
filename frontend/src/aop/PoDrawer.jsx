@@ -132,7 +132,7 @@ export function PoBody({ data, po, onOpenPo, onOpenLine }) {
                       <td className="px-2 text-right">{fmtCell(i.quantity, "number")}</td>
                       <td className="px-2 text-right">{fmtCell(i.net_order_value, "number")} {i.currency !== "INR" ? i.currency : ""}</td>
                       <td className="px-2 text-right">{fmtCell(i.value_inr, "number")}</td>
-                      <td className={`px-2 ${i.fx_source !== "INR" && i.fx_source !== "SAP group currency" ? "text-[var(--warning)]" : ""}`}>{i.fx_source}</td>
+                      <td className={`px-2 ${/^(FX assumption|No FX)/.test(i.fx_source || "") ? "text-[var(--warning)]" : ""}`}>{i.fx_source}</td>
                       <td className="px-2">{fmtCell(i.period_start, "date")} → {fmtCell(i.period_end, "date")}
                         {(now.period_start || now.period_end) && <span className="text-[var(--warning)]"> · SAP now {now.period_start || i.period_start} → {now.period_end || i.period_end}</span>}</td>
                       <td className="px-2 text-right">{fmtCell(i.grn_inr, "number")}</td>
