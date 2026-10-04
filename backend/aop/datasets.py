@@ -120,6 +120,9 @@ SPECS: Dict[str, DatasetSpec] = {s.key: s for s in [
     DatasetSpec("assumptions", "Assumptions", "aop_inputs", "Inputs",
                 key_fields=["fy", "name"],
                 description="Scenario drivers (Low/Base/High) — FX, escalation, PAX, rates, growth, allocation."),
+    DatasetSpec("fx_rates", "FX rates by date", "aop_inputs", "Inputs", key_fields=["currency", "date"],
+                description="INR per unit of each currency by date — PO values are converted at the rate on the PO date "
+                            "(missing dates are fetched from the ECB reference rates on each ZMM run)."),
     DatasetSpec("pl_other", "Below-EBITDA lines", "aop_inputs", "Inputs",
                 key_fields=["line"],
                 description="Depreciation, interest, interest income and tax.",

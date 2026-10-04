@@ -7,7 +7,7 @@ const KINDS = [
   { key: "aop", url: "/aop/import/aop-workbook", title: "Consolidated AOP workbook",
     help: "Reads Assumptions, CUTE / Non-CUTE / CR & Project revenue, Opex_Raw Data, Resource Dashboard, Overhead_Inputs + Indirect Cost ledger, Budgeted CAPEX and the WAISL P&L. Replaces those datasets and the imported actuals." },
   { key: "zmm", url: "/aop/import/zmm", title: "ZMM PO report", zmm: true,
-    help: "The SAP PO dump (sheet ZMM_PO_Report, else the first sheet). Rebuilds PO items, flags changes on mapped POs, re-resolves links and recalculates the Opex forecast. The same file twice changes nothing. New POs and changes land in Review." },
+    help: "The SAP ZMM PO report as e-mailed (sheet Data / ZMM_PO_Report, else the first sheet). Foreign-currency POs are converted to INR at the PO date (Net Order Value × the rate of the PO's Created On date, from Inputs → FX rates by date; missing dates are fetched from the ECB reference rates, else the Assumptions rate is used and flagged). Rebuilds PO items, flags changes on mapped POs, re-resolves links and recalculates the Opex forecast. The same file twice changes nothing. New POs and changes land in Review." },
   { key: "opex", url: "/aop/import/opex-workbook", title: "Opex forecast workbook (one-time setup)",
     help: "Tracker lines from Opex_Forecast (upserted by S. No. — portal edits are kept), links from PO_Links (else the old mapping text), statuses from Line_Status, and the ZMM_PO_Report sheet if present. Rows without S. No. are rejected." },
   { key: "mis", url: "/aop/import/mis-actuals", title: "Monthly actuals — MIS working file", monthly: true,

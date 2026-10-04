@@ -25,7 +25,7 @@ def zrow(po, item, **kw):
 
 def items_of(rows, rates=None, fy="FY27"):
     _, raw = P.read_zmm([tuple([None] * len(HEADER)), tuple(HEADER)] + rows)
-    return P.build_items(raw, lambda c: (rates or {}).get(c), fy)
+    return P.build_items(raw, lambda c, dt: ((rates or {})[c], P.FX_FALLBACK) if (rates or {}).get(c) else None, fy)
 
 
 # ---------------------------------------------------------------------------------------------- 3. dedupe
@@ -41,7 +41,7 @@ def test_zmm_reader_normalises_and_dedupes_grn_and_invoices():
     header, raw = P.read_zmm([tuple(["subtotal"] + [None] * (len(HEADER) - 1)), tuple(HEADER)] + rows)
     assert raw[0]["purchase_order"] == "4200000049" and raw[0]["supplier"] == "1000001" and raw[0]["material"] == "9700000001"
     assert "currency_2" in raw[0] or "currency" in raw[0]
-    it = P.build_items(raw, lambda c: None, "FY27")["4200000049|10"]
+    it = P.build_items(raw, lambda c, dt: None, "FY27")["4200000049|10"]
     assert it["grn_inr"] == 150000 and it["invoiced_inr"] == 100000
     assert it["pending_inr"] == 365000 - 150000 and it["last_grn_date"] == "2026-06-01"
     P.register_rows(raw)
@@ -57,14 +57,25 @@ def test_zmm_missing_columns_rejected():
 
 
 # ---------------------------------------------------------------------------------------------- 4. FX
-def test_fx_keeps_sap_inr_when_converted_and_falls_back_otherwise():
-    rates = {"EUR": 108.0, "GBP": 110.0}
-    its = items_of([zrow(4400000018, 10, Currency="EUR", **{"Net Order Value": 1000, "PO Net Price in Group Currency": 107000}),
-                    zrow(4400000099, 10, Currency="GBP", **{"Net Order Value": 1000, "PO Net Price in Group Currency": 1000}),
-                    zrow(4400000077, 10, Currency="CHF", **{"Net Order Value": 1000, "PO Net Price in Group Currency": 1000})], rates)
-    assert its["4400000018|10"]["value_inr"] == 107000 and its["4400000018|10"]["fx_source"] == "SAP group currency"
-    assert its["4400000099|10"]["value_inr"] == 110000 and its["4400000099|10"]["fx_source"] == P.FX_FALLBACK
-    assert its["4400000077|10"]["value_inr"] is None and "No FX rate" in its["4400000077|10"]["fx_source"]
+def test_fx_converts_doc_amount_at_po_date_and_flags_fallback():
+    from datetime import date
+    from aop.po_pipeline import FxTable
+    fx = FxTable({"EUR": {"2026-03-27": 100.0, "2026-04-01": 108.0}}, {"GBP": 110.0})
+    assert fx.rate("EUR", date(2026, 4, 1)) == (108.0, "FX EUR on PO date 2026-04-01")
+    assert fx.rate("EUR", date(2026, 3, 29))[0] == 100.0          # weekend → nearest earlier day
+    assert fx.rate("EUR", date(2026, 5, 1)) is None               # > 10 days since the last rate, no fallback
+    assert fx.rate("GBP", date(2026, 4, 1)) == (110.0, P.FX_FALLBACK)
+    _, raw = P.read_zmm([tuple([None] * len(HEADER)), tuple(HEADER)] + [
+        # SAP group-currency figure is ignored: INR = Net Order Value (document currency) × rate on the PO date
+        zrow(4400000018, 10, Currency="EUR", **{"Net Order Value": 1000, "PO Net Price in Group Currency": 254.9,
+                                                "GR Amount In LC": 500}),
+        zrow(4400000099, 10, Currency="GBP", **{"Net Order Value": 1000, "PO Net Price in Group Currency": 1000}),
+        zrow(4400000077, 10, Currency="CHF", **{"Net Order Value": 1000})])
+    its = P.build_items(raw, fx.rate, "FY27")
+    eur = its["4400000018|10"]
+    assert eur["value_inr"] == 108000 and eur["fx_rate"] == 108.0 and not P.fx_flagged(eur["fx_source"])
+    assert its["4400000099|10"]["value_inr"] == 110000 and P.fx_flagged(its["4400000099|10"]["fx_source"])
+    assert its["4400000077|10"]["value_inr"] is None and P.fx_flagged(its["4400000077|10"]["fx_source"])
     assert P.to_inr("INR", 5, None, None) == (5.0, "INR")
 
 
@@ -250,3 +261,9 @@ def test_old_po_details_and_po_date_order():
     assert lp["previous_po_start"] == "2025-04-01" and lp["previous_po_end"] == "2026-03-31"
     own = P.latest_previous({"po": "OWN", "vendor": "V", "net_po": 5, "po_start": "2024-04-01", "po_end": "2025-03-31"}, detail[:1])
     assert own["previous_po"] == "OWN" and own["previous_po_value_inr"] == 5 and own["previous_po_supplier"] == "V"
+
+
+def test_suggestion_scores_zmm_aop_code():
+    lines = [{"line_id": "1", "aop_code": "OPX-101", "tag": "HYD"}, {"line_id": "2", "aop_code": "OPX-202", "tag": "HYD"}]
+    got = P.suggest_lines({"aop_code": "opx-202", "location": "HYD"}, lines)
+    assert got[0]["line_id"] == "2" and "same AOP code" in got[0]["reason"]

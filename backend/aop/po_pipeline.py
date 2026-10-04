@@ -16,9 +16,11 @@ The same file processed twice changes nothing.
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import io
 import logging
+import os
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
@@ -47,6 +49,52 @@ def _num(v) -> float:
         return float(v or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+FX_API = os.environ.get("FX_API_URL", "https://api.frankfurter.app")
+
+
+async def fetch_fx_series(cur: str, start: str, end: str) -> Dict[str, float]:
+    """INR per unit of ``cur`` for each business day in [start − 10 days, end] (ECB reference rates)."""
+    import httpx
+    from datetime import date as _d, timedelta
+    lo = (_d.fromisoformat(start) - timedelta(days=10)).isoformat()
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(f"{FX_API}/{lo}..{end}", params={"from": cur, "to": "INR"})
+    r.raise_for_status()
+    return {dt: float(v["INR"]) for dt, v in (r.json().get("rates") or {}).items() if v.get("INR")}
+
+
+class FxTable:
+    """Rate on a date = that day's rate, else the nearest earlier one within 10 days (weekends, holidays)."""
+
+    def __init__(self, stored: Dict[str, Dict[str, float]], fallback: Dict[str, Optional[float]]):
+        self.stored, self.fallback = stored, fallback
+        self.fetched, self.error = 0, None
+        self.reindex()
+
+    def reindex(self):
+        self.idx = {c: sorted(v.items()) for c, v in self.stored.items()}
+
+    def lookup(self, cur: str, dt: str) -> Optional[Tuple[float, str]]:
+        series = self.idx.get(cur) or sorted((self.stored.get(cur) or {}).items())
+        if not series or not dt:
+            return None
+        i = bisect.bisect_right([x[0] for x in series], dt) - 1
+        if i < 0:
+            return None
+        day, rate = series[i]
+        from datetime import date as _d
+        if (_d.fromisoformat(dt) - _d.fromisoformat(day)).days > 10:
+            return None
+        return rate, f"FX {cur} on PO date {day}"
+
+    def rate(self, cur: str, po_date) -> Optional[Tuple[float, str]]:
+        got = self.lookup(cur, po_date.isoformat() if po_date else "")
+        if got:
+            return got
+        fb = self.fallback.get(cur)
+        return (fb, P.FX_FALLBACK) if fb else None
 
 
 class OpexEngine:
@@ -96,6 +144,40 @@ class OpexEngine:
         for cur in ("USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD", "CHF", "JPY"):
             out[cur] = await self.fx_rate(cur) or DEFAULT_FX.get(cur)
         return out
+
+    async def fx_table(self, rows: List[Dict[str, Any]], by: str = "system") -> "FxTable":
+        """Exchange rates for the PO dates in this file: the stored FX table (aop_rows fx_rates, editable / uploadable
+        under Inputs), missing dates fetched from the ECB reference rates (FX_AUTO_FETCH, default on) and saved, and
+        the Assumptions FY rate as the last resort (flagged)."""
+        stored: Dict[str, Dict[str, float]] = defaultdict(dict)
+        for f in (await self.fields("fx_rates")).values():
+            cur, dt, rate = str(f.get("currency") or "").upper(), str(f.get("date") or "")[:10], f.get("rate")
+            if cur and dt and isinstance(rate, (int, float)) and rate > 0:
+                stored[cur][dt] = float(rate)
+        need: Dict[str, List[str]] = defaultdict(list)
+        for f in rows:
+            cur = str(f.get("currency") or "INR").strip().upper()
+            dt = str(f.get("created_on") or "")[:10]
+            if cur not in ("", "INR") and dt:
+                need[cur].append(dt)
+        table = FxTable(stored, await self.rate_map())
+        missing = {c: ds for c, ds in need.items() if any(table.lookup(c, x) is None for x in ds)}
+        if missing and os.environ.get("FX_AUTO_FETCH", "true").strip().lower() not in ("0", "false", "no", "off"):
+            new: Dict[str, Dict[str, Any]] = {}
+            for cur, ds in missing.items():
+                try:
+                    got = await fetch_fx_series(cur, min(ds), max(ds))
+                except Exception as e:  # noqa: BLE001 — no network / API down: fall back to the assumptions, flagged
+                    table.error = f"{cur}: {e}"[:300]
+                    continue
+                for dt, rate in got.items():
+                    stored[cur][dt] = rate
+                    new[f"{cur}|{dt}"] = {"currency": cur, "date": dt, "rate": rate, "source": "ECB reference (auto)"}
+            if new:
+                await self.bulk_set("fx_rates", new, upsert=True, by=by)
+                table.fetched = len(new)
+        table.reindex()
+        return table
 
     async def corrections_overrides(self) -> Dict[str, Dict[str, Any]]:
         out: Dict[str, Dict[str, Any]] = {}
@@ -348,8 +430,8 @@ class OpexEngine:
         for j in range(0, len(docs), 1000):
             await self.db.aop_rows.insert_many(docs[j:j + 1000])
         # 4. po_items: latest values; accepted kept for items in review
-        rates = await self.rate_map()
-        fresh = P.build_items([d["fields"] for d in docs], lambda c: rates.get(c), plan)
+        fx = await self.fx_table([d["fields"] for d in docs], by)
+        fresh = P.build_items([d["fields"] for d in docs], fx.rate, plan)
         prev_items = await self.fields("po_items")
         first_run = not prev_items
         scope = await self.in_scope_items()
@@ -394,7 +476,8 @@ class OpexEngine:
                 "changes_flagged": flagged, "fx_only_changes": fx_only, "to_map": to_map, "snapshot": snapshot,
                 "forecast_before": before, "forecast_after": after, "forecast_delta": round(after - before, 2),
                 "first_run": first_run, "header": header[:120],
-                "unconverted": len([1 for it in fresh.values() if it.get("fx_source") not in ("INR", "SAP group currency")])}
+                "unconverted": len([1 for it in fresh.values() if P.fx_flagged(it.get("fx_source"))]),
+                "fx_fetched": fx.fetched, "fx_fetch_error": fx.error}
 
     async def _triage(self, docs, fresh, triage, cfg, by) -> int:
         prefix = cfg.get("po_nature_prefix") or P.DEFAULT_PREFIX
@@ -562,6 +645,8 @@ def _c(key, label, ctype="text", editable=False, hidden=False, role=None):
 
 
 PO_META: Dict[str, List[Dict[str, Any]]] = {
+    "fx_rates": [_c("currency", "Currency", role="key"), _c("date", "Date", "date", role="key"),
+                 _c("rate", "INR per unit", "number", True), _c("source", "Source", editable=True)],
     "po_links": [
         _c("line_id", "Line ID", role="key"), _c("po", "PO", role="key"), _c("material", "Material code", role="key"),
         _c("po_item", "PO item", role="key"), _c("alloc_pct", "Allocation %", "percent", True),
@@ -577,8 +662,10 @@ PO_META: Dict[str, List[Dict[str, Any]]] = {
         _c("po", "PO", role="key"), _c("item", "Item", role="key"), _c("material", "Material"),
         _c("material_description", "Material description"), _c("supplier_code", "Supplier code"),
         _c("supplier_name", "Supplier"), _c("created_on", "Created on", "date"), _c("pr_no", "PR"), _c("wbs", "WBS"),
-        _c("currency", "Currency"), _c("quantity", "Qty", "number"), _c("net_order_value", "Net order value", "number"),
-        _c("value_inr", "Value (INR)", "number"), _c("fx_source", "FX source"), _c("period_start", "Period start", "date"),
+        _c("aop_code", "AOP code (Short ID)"), _c("wbs_name", "WBS name"), _c("material_type", "Material type"),
+        _c("currency", "Currency"), _c("quantity", "Qty", "number"), _c("net_price", "Net order price", "number"),
+        _c("net_order_value", "Net order value", "number"),
+        _c("value_inr", "Value (INR)", "number"), _c("fx_rate", "FX rate (PO date)", "number"), _c("fx_date", "FX at (PO date)", "date"), _c("fx_source", "FX source"), _c("period_start", "Period start", "date"),
         _c("period_end", "Period end", "date"), _c("delivery_date", "Delivery date", "date"), _c("active", "Active"),
         _c("deletion_indicator", "Deletion indicator"), _c("grn_inr", "GRN (INR)", "number"),
         _c("pending_inr", "Pending (INR)", "number"), _c("grn_pct", "GRN %", "percent"),

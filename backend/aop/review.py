@@ -113,7 +113,7 @@ def register_review(r, ctx: SimpleNamespace):
             sug_types = {t.get("suggested_type") for t in tr}
             total = sum(_num(i.get("value_inr")) for i in its)
             agg = {"po": po, "supplier_code": head.get("supplier_code"), "supplier_name": head.get("supplier_name"),
-                   "wbs": head.get("wbs"), "created_on": head.get("created_on"), "currency": head.get("currency"),
+                   "wbs": head.get("wbs"), "aop_code": head.get("aop_code"), "wbs_name": head.get("wbs_name"), "created_on": head.get("created_on"), "currency": head.get("currency"),
                    "value_inr": round(total, 2), "fy_impact_inr": round(sum(_num(i.get("fy_impact_inr")) for i in its), 2),
                    "period_start": min([i["period_start"] for i in its if i.get("period_start")] or [None]),
                    "period_end": max([i["period_end"] for i in its if i.get("period_end")] or [None]),
@@ -125,11 +125,12 @@ def register_review(r, ctx: SimpleNamespace):
                    "department": next((t.get("department") for t in tr if t.get("department")), None),
                    "items": [{"item": i["item"], "material": i.get("material"), "material_description": i.get("material_description"),
                               "value_inr": i.get("value_inr"), "period_start": i.get("period_start"), "period_end": i.get("period_end"),
-                              "fx_source": i.get("fx_source"), "suggested_type": t.get("suggested_type")} for i, t in zip(its, tr)]}
+                              "fx_source": i.get("fx_source"), "fx_rate": i.get("fx_rate"), "currency": i.get("currency"),
+                              "net_order_value": i.get("net_order_value"), "suggested_type": t.get("suggested_type")} for i, t in zip(its, tr)]}
             agg["suggestions"] = P.suggest_lines({**head, "value_inr": total, "location": agg["location"],
                                                   "period_start": agg["period_start"], "period_end": agg["period_end"]}, lines)
             same_wbs = [ln for ln in lines if head.get("wbs") and ln.get("wbs") == head.get("wbs") and ln.get("aop_code")]
-            agg["aop_code_suggestion"] = same_wbs[0].get("aop_code") if same_wbs else None
+            agg["aop_code_suggestion"] = head.get("aop_code") or (same_wbs[0].get("aop_code") if same_wbs else None)
             out.append(agg)
             if limit and len(out) >= limit:
                 break
@@ -478,7 +479,7 @@ def register_review(r, ctx: SimpleNamespace):
                     "enter coverage dates", link=k, line_id=ln["line_id"], po=ln["po"])
         for k, it in items.items():
             src = str(it.get("fx_source") or "")
-            if src not in ("INR", "SAP group currency", ""):
+            if P.fx_flagged(src):
                 add(f"fx|{k}", "FX fallback" if src == P.FX_FALLBACK else "No FX rate", k,
                     f"PO {it['po']} item {it['item']} ({it.get('currency')}): {src}", info=src == P.FX_FALLBACK, po=it["po"])
         today = date.today().isoformat()

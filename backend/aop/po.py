@@ -138,7 +138,13 @@ def to_inr(cur: Any, doc_value: Any, sap_group_value: Any, rate: Optional[float]
     return None, f"No FX rate for {cur}"
 
 
-FX_FALLBACK = "FX assumption (SAP not converted)"
+FX_FALLBACK = "FX assumption (no rate for the PO date)"
+
+
+def fx_flagged(source: Any) -> bool:
+    """INR value from the FY assumption or not converted at all → Review → Checks."""
+    s = str(source or "")
+    return s == FX_FALLBACK or s.startswith("No FX")
 
 
 def _first(f: Dict[str, Any], *keys: str) -> Any:
@@ -161,10 +167,14 @@ def fy_impact(value: float, start: Optional[date], end: Optional[date], fy: str,
     return 0.0
 
 
-def build_items(rows: List[Dict[str, Any]], rate_for: Callable[[str], Optional[float]], plan_fy: str) -> Dict[str, Dict[str, Any]]:
+def build_items(rows: List[Dict[str, Any]], rate_for: Callable[..., Any], plan_fy: str) -> Dict[str, Dict[str, Any]]:
     """One record per PO item from the raw rows. Header fields come from the item's first row; GRN once per
     (MIGO no., MIGO line) and invoices once per invoice no. — the file repeats header values on every GRN row and
-    carries pending as a running balance, so neither is summed."""
+    carries pending as a running balance, so neither is summed.
+
+    Amounts are in the PO's currency (Net Order Price / Value, GR Amount In LC, Invoiced Value). INR = amount × the
+    exchange rate on the PO date (Created On): ``rate_for(currency, date)`` → (INR per unit, source) or None. SAP's
+    group-currency columns are not used for the value — they are converted inconsistently in the report."""
     by_item: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for f in rows:
         by_item[f"{f['purchase_order']}|{f.get('purchase_order_item') or ''}"].append(f)
@@ -172,14 +182,20 @@ def build_items(rows: List[Dict[str, Any]], rate_for: Callable[[str], Optional[f
     for key, rs in by_item.items():
         h = rs[0]
         cur = str(_first(h, "currency") or "INR").strip().upper()
-        rate = rate_for(cur) if cur not in ("", "INR") else 1.0
+        po_date = d(h.get("created_on"))
         doc_val = num(h.get("net_order_value"))
-        qty = num(_first(h, "quantity", "po_quantity", "order_quantity"))
-        g = num(h.get("po_net_price_in_group_currency"))
-        # the group-currency figure is a price; it is the item value either as-is or × quantity
-        cands = [g] + ([g * qty] if qty and qty != 1 else [])
-        sap = next((c for c in cands if rate and doc_val and c and abs(c / doc_val / rate - 1) <= 0.15), g)
-        value_inr, fx_source = to_inr(cur, doc_val, sap, rate if cur not in ("", "INR") else None)
+        qty = num(_first(h, "order_quantity", "quantity", "po_quantity"))
+        if cur in ("", "INR"):
+            rate, fx_source = 1.0, "INR"
+        else:
+            got = rate_for(cur, po_date)
+            if isinstance(got, tuple):
+                rate, fx_source = got
+            else:  # a plain rate (assumption)
+                rate, fx_source = got, FX_FALLBACK
+            if not rate:
+                rate, fx_source = None, f"No FX rate for {cur}"
+        value_inr = doc_val * rate if rate else None
         grn = invoice = 0.0
         grn_doc = 0.0
         seen_migo, seen_inv = set(), set()
@@ -189,12 +205,11 @@ def build_items(rows: List[Dict[str, Any]], rate_for: Callable[[str], Optional[f
             if mk[0] and mk not in seen_migo:
                 seen_migo.add(mk)
                 gi = num(f.get("grn_amount_in_group_currency"))
-                gd = num(_first(f, "gr_amount_in_lc"))
+                gd = num(_first(f, "gr_amount_in_lc"))  # in the PO's currency
                 if cur in ("", "INR"):
-                    grn += gi or gd
-                else:
-                    v, _ = to_inr(cur, gd or (gi / rate if rate else 0), gi, rate)
-                    grn += v or 0.0
+                    grn += gd or gi
+                elif rate:
+                    grn += gd * rate
                 grn_doc += gd
                 gd_ = f.get("grn_posting_date")
                 if gd_ and (last_grn is None or str(gd_) > last_grn):
@@ -203,12 +218,11 @@ def build_items(rows: List[Dict[str, Any]], rate_for: Callable[[str], Optional[f
             if ik and ik not in seen_inv:
                 seen_inv.add(ik)
                 ii = num(f.get("invoice_amount_in_group_currency"))
-                idoc = num(_first(f, "invoiced_value_base_value", "invoice_amount"))
+                idoc = num(_first(f, "invoiced_value_base_value", "invoice_amount"))  # in the PO's currency
                 if cur in ("", "INR"):
-                    invoice += ii or idoc
-                else:
-                    v, _ = to_inr(cur, idoc or (ii / rate if rate else 0), ii, rate)
-                    invoice += v or 0.0
+                    invoice += idoc or ii
+                elif rate:
+                    invoice += idoc * rate
                 idt = _first(f, "invoice_posting_date", "invoice_date")
                 if idt and (last_inv is None or str(idt) > last_inv):
                     last_inv = str(idt)[:10]
@@ -228,7 +242,10 @@ def build_items(rows: List[Dict[str, Any]], rate_for: Callable[[str], Optional[f
             "gl": po_str(_first(h, "g_l_account", "gl_account", "g_l_account_no", "gl")),
             "wbs": h.get("wbs_element"), "delivery_date": delivery.isoformat() if delivery else None,
             "currency": cur or "INR", "quantity": qty or None, "net_order_value": doc_val,
-            "net_price": num(_first(h, "net_price", "po_net_price")) or None,
+            "net_price": num(_first(h, "net_order_price", "net_price", "po_net_price")) or None,
+            "fx_rate": rate if cur not in ("", "INR") else None, "fx_date": po_date.isoformat() if po_date and cur not in ("", "INR") else None,
+            "aop_code": _first(h, "short_id_wbs_elem", "short_id"), "wbs_name": _first(h, "wbs_element_name"),
+            "material_type": _first(h, "material_type_desc", "material_type"),
             "value_inr": round(value_inr, 2) if value_inr is not None else None, "fx_source": fx_source,
             "period_start": ps.isoformat() if ps else None, "period_end": pe.isoformat() if pe else None,
             "period_missing": not (ps and pe), "active": active, "deletion_indicator": deletion or None,
@@ -684,12 +701,15 @@ def type_from_wbs(wbs: Any, prefix_map: Optional[Dict[str, str]] = None, nature:
 
 
 def suggest_lines(item: Dict[str, Any], lines: List[Dict[str, Any]], top: int = 3) -> List[Dict[str, Any]]:
-    """Score tracker lines for an Opex renewal: same WBS +2, same supplier as the line's latest or old supplier +2,
+    """Score tracker lines for an Opex renewal: same AOP code (ZMM Short ID) +2, same WBS +2, same supplier as the line's latest or old supplier +2,
     same Location +1, daily rate within ±25% of the line's latest / old rate +1, line awaiting a new PO +1."""
     out = []
     rate = daily_rate(item.get("value_inr"), item.get("period_start"), item.get("period_end"))
     for ln in lines:
         score, why = 0, []
+        code = str(item.get("aop_code") or "").strip().upper()
+        if code and code == str(ln.get("aop_code") or "").strip().upper():
+            score += 2; why.append("same AOP code")
         if item.get("wbs") and str(ln.get("wbs") or "").strip() == str(item["wbs"]).strip():
             score += 2; why.append("same WBS")
         sups = {str(ln.get("supplier_code") or ""), str(ln.get("latest_po_supplier_code") or "")} - {""}
