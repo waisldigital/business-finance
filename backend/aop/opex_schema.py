@@ -223,7 +223,8 @@ def meta_columns(dataset: str, cfg: Dict[str, Any], existing: Optional[List[Dict
     prev = {c["key"]: c for c in existing or []}
     out = []
     for c in layout(dataset, cfg):
-        col = column(c["key"], c["label"], c["type"], editable=bool(c.get("editable")), group=c.get("group", ""),
+        label = f"{c['group']} {c['label']}" if c.get("month") else c["label"]  # F27 Apr-26 vs B27 Apr-26 in the grid
+        col = column(c["key"], label, c["type"], editable=bool(c.get("editable")), group=c.get("group", ""),
                      hidden=bool(c.get("hidden")))
         if c.get("actual"):
             col["actual"] = True  # booked months come from the actual source (read-only)
@@ -234,6 +235,15 @@ def meta_columns(dataset: str, cfg: Dict[str, Any], existing: Optional[List[Dict
             if old.get("user_editable") is not None and c.get("role") not in ("computed", "system", "key"):
                 col["user_editable"] = old["user_editable"]
         out.append(col)
+    if dataset == "opex_lines":  # the plan year's running forecast (from the tracker), next to its budget
+        F = "F" + cfg["plan_fy"][2:]
+        at = next((i for i, c in enumerate(out) if c["key"] == vkey("B" + cfg["plan_fy"][2:], "annual")), len(out) - 1) + 1
+        fc = []
+        for p in fy_months(cfg["plan_fy"]):
+            col = column(vkey(F, p), f"{F} {period_label(p)}", "number", group=F)
+            col["role"] = "computed"
+            fc.append(col)
+        out = out[:at] + fc + out[at:]
     known = {c["key"] for c in out}
     out += [c for c in existing or [] if c.get("custom") and c["key"] not in known]
     return out

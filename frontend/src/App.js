@@ -30,6 +30,7 @@ const AopSectionPage = lazy(() => import("@/pages/aop/AopSectionPage"));
 const MyChangesPage = lazy(() => import("@/pages/aop/MyChangesPage"));
 const AopReportsPage = lazy(() => import("@/pages/aop/AopReportsPage"));
 const ReviewPage = lazy(() => import("@/pages/aop/ReviewPage"));
+const AdminAopSections = lazy(() => import("@/pages/admin/AdminAopSections"));
 const AdminHome = lazy(() => import("@/pages/admin/AdminHome"));
 const AdminDataPage = lazy(() => import("@/pages/admin/AdminDataPage"));
 const AdminImportsPage = lazy(() => import("@/pages/admin/AdminImportsPage"));
@@ -40,13 +41,11 @@ const AdminPlanSettings = lazy(() => import("@/pages/admin/AdminPlanSettings"));
 const SECTION_PAGES = {
   dashboard: <DashboardPage />, pipeline: <PipelinePage />, projects: <ProjectsPage />,
   change_requests: <ChangeRequestsPage />, customer_profile: <MasterPage entityKey="customers" />,
-  wbs_budget: <WBSBudgetPage />, aop_pnl: <AopReportsPage />, aop_review: <ReviewPage />,
+  wbs_budget: <WBSBudgetPage />, aop_pnl: <AopReportsPage />,
   ...Object.fromEntries(["aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex"]
     .map((k) => [k, <AopSectionPage section={k} />])),
 };
-// Review is also open to roles that edit Opex (the API checks the edit right)
-const sectionsAt = (path) => [...SECTIONS.filter((x) => x.path === path).map((x) => x.key),
-                              ...(path === "/app/aop/review" ? ["aop_opex"] : [])];
+const sectionsAt = (path) => SECTIONS.filter((x) => x.path === path).map((x) => x.key);
 
 const Loading = () => (
   <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
@@ -156,6 +155,7 @@ function App() {
                   <Route path="/admin/aop/reports" element={A(<AopReportsPage admin />)} />
                   <Route path="/admin/aop/settings" element={A(<AdminPlanSettings />)} />
                   <Route path="/admin/aop/review" element={A(<ReviewPage />)} />
+                  <Route path="/admin/aop/sections" element={A(<AdminAopSections />)} />
                   <Route path="/admin/approvals" element={A(<ApprovalsPage />)} />
                   <Route path="/admin/employees" element={A(<EmployeesPage />)} />
                   <Route path="/admin/suppliers" element={A(<MasterPage entityKey="suppliers" />)} />

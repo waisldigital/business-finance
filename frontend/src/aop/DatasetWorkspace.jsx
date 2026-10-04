@@ -2,23 +2,25 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import api from "@/lib/api";
 import {
   MagnifyingGlass, CaretLeft, CaretRight, Columns, UploadSimple, DownloadSimple, Trash, ArrowClockwise,
-  ClipboardText, HourglassMedium, CheckCircle, WarningCircle,
+  ClipboardText, HourglassMedium, CheckCircle, WarningCircle, Plus,
 } from "@phosphor-icons/react";
 import DataGrid from "./DataGrid";
 import PivotTable from "./PivotTable";
 import GridSettings from "./GridSettings";
 import ColumnHeader from "./ColumnHeader";
-import { useGridView, arrangeColumns, applyView, cellValue, isMonthCol } from "./gridView";
+import { useGridView, arrangeColumns, applyView, cellValue, isMonthCol, monthsOpen } from "./gridView";
 import { csvDownload } from "./mis";
 import ColumnManager from "./ColumnManager";
 import UploadDialog from "./UploadDialog";
 import PoDrawer, { reviewBase } from "./PoDrawer";
 import PoHistoryDrawer from "./PoHistoryDrawer";
 import { download } from "./format";
+import Modal from "@/components/common/Modal";
 
 const PO_COLUMNS = ["po", "latest_po", "previous_po", "merged_into_po", "purchase_order", "linked_old_po", "linked_forecast_s_no", "dims.po"];
 // clicks that open a line's PO history instead of a single PO
-const HISTORY_COLUMNS = { opex_tracker: ["po", "previous_po"], po_register: ["linked_old_po", "linked_forecast_s_no"],
+const HISTORY_COLUMNS = { opex_tracker: ["po", "previous_po"], opex_lines: ["po", "previous_po"],
+                          po_register: ["linked_old_po", "linked_forecast_s_no"],
                           po_links: ["line_id"] };
 const PAGE = 5000; // datasets up to this size load whole, so sort / filter / pivot work on every row
 
@@ -32,7 +34,12 @@ const groupLabel = (g) => {
   return `FY'${m[2]} ${m[1]}${sub}`;
 };
 
-export default function DatasetWorkspace({ dataset, admin = false, onChanged, focusVersion }) {
+/**
+ * One dataset's grid. ``filter`` {field, value, label} shows one slice of it (e.g. the PAX lines of the CUTE drivers)
+ * with its own view; ``preview`` is the users' view for an admin (read-only); ``manage`` adds the admin's table tools
+ * (columns, add / delete rows) to that preview.
+ */
+export default function DatasetWorkspace({ dataset, admin = false, onChanged, focusVersion, preview = false, manage = false, filter = null }) {
   const [columns, setColumns] = useState([]);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -42,19 +49,20 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showCols, setShowCols] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [po, setPo] = useState(null);
   const [hist, setHist] = useState(null);
   const [review, setReview] = useState(null);
   useEffect(() => {
-    if (dataset.key !== "opex_tracker") return;
+    if (dataset.key !== "opex_tracker" || !admin) return;
     api.get("/aop/review/summary").then((r) => setReview(r.data)).catch(() => {});
-  }, [dataset.key]);
+  }, [dataset.key, admin]);
   const openLink = (c, row) => {
     const f = row.fields || {};
     const first = (v) => String(v ?? "").split(/[,;/\s]+/).filter(Boolean)[0];
     if ((HISTORY_COLUMNS[dataset.key] || []).includes(c.key)) {
-      if (dataset.key === "opex_tracker") return setHist({ lineId: row.key, po: first(f[c.key]) });
+      if (dataset.key === "opex_tracker" || dataset.key === "opex_lines") return setHist({ lineId: row.key, po: first(f[c.key]) });
       if (dataset.key === "po_links") return setHist({ lineId: f.line_id, po: f.po });
       const lid = first(f.linked_forecast_s_no);
       if (lid) return setHist({ lineId: lid, po: c.key === "linked_old_po" ? first(f.linked_old_po) : f.purchase_order });
@@ -63,16 +71,15 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
     if (p) setPo(p);
   };
   const [selected, setSelected] = useState(new Set());
-  const [groups, setGroups] = useState(null);
-  const [view, updateView, resetView, sharedView] = useGridView(`aop_grid_${dataset.key}_v1`, {});
-  const canUpload = admin || !!dataset.can_upload;
+  const [view, updateView, resetView, sharedView] = useGridView(`aop_grid_${dataset.key}${filter ? `_${String(filter.value).replace(/[^0-9a-zA-Z]+/g, "")}` : ""}_v1`, {});
+  const canUpload = !preview && (admin || !!dataset.can_upload);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [c, r] = await Promise.all([
         api.get(`/aop/datasets/${dataset.key}/columns`),
-        api.get(`/aop/datasets/${dataset.key}/rows`, { params: { q: query || undefined, limit: PAGE, offset } }),
+        api.get(`/aop/datasets/${dataset.key}/rows`, { params: { q: query || undefined, limit: PAGE, offset, ...(filter ? { filter_field: filter.field, filter_value: filter.value } : {}) } }),
       ]);
       setColumns(c.data);
       setRows(r.data.rows);
@@ -80,20 +87,33 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
     } catch (e) {
       setMsg({ tone: "err", text: e.response?.data?.detail || e.message });
     } finally { setLoading(false); }
-  }, [dataset.key, query, offset]);
+  }, [dataset.key, query, offset, filter?.field, filter?.value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setOffset(0); setSelected(new Set()); setGroups(null); setQ(""); setQuery(""); }, [dataset.key]);
+  useEffect(() => { setOffset(0); setSelected(new Set()); setQ(""); setQuery(""); }, [dataset.key]);
 
   const allGroups = useMemo(() => Array.from(new Set(columns.map((c) => c.group || ""))), [columns]);
-  useEffect(() => {
-    if (groups === null && allGroups.length) {
-      const plan = allGroups.filter(Boolean);
-      // every FY side by side (each folds to one total column until 12M is switched on); the report data panel
-      // opens on the draft year's budget
-      setGroups(new Set(["", ...(focusVersion && plan.includes(focusVersion) ? [focusVersion] : plan)]));
-    }
-  }, [allGroups, groups, focusVersion]);
+  // FY blocks shown (saved with the view): every FY side by side, each folded to one total column until its own 12M
+  // is switched on; the report data panel opens on the draft year's budget
+  const groups = useMemo(() => {
+    if (!allGroups.length) return null;
+    const plan = allGroups.filter(Boolean);
+    if (!view.groupsOff && focusVersion && plan.includes(focusVersion)) return new Set(["", focusVersion]);
+    const off = new Set(view.groupsOff || []);
+    return new Set(allGroups.filter((g) => !off.has(g)));
+  }, [allGroups, view.groupsOff, focusVersion]);
+  const toggleGroup = (g) => updateView((v) => {
+    const shownNow = groups || new Set(allGroups);
+    const off = new Set(allGroups.filter((x) => !shownNow.has(x)));
+    off.has(g) ? off.delete(g) : off.add(g);
+    return { groupsOff: [...off] };
+  });
+  const groupMonths = (g) => columns.some((c) => isMonthCol(c) && c.group === g);
+  const toggle12 = (g) => updateView((v) => {
+    const cur = v.twelveM === true ? Object.fromEntries(allGroups.filter(groupMonths).map((x) => [x, true])) : { ...(v.twelveM || {}) };
+    if (cur[g]) delete cur[g]; else cur[g] = true;
+    return { twelveM: cur };
+  });
   const shown = useMemo(() => columns.filter((c) => !groups || groups.has(c.group || "")), [columns, groups]);
   const hasMonths = useMemo(() => shown.some(isMonthCol), [shown]);
 
@@ -109,8 +129,8 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   // a folded FY total (12M off) is editable when its months are: the value is phased evenly over the months
   const monthsOf = useCallback((v) => columns.filter((c) => isMonthCol(c) && c.key.startsWith(`${v}__`)), [columns]);
   // actual months come from the single actual source and are never typed over
-  const canEdit = useCallback((c) => (c.actual ? false : c.virtual ? monthsOf(c.version).some((m) => !m.actual && (admin || !!m.user_editable))
-    : admin || !!c.user_editable), [admin, monthsOf]);
+  const canEdit = useCallback((c) => (preview || c.actual ? false : c.virtual ? monthsOf(c.version).some((m) => !m.actual && (admin || !!m.user_editable))
+    : admin || !!c.user_editable), [admin, monthsOf, preview]);
   const downloadView = () => {
     csvDownload([visible.map((c) => c.label), ...filtered.map((r) => visible.map((c) => cellValue(r, c)))], `${dataset.key}_view.csv`);
   };
@@ -123,6 +143,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   const changedCb = useRef(onChanged);
   changedCb.current = onChanged;
   const [saving, setSaving] = useState(0);
+  const loadDraftsRef = useRef(null);
   const colType = useMemo(() => Object.fromEntries(columns.map((c) => [c.key, c.type])), [columns]);
   const asValue = (field, v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -142,7 +163,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
       const { data } = await api.patch(`/aop/datasets/${dataset.key}/rows`, batch);
       const parts = [];
       if (data.applied) parts.push(`${data.applied} saved`);
-      if (data.queued) parts.push(`${data.queued} sent for approval`);
+      if (data.queued) parts.push(`${data.queued} kept as draft — submit for approval when ready`);
       if (data.rejected?.length) parts.push(`${data.rejected.length} not allowed (${data.rejected[0].reason})`);
       setMsg({ tone: data.rejected?.length ? "warn" : "ok", text: parts.join(" · ") || "No change" });
       const keys = [...new Set(batch.map((e) => e.key))];
@@ -152,6 +173,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
         setRows((rs) => rs.map((r) => byKey[r.key] || r));
       }
       changedCb.current?.();
+      if (data.queued) loadDraftsRef.current?.();
     } catch (e) {
       queue.current = [...batch, ...queue.current]; // keep the edits; they go with the next save
       setMsg({ tone: "err", text: `Not saved yet — ${e.response?.data?.detail || e.message}. Retrying…` });
@@ -201,7 +223,28 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
     load(); onChanged?.();
   };
 
-  const editableCount = columns.filter((c) => c.user_editable).length;
+  // the user's own edits in "with approval" sections: drafts until submitted as one batch
+  const [drafts, setDrafts] = useState({ drafts: 0, submitted: 0 });
+  const loadDrafts = useCallback(() => {
+    if (admin) return;
+    api.get("/aop/changes/drafts").then((r) => setDrafts({ drafts: r.data.by_dataset?.[dataset.key] || 0, submitted: r.data.submitted || 0 })).catch(() => {});
+  }, [admin, dataset.key]);
+  useEffect(() => { loadDrafts(); }, [loadDrafts]);
+  loadDraftsRef.current = loadDrafts;
+  const submitDrafts = async () => {
+    const note = window.prompt(`Submit ${drafts.drafts} change(s) for approval? Add a note for the approver (optional):`, "");
+    if (note === null) return;
+    try {
+      const { data } = await api.post("/aop/changes/submit", { dataset: dataset.key, note });
+      setMsg({ tone: "ok", text: `Submitted ${data.count} change(s) as ${data.number} — the numbers stay yours, marked pending, until approved` });
+      loadDrafts(); load();
+    } catch (e) { setMsg({ tone: "err", text: e.response?.data?.detail || e.message }); }
+  };
+  const discardDrafts = async () => {
+    if (!window.confirm(`Discard ${drafts.drafts} unsubmitted change(s)? The approved values come back.`)) return;
+    await api.post("/aop/changes/discard", { dataset: dataset.key });
+    loadDrafts(); load();
+  };
 
   return (
     <div className="space-y-2" data-testid={`dataset-${dataset.key}`}>
@@ -218,12 +261,17 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
           <input className="input-sm pl-6 w-56" placeholder="Search key, PO, vendor, AOP code…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="ds-search" />
         </form>
         <GridSettings cols={arranged} view={view} update={updateView} reset={resetView} shared={sharedView} hasMonths={hasMonths} align="left" testid="ds-grid" />
-        <div className="seg" title="Column groups">
+        <div className="seg" title="Years: click a year to show / hide it; 12M opens that year month by month" data-testid="ds-years">
           {allGroups.map((g) => (
-            <button key={g || "details"} className={groups?.has(g) ? "on" : ""}
-                    onClick={() => setGroups((s) => { const n = new Set(s || []); n.has(g) ? n.delete(g) : n.add(g); return n; })}>
-              {groupLabel(g)}
-            </button>
+            <React.Fragment key={g || "details"}>
+              <button className={groups?.has(g) ? "on" : ""} onClick={() => toggleGroup(g)} data-testid={`ds-year-${g || "details"}`}>
+                {groupLabel(g)}
+              </button>
+              {g && groups?.has(g) && groupMonths(g) && (
+                <button className={`!px-1.5 !text-[9.5px] ${monthsOpen(view, g) ? "on" : ""}`} onClick={() => toggle12(g)}
+                        title={`${groupLabel(g)}: ${monthsOpen(view, g) ? "back to the FY total" : "show the 12 months"}`} data-testid={`ds-12m-${g}`}>12M</button>
+              )}
+            </React.Fragment>
           ))}
         </div>
         <div className="flex-1" />
@@ -242,23 +290,26 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
             <button className="icon-btn" onClick={() => doDownload("xlsx")} title="Download all rows with line ids (xlsx) — edit and upload back" data-testid="ds-download"><DownloadSimple size={14} />xlsx</button>
           </>
         )}
-        {admin && (
+        {(admin && !preview) || manage ? (
           <>
+            <button className="icon-btn" onClick={() => setShowAdd(true)} title="Add a line" data-testid="ds-add-row"><Plus size={14} /></button>
             <button className="icon-btn" onClick={() => setShowCols(true)} title="Manage columns (add fields, types, user-editable)" data-testid="ds-columns"><Columns size={14} /></button>
             <button className="icon-btn danger" disabled={!selected.size} onClick={doDelete} title="Delete selected rows"><Trash size={14} />{selected.size || ""}</button>
           </>
-        )}
+        ) : null}
       </div>
 
       <div className="flex items-center gap-3 text-[10.5px] text-[var(--muted)] min-h-[18px]">
-        {!admin && (
-          <span className="flex items-center gap-1">
-            <ClipboardText size={12} />
-            {editableCount ? `${editableCount} editable column${editableCount > 1 ? "s" : ""} (tinted) · type, or paste a block copied from Excel` : "Read-only — no editable columns for you here"}
+        {admin && !preview && <span className="flex items-center gap-1"><ClipboardText size={12} /> Admin: every cell is editable · paste blocks from Excel · Ctrl+C copies selection</span>}
+        {(drafts.drafts > 0 || drafts.submitted > 0) && <span className="flex items-center gap-1"><HourglassMedium size={11} className="text-[var(--warning)]" /> pending approval (your numbers until approved)</span>}
+        {drafts.drafts > 0 && (
+          <span className="flex items-center gap-1.5 text-[var(--text)]" data-testid="ds-drafts">
+            <b>{drafts.drafts}</b> change{drafts.drafts > 1 ? "s" : ""} not submitted
+            <button className="icon-btn primary !h-6" onClick={submitDrafts} data-testid="ds-submit">Submit for approval</button>
+            <button className="icon-btn !h-6" onClick={discardDrafts}>Discard</button>
           </span>
         )}
-        {admin && <span className="flex items-center gap-1"><ClipboardText size={12} /> Admin: every cell is editable · paste blocks from Excel · Ctrl+C copies selection</span>}
-        <span className="flex items-center gap-1"><HourglassMedium size={11} className="text-[var(--warning)]" /> pending approval</span>
+        {!drafts.drafts && drafts.submitted > 0 && <span>{drafts.submitted} change{drafts.submitted > 1 ? "s" : ""} awaiting the admin's approval</span>}
         {saving > 0 && <span className="flex items-center gap-1 text-[var(--gold)]" data-testid="ds-saving"><HourglassMedium size={11} />Saving {saving} change{saving > 1 ? "s" : ""} in the background…</span>}
         {msg && (
           <span className={`flex items-center gap-1 ml-auto ${msg.tone === "err" ? "text-[var(--danger)]" : msg.tone === "warn" ? "text-[var(--warning)]" : "text-[var(--success)]"}`}>
@@ -279,16 +330,52 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
         onCommit={onCommit}
         linkColumns={[...PO_COLUMNS, ...(HISTORY_COLUMNS[dataset.key] || [])]}
         onCellLink={openLink}
-        selectable={admin}
+        selectable={(admin && !preview) || manage}
         selected={selected}
         onSelect={setSelected}
       />
       )}
 
+      {showAdd && <AddRowDialog dataset={dataset} columns={columns} filter={filter} onClose={() => setShowAdd(false)}
+                                onDone={() => { setShowAdd(false); load(); onChanged?.(); }} />}
       {showCols && <ColumnManager dataset={dataset} columns={columns} keyFields={dataset.key_fields} onClose={() => setShowCols(false)} onSaved={load} />}
       {showUpload && <UploadDialog dataset={dataset} keyFields={dataset.key_fields} admin={admin} onClose={() => setShowUpload(false)} onDone={() => { load(); onChanged?.(); }} />}
       {po && <PoDrawer po={po} onClose={() => setPo(null)} onOpenPo={setPo} onOpenLine={(lineId, p) => { setPo(null); setHist({ lineId, po: p }); }} />}
       {hist && <PoHistoryDrawer lineId={hist.lineId} po={hist.po} onClose={() => setHist(null)} />}
     </div>
+  );
+}
+
+/** Admin: add a line — its key fields and descriptive columns; plan values are typed in the grid afterwards. */
+function AddRowDialog({ dataset, columns, filter, onClose, onDone }) {
+  const keys = dataset.key_fields || [];
+  const fields = columns.filter((c) => !isMonthCol(c) && !c.actual && c.role !== "computed" && !/__(annual|total|sum)$/.test(c.key)
+                                 && c.type !== "number" && c.type !== "percent").slice(0, 14);
+  const ordered = [...keys.map((k) => fields.find((c) => c.key === k) || { key: k, label: k }), ...fields.filter((c) => !keys.includes(c.key))];
+  const [f, setF] = useState(() => (filter ? { [filter.field]: filter.value } : {}));
+  const [err, setErr] = useState("");
+  const save = async () => {
+    try {
+      const { data } = await api.post(`/aop/datasets/${dataset.key}/rows`, [f]);
+      if (data.errors?.length) return setErr(data.errors[0].reason);
+      if (!data.added) return setErr("A line with this key already exists");
+      onDone();
+    } catch (e) { setErr(e.response?.data?.detail || e.message); }
+  };
+  return (
+    <Modal title={`Add a line · ${dataset.label}${filter ? ` · ${filter.label}` : ""}`} size="md" onClose={onClose}
+           footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={save} data-testid="add-row-save">Add</button></>}>
+      <div className="px-5 py-4 grid grid-cols-2 gap-2 text-xs">
+        {ordered.map((c) => (
+          <label key={c.key} className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-[var(--muted)]">{c.label}{keys.includes(c.key) ? " · key" : ""}</span>
+            <input className="input-sm" value={f[c.key] ?? ""} disabled={filter?.field === c.key}
+                   onChange={(e) => setF({ ...f, [c.key]: e.target.value })} data-testid={`add-${c.key}`} />
+          </label>
+        ))}
+        <div className="col-span-2 text-[var(--muted)]">{keys.length ? `Unique key: ${keys.join(" + ")}` : "A line id is assigned automatically"} · enter the months / FY values in the grid after adding.</div>
+        {err && <div className="col-span-2 text-[var(--danger)]">{String(err)}</div>}
+      </div>
+    </Modal>
   );
 }

@@ -10,6 +10,7 @@ const pct = (v) => (v === null || v === undefined || v === "" ? "—" : `${(Numb
 
 /** One SAP PO: items (INR, deduped), GRN and invoices, the lines it is linked to, triage, open changes and corrections. */
 export default function PoDrawer({ po, onClose, onOpenPo, onOpenLine }) {
+  const isAdmin = window.location.pathname.startsWith("/admin"); // mapping and corrections are admin work
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -35,8 +36,8 @@ export default function PoDrawer({ po, onClose, onOpenPo, onOpenLine }) {
             <div className="text-[10px] tracking-overline text-[var(--muted)]">Purchase order</div>
             <div className="font-semibold font-mono">{po}</div>
           </div>
-          <button className="icon-btn" onClick={flag} title="Flag this PO for correction in SAP" data-testid="po-flag-correction"><Flag size={13} />Flag for correction</button>
-          <a className="icon-btn" href={`${reviewBase()}?tab=to-map&po=${encodeURIComponent(po)}`} title="Open the To map form for this PO"><MapPin size={13} />Map</a>
+          {isAdmin && <button className="icon-btn" onClick={flag} title="Flag this PO for correction in SAP" data-testid="po-flag-correction"><Flag size={13} />Flag for correction</button>}
+          {isAdmin && <a className="icon-btn" href={`${reviewBase()}?tab=to-map&po=${encodeURIComponent(po)}`} title="Open the To map form for this PO"><MapPin size={13} />Map</a>}
           <button className="icon-btn" onClick={onClose} title="Close"><X size={14} /></button>
         </div>
         <div className="overflow-auto p-4 space-y-4 text-xs">

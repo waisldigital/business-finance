@@ -1,5 +1,6 @@
 // Grid view state shared by dataset screens and report tables: column order / visibility, pivot levels,
-// sorting, Excel-style column filters and the 12-month toggle. Saved per viewer and per grid in localStorage.
+// sorting, Excel-style column filters and the 12-month toggle. Saved per viewer and per grid — on the server (so a
+// layout follows the user to any browser) with a localStorage copy for an instant first paint.
 import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { usePersistentState } from "@/lib/usePersistentState";
@@ -16,7 +17,9 @@ export const versionLabel = (v) => {
 export const isNumeric = (c) => ["number", "money", "percent"].includes(c.type) || isMonthCol(c) || c.numeric;
 
 // pivot defaults follow Excel's tabular layout: no subtotal rows, item labels repeated on every line
-const DEFAULT_VIEW = { order: null, hidden: [], pivot: 0, subtotals: false, repeatLabels: true, filtersOn: false, twelveM: false, sort: null, filters: {} };
+// twelveM: true (every FY's months), false, or {<version>: true} for the FYs opened month by month; groupsOff: FY blocks hidden
+const DEFAULT_VIEW = { order: null, hidden: [], pivot: 0, subtotals: false, repeatLabels: true, filtersOn: false, twelveM: false, sort: null, filters: {}, groupsOff: null };
+export const monthsOpen = (view, v) => view.twelveM === true || !!(view.twelveM && typeof view.twelveM === "object" && view.twelveM[v]);
 
 // ------------------------------------------------------------------ admin default views (shared by every viewer)
 // The admin can save any grid's / report's current layout as everyone's default (server: /aop/views). A viewer
@@ -45,7 +48,7 @@ export function useSharedView(key) {
   return v;
 }
 
-const SHARED_FIELDS = ["order", "hidden", "pivot", "subtotals", "repeatLabels", "filtersOn", "twelveM", "sort", "period",
+const SHARED_FIELDS = ["order", "hidden", "pivot", "subtotals", "repeatLabels", "filtersOn", "twelveM", "groupsOff", "sort", "filters", "period",
   "measures", "segments", "variance", "subs", "section", "view", "selected"];
 
 export async function saveSharedView(key, view) {
@@ -63,6 +66,36 @@ export async function clearSharedView(key) {
   notify();
 }
 
+// ------------------------------------------------------------------ the viewer's own views (server copy)
+let mine = null;
+let minePending = null;
+const mineListeners = new Set();
+const saveTimers = {};
+
+let mineUser = null;
+const who = () => { try { return localStorage.getItem("fs_token") || ""; } catch { return ""; } };
+
+export function loadMyViews() {
+  if (mineUser !== who()) { mine = null; minePending = null; mineUser = who(); } // signed in as someone else
+  if (!minePending) {
+    minePending = api.get("/aop/my-views").then((r) => { mine = r.data || {}; mineListeners.forEach((f) => f(mine)); return mine; })
+      .catch(() => { mine = mine || {}; return mine; });
+  }
+  return minePending;
+}
+
+function saveMyView(key, view) {
+  mine = { ...(mine || {}), [key]: view };
+  clearTimeout(saveTimers[key]);
+  saveTimers[key] = setTimeout(() => api.put(`/aop/my-views/${encodeURIComponent(key)}`, view).catch(() => {}), 800);
+}
+
+function clearMyView(key) {
+  if (mine) { const n = { ...mine }; delete n[key]; mine = n; }
+  clearTimeout(saveTimers[key]);
+  api.delete(`/aop/my-views/${encodeURIComponent(key)}`).catch(() => {});
+}
+
 /**
  * View state for one grid: the code default, overlaid with the admin's default for everyone, overlaid with the
  * viewer's own changes (kept in localStorage). reset() drops the viewer's changes → back to the admin default.
@@ -71,7 +104,21 @@ export async function clearSharedView(key) {
 export function useGridView(storageKey, defaults = {}) {
   const init = { ...DEFAULT_VIEW, ...defaults };
   const sharedView = useSharedView(storageKey);
-  const [local, setLocal, reset] = usePersistentState(storageKey, null); // the viewer's own changes (null = none)
+  const [local, setLocalRaw, resetLocal] = usePersistentState(storageKey, null); // the viewer's own changes (null = none)
+  // the server copy wins when the grid opens (another browser may have changed it)
+  useEffect(() => {
+    let alive = true;
+    const apply = (all) => {
+      if (!alive || !all) return;
+      if (storageKey in all) setLocalRaw(all[storageKey]);
+      else if (local) saveMyView(storageKey, local); // a layout kept only in this browser so far: keep it on the server
+    };
+    if (mine && mineUser === who()) apply(mine); else loadMyViews().then(apply);
+    mineListeners.add(apply);
+    return () => { alive = false; mineListeners.delete(apply); };
+  }, [storageKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setLocal = (fn) => setLocalRaw((cur) => { const v = typeof fn === "function" ? fn(cur) : fn; if (v) saveMyView(storageKey, v); return v; });
+  const reset = () => { resetLocal(); clearMyView(storageKey); };
   const base = { ...init, ...(sharedView || {}) };
   const view = local ? { ...base, ...local } : base;
   const update = (patch) => setLocal((cur) => {
@@ -92,14 +139,14 @@ export function useGridView(storageKey, defaults = {}) {
  */
 export function arrangeColumns(columns, view) {
   let cols = columns.filter((c) => !c.hidden);
-  if (!view.twelveM) {
+  if (view.twelveM !== true) { // a FY whose 12M is off folds into one total column
     const out = [];
     const seen = new Set();
     // a version with an editable FY column (<VER>__annual, e.g. the departments' FY'28 budget) shows that column
     // instead of a read-only sum of its months
     const annual = new Set(cols.filter((c) => /__annual$/.test(c.key)).map((c) => c.key.split("__")[0]));
     for (const c of cols) {
-      if (isMonthCol(c)) {
+      if (isMonthCol(c) && !monthsOpen(view, versionOf(c))) {
         const v = versionOf(c);
         if (!seen.has(v)) {
           seen.add(v);
