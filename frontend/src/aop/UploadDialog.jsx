@@ -64,13 +64,20 @@ export default function UploadDialog({ dataset, keyFields = [], onClose, onDone,
         {result && (
           <div className="border border-[var(--border)] p-2 space-y-1" data-testid="upload-result">
             <div className="flex gap-3 font-semibold">
-              <span className="text-[var(--success)]">+{result.added} added</span>
-              <span>{result.updated} updated</span>
-              <span className="text-[var(--muted)]">{result.skipped} skipped</span>
+              {"mapping" in result ? <>
+                <span className="text-[var(--success)]">{result.mapping} mapping change(s)</span>
+                <span>{result.correction} correction(s)</span>
+                <span className="text-[var(--muted)]">{result.rows} rows read{result.unknown_rows ? ` · ${result.unknown_rows} not in the ZMM` : ""}</span>
+              </> : <>
+                <span className="text-[var(--success)]">+{result.added} added</span>
+                <span>{result.updated} updated</span>
+                <span className="text-[var(--muted)]">{result.skipped} skipped</span>
+              </>}
               {!!result.errors?.length && <span className="text-[var(--danger)]">{result.errors.length} errors</span>}
             </div>
             {!!result.new_columns?.length && <div className="text-[var(--muted)]">New columns added: {result.new_columns.join(", ")}</div>}
             {result.errors?.slice(0, 8).map((e, i) => <div key={i} className="text-[var(--danger)]">Row {e.row}: {e.reason}</div>)}
+            {result.rejected?.slice(0, 8).map((e, i) => <div key={`r${i}`} className="text-[var(--danger)]">{e.key} · {e.field}: {e.reason}</div>)}
           </div>
         )}
       </div>

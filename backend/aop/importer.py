@@ -902,7 +902,8 @@ def import_opex_workbook(path_or_file, plan: str = "FY27") -> Result:
         f.pop("_months", None)
         f.pop("_sno", None)
         n = f.pop("_row")
-        text = next((extra[c] for c in LINK_TEXT_COLUMNS if extra.get(c) not in (None, "")), None)
+        typed = f.pop("mapped_pos", None)
+        text = next((extra[c] for c in LINK_TEXT_COLUMNS if extra.get(c) not in (None, "")), typed)
         toks, rest = parse_po_tokens(text)
         for po, mat in toks:
             text_links.append({"line_id": lid, "po": po, "material": mat, "po_item": None, "alloc_pct": None,

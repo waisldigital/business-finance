@@ -89,6 +89,8 @@ OPEX_LINE_COLUMNS: List[Dict[str, Any]] = [
     C("latest_pr", "New PR", role="computed", match=["New PR"], editable=False),
     C("previous_po", "Old PO No.", role="computed", match=["Old PO No."], editable=False),
     C("latest_po", "New PO No.", role="computed", match=["New PO No."], editable=False),
+    C("mapped_pos", "New PO(s) mapped", role="mapping",
+      aliases=["New PO(s) mapped (ZMM)", "New PO No. (SAP)", "Mapped new PO(s)", "New PO(s)"]),
     C("latest_po_supplier", "Latest PO supplier", role="computed", editable=False),
     C("latest_po_value_inr", "Latest PO amount (INR)", "number", role="computed", editable=False),
     C("latest_po_start", "Latest PO service start", "date", role="computed", editable=False),
@@ -238,8 +240,10 @@ def meta_columns(dataset: str, cfg: Dict[str, Any], existing: Optional[List[Dict
         old = prev.get(c["key"])
         if old:
             col.update({k: old[k] for k in ("hidden", "width") if k in old})
-            if old.get("user_editable") is not None and c.get("role") not in ("computed", "system", "key"):
+            if old.get("user_editable") is not None and c.get("role") not in ("computed", "system", "key", "mapping"):
                 col["user_editable"] = old["user_editable"]
+        if c.get("role") == "mapping":  # the PO mapping is admin work
+            col["user_editable"] = False
         out.append(col)
     if dataset == "opex_lines":
         out = grid_order(out)
@@ -263,7 +267,7 @@ GRID_BLOCKS = [
     ["line_id", "aop_code", "category", "category2", "tag", "geo", "region", "grouping", "airport_type", "bau_growth",
      "retro_location", "project_id", "project_name", "wbs", "wbs_l1", "wbs_desc", "wbs_l1_desc", "cost_centre", "gl_code",
      "gl_name", "nature_of_expense", "recurring", "package_l1", "package_l2", "package_l3"],
-    ["latest_po", "latest_po_supplier", "latest_po_value_inr", "latest_po_start", "latest_po_end", "latest_pr",
+    ["latest_po", "mapped_pos", "latest_po_supplier", "latest_po_value_inr", "latest_po_start", "latest_po_end", "latest_pr",
      "previous_po", "previous_po_supplier", "previous_po_value_inr", "previous_po_start", "previous_po_end"],
     ["po", "po_date", "supplier_code", "supplier_name", "vendor_code", "vendor", "po_description", "material_type", "material",
      "material_description", "po_start", "po_end", "tech_refresh_date", "qty", "rate", "currency", "po_amount_doc",

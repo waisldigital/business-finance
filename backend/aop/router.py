@@ -41,6 +41,7 @@ from . import opex_schema
 from . import po as PO
 from .po_pipeline import PO_META, OpexEngine, notify_zmm
 from .review import register_review
+from .mapping import Mapping, MAPPING_FIELD, REGISTER_FIELDS, REGISTER_LINES_FIELD
 from .plan import build_draft, default_drivers
 from . import reports as rep
 from .pnl import Filters, PnLEngine
@@ -253,8 +254,26 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         if dataset in PO_META:
             known = {c["key"] for c in PO_META[dataset]}
             prev = {c["key"]: c for c in stored}
-            return [{**c, **{k: prev[c["key"]][k] for k in ("hidden", "width") if c["key"] in prev and k in prev[c["key"]]}}
+            return [{**c, **{k: prev[c["key"]][k] for k in ("hidden", "width") if c["key"] in prev and k in prev[c["key"]]},
+                     **({"user_editable": False} if dataset == "po_items" else {})}  # mapping / corrections: admin work
                     for c in PO_META[dataset]] + [c for c in stored if c.get("custom") and c["key"] not in known]
+        if dataset == "po_register":  # as uploaded; the mapping and the correctable SAP columns are editable
+            if not stored:
+                seen: Dict[str, None] = {}
+                async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "fields": 1}).limit(200):
+                    for k in (d.get("fields") or {}):
+                        seen.setdefault(k, None)
+                stored = [column(k, k.replace("_", " ").capitalize()) for k in seen]
+            keys = {c["key"] for c in stored}
+            if REGISTER_LINES_FIELD not in keys:
+                stored = stored + [column(REGISTER_LINES_FIELD, "Linked Forecast S.No")]
+            if "corrected" not in keys:
+                stored = stored + [column("corrected", "Corrected (SAP → used)")]
+            out = []
+            for c in stored:
+                ed = c["key"] in REGISTER_FIELDS or c["key"] == REGISTER_LINES_FIELD
+                out.append({**c, "user_editable": False, "role": "input" if ed else "computed"})
+            return out
         return stored
 
     async def draft_version() -> str:
@@ -335,6 +354,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         return fx_rate(data, currency, [cfg["plan_fy"], cfg["base_fy"]])
 
     engine = OpexEngine(db, get_config, fx_for, storage=storage, bump=bump_version)
+    mapper = Mapping(db, engine)
 
     async def recalc_tracker(keys: Optional[List[str]] = None):
         """Resolve the PO links and recompute the forecast months and PO display fields of tracker lines (all lines
@@ -632,6 +652,10 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                     fc = sum(float(f.get(k) or 0) for k in f if k.startswith(f"F{plan}__"))
                     basis = fc if fc else float(f.get(f"B{plan}__annual") or 0)
                     f[f"{T}__annual"] = round(basis * (1 + f["increment_pct"]), 2)
+        if dataset in OPEX_DATASETS and docs:  # the PO mapping, editable here as on the ZMM sheet and PO links
+            await mapper.decorate_lines(dataset, docs)
+        if dataset in ("po_items", "po_register") and docs:  # linked lines and corrections on the ZMM sheet
+            await mapper.decorate_items(dataset, docs)
         if dataset in OPEX_DATASETS and docs:  # computed columns (YTD, totals, variance, bridge check)
             cfg = await get_config()
             acts = await opex_actuals([d["key"] for d in docs]) if dataset == "opex_lines" else {}
@@ -643,11 +667,15 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         idx: Dict[str, List[tuple]] = {}
         async for d in db.aop_rows.find({"dataset": "opex_tracker"}, {"_id": 0, "key": 1, "fields": 1}):
             f = d.get("fields") or {}
+            idx.setdefault("\x00" + d["key"], []).append((d["key"], f))
             if f.get("po") not in (None, "") and not f.get("parent_line_id"):
                 idx.setdefault(str(f["po"]), []).append((d["key"], f))
         return idx
 
     def pick_tracker(f: Dict[str, Any], idx: Dict[str, List[tuple]]) -> Optional[tuple]:
+        own = idx.get("\x00" + str(f.get("tracker_line_id") or ""))
+        if own:  # set when the line was mapped from the Opex sheet
+            return own[0]
         cands = idx.get(str(f.get("po") or ""), [])
         if not cands:
             return None
@@ -727,9 +755,21 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         ensure_ds(dataset)
         if dataset == ACTUALS:
             require_admin(user)
+        if dataset in ("po_items", "po_register"):
+            return await sheet_edits(dataset, edits, user)
         if dataset in READONLY_DATASETS:
             raise HTTPException(400, "This dataset is written by the ZMM run — change it through Review")
         p = await perms_for(user)
+        if dataset in OPEX_DATASETS and any(str(e.get("field")) == MAPPING_FIELD for e in edits):
+            mine = [e for e in edits if str(e.get("field")) == MAPPING_FIELD]
+            res = await line_mapping_edits(dataset, mine, user) if p["admin"] else \
+                {"applied": 0, "queued": 0, "mode": "direct",
+                 "rejected": [{"key": e.get("key"), "field": MAPPING_FIELD, "reason": "the PO mapping is set by an administrator"} for e in mine]}
+            rest = [e for e in edits if str(e.get("field")) != MAPPING_FIELD]
+            if not rest:
+                return res
+            out = await edit_cells(dataset, rest, user)
+            return {**out, "applied": out["applied"] + res["applied"], "rejected": res["rejected"] + out["rejected"]}
         if not await can(user, dataset, "edit"):
             raise HTTPException(403, "You don't have edit rights on this section")
         cols = {c["key"]: c for c in await columns_with_draft(dataset)}
@@ -787,6 +827,82 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             await write_audit(db, entity_type="aop_rows", entity_id=dataset, action="edit", user=user,
                               field_changes={"cells": applied})
         return {"applied": applied, "queued": queued, "rejected": rejected, "mode": mode}
+
+    async def line_mapping_edits(dataset: str, edits: List[Dict[str, Any]], user: dict) -> Dict[str, Any]:
+        """Opex sheet "New PO(s) mapped" → po_links of the line's tracker line (created for an Opex line without one)."""
+        by = user.get("email") or "admin"
+        applied, rejected = 0, []
+        for e in edits[:5000]:
+            key = str(e.get("key") or "")
+            doc = await db.aop_rows.find_one({"dataset": dataset, "key": key}, {"_id": 0, "fields": 1})
+            if not doc:
+                rejected.append({"key": key, "field": MAPPING_FIELD, "reason": "row not found"}); continue
+            lid = key if dataset == "opex_tracker" else await mapper.tracker_for_opex(key, doc.get("fields") or {}, by)
+            await mapper.set_line_mapping(lid, e.get("value"), by)
+            applied += 1
+        if applied:
+            await recalc_tracker()
+            await bump_version()
+            await write_audit(db, entity_type="po_links", entity_id=dataset, action="map", user=user, field_changes={"lines": applied})
+        return {"applied": applied, "queued": 0, "rejected": rejected, "mode": "direct"}
+
+    async def sheet_edits(dataset: str, edits: List[Dict[str, Any]], user: dict) -> Dict[str, Any]:
+        """ZMM sheet cells: "Opex line(s)" maps the PO item; a correctable SAP column becomes a correction (SAP's value
+        is kept, the typed one is used until SAP is fixed)."""
+        require_admin(user)
+        by = user.get("email") or "admin"
+        applied, rejected, kinds = 0, [], {"mapping": 0, "correction": 0}
+        for e in edits[:5000]:
+            key, fld = str(e.get("key") or ""), str(e.get("field") or "")
+            try:
+                kinds[await mapper.sheet_edit(dataset, key, fld, e.get("value"), by)] += 1
+                applied += 1
+            except ValueError as ex:
+                rejected.append({"key": key, "field": fld, "reason": str(ex)})
+        if applied:
+            await recalc_tracker()
+            await bump_version()
+            await write_audit(db, entity_type="aop_rows", entity_id=dataset, action="zmm_sheet_edit", user=user, field_changes=kinds)
+        return {"applied": applied, "queued": 0, "rejected": rejected, "mode": "direct", **kinds}
+
+    async def sheet_upload(dataset: str, content: bytes, filename: str, user: dict) -> Dict[str, Any]:
+        """The ZMM sheet downloaded, edited in Excel and uploaded back: changed "Opex line(s)" cells map, changed SAP
+        columns become corrections. Rows are matched on PO + item; nothing else is changed (the ZMM itself is
+        replaced only by the ZMM upload under Imports)."""
+        require_admin(user)
+        cols = await columns_with_draft(dataset)
+        editable = [c["key"] for c in cols if c.get("role") == "input"]
+        incoming = read_table(content, filename, cols)
+        po_k, it_k = ("po", "item") if dataset == "po_items" else ("purchase_order", "purchase_order_item")
+        docs = [d async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1}).sort("seq", 1)]
+        await mapper.decorate_items(dataset, docs)
+        by_item: Dict[tuple, Dict[str, Any]] = {}
+        for d in docs:
+            f = d.get("fields") or {}
+            by_item.setdefault((str(f.get(po_k)), str(f.get(it_k) or "")), d)
+        edits, unknown = [], 0
+        for raw in incoming:
+            po, it = PO.po_str(raw.get(po_k)), PO.po_str(raw.get(it_k)) or ""
+            d = by_item.get((str(po), str(it)))
+            if not d:
+                unknown += 1
+                continue
+            cur = d.get("fields") or {}
+            for k in editable:
+                if k not in raw:
+                    continue
+                new, old = raw.get(k), cur.get(k)
+                if new in (None, "") and old in (None, ""):
+                    continue
+                if str(new if new is not None else "").strip() == str(old if old is not None else "").strip():
+                    continue
+                if isinstance(new, (int, float)) and isinstance(old, (int, float)) and abs(float(new) - float(old)) < 0.005:
+                    continue
+                if hasattr(new, "isoformat") and str(old or "")[:10] == new.isoformat()[:10]:
+                    continue
+                edits.append({"key": d["key"], "field": k, "value": new})
+        res = await sheet_edits(dataset, edits, user)
+        return {**res, "rows": len(incoming), "unknown_rows": unknown}
 
     @r.post("/datasets/{dataset}/rows")
     async def add_rows(dataset: str, new_rows: List[Dict[str, Any]] = Body(...), user: dict = Depends(get_current_user)):
@@ -917,6 +1033,8 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             raise HTTPException(403, "Bulk upload needs the upload permission for this section — ask an administrator")
         if mode == "replace" and user.get("role") != "admin":
             raise HTTPException(403, "Only an administrator can replace a whole dataset")
+        if dataset in ("po_items", "po_register"):
+            return await sheet_upload(dataset, await file.read(), file.filename or "upload.xlsx", user)
         if dataset in READONLY_DATASETS:
             raise HTTPException(400, "This dataset is written by the ZMM run — upload the ZMM report under Imports")
         content = await file.read()
@@ -969,6 +1087,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         existing = {d["key"]: d.get("fields") or {} async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1})}
         cut = (cfg.get("cutoffs") or {}).get("default") or ""
         incoming, acts = [], []
+        mapping_in: Dict[str, Any] = {}
         auto_n = 0
         for f in parsed["lines"]:
             months = f.pop("_months", {})
@@ -979,6 +1098,9 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             if not f.get("line_id") and mode != "modify":  # new line: its id now, so its booked months can follow it
                 auto_n += 1
                 f["line_id"] = f"{SPECS[dataset].auto_prefix}-N{datetime.now().strftime('%y%m%d%H%M%S')}{auto_n:04d}"
+            if f.get(MAPPING_FIELD) not in (None, "") and f.get("line_id"):  # the mapping goes to po_links, not onto the line
+                mapping_in[f["line_id"]] = f.pop(MAPPING_FIELD)
+            f.pop(MAPPING_FIELD, None)
             po = f.get("po")
             if po in zmm_pos:
                 old = existing.get(f.get("line_id") or "", {})
@@ -1010,10 +1132,28 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                                                 {"$set": {"domain": "opex", "ref": lid, "period": per, "amount": float(amt),
                                                           "dims": dims, "source": "upload", "uid": f"opex|{lid}|{per}"}}, upsert=True)
             await bump_version()
-        if dataset == "opex_tracker":
+        mapped = 0
+        if mapping_in and user.get("role") == "admin":
+            by = user.get("email") or "admin"
+            current = await mapper.text_by_line()
+            for k, text in mapping_in.items():
+                doc = await db.aop_rows.find_one({"dataset": dataset, "key": k}, {"_id": 0, "fields": 1})
+                if not doc:
+                    continue
+                lid = k if dataset == "opex_tracker" else await mapper.tracker_for_opex(k, doc.get("fields") or {}, by)
+                if str(current.get(lid) or "") == str(text).strip():
+                    continue
+                try:
+                    await mapper.set_line_mapping(lid, text, by, source="Opex sheet upload")
+                    mapped += 1
+                except ValueError as e:
+                    warnings.append(f"{k}: {e}")
+        elif mapping_in:
+            warnings.append("New PO(s) mapped: the mapping is set by an administrator — ignored")
+        if dataset == "opex_tracker" or mapped:
             await recalc_tracker()
         res.update(ignored_columns=parsed["ignored"], dropped_columns=parsed["dropped"], warnings=warnings[:200],
-                   header_row=parsed["header_row"])
+                   header_row=parsed["header_row"], mapped_lines=mapped)
         return res
 
     async def upsert_actuals(incoming: List[Dict[str, Any]], mode: str, user: dict):
@@ -1073,6 +1213,10 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             if dataset == ACTUALS:
                 async for d in db.aop_actuals.find({}, {"_id": 0}):
                     rows_iter.append([(d.get("dims") or {}).get(k[5:]) if k.startswith("dims.") else d.get(k) for k in keys])
+            elif dataset in ("po_items", "po_register"):  # with the mapping and the corrections, so it round-trips
+                docs = [d async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1}).sort("seq", 1)]
+                await mapper.decorate_items(dataset, docs)
+                rows_iter = [[(d.get("fields") or {}).get(k) for k in keys] for d in docs]
             else:
                 scope = (await perms_for(user)).get("departments")
                 async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "fields": 1}).sort("seq", 1):
@@ -1109,6 +1253,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         if not template:
             acts = await opex_actuals() if dataset == "opex_lines" else {}
             idx = await tracker_index() if dataset == "opex_lines" else {}
+            map_text = await mapper.text_by_line()
             scope = (await perms_for(user)).get("departments")
             async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1}).sort("seq", 1):
                 f = d.get("fields") or {}
@@ -1117,6 +1262,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                 f = {**f, **opex_schema.derive(f, dataset, cfg, acts.get(d["key"]))}
                 if dataset == "opex_lines":
                     apply_tracker(f, pick_tracker(f, idx), "F" + cfg["plan_fy"][2:] + "__")
+                f[MAPPING_FIELD] = map_text.get(str(f.get("tracker_line_id") if dataset == "opex_lines" else d["key"]))
                 rows_out.append([f.get(c["key"]) for c in lay])
         name = f"{dataset}{'_template' if template else ''}"
         if fmt == "csv":
@@ -1258,17 +1404,26 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         await engine.bulk_set("opex_tracker", st_upd, by=user.get("email"))
         if unknown_lines:
             res.rejected.append(f"Links to lines not in the tracker: {', '.join(sorted(unknown_lines)[:30])}")
-        zmm = None
+        zmm = harvest = None
         if res.has_zmm:
             last = await db.aop_rows.find_one({"dataset": "zmm_runs", "fields.status": "processed"}, {"_id": 0, "fields": 1},
                                               sort=[("fields.processed_at", -1)])
-            zmm = await engine.run_zmm_pipeline(workbook_bytes, file.filename, "workbook", by=user.get("email"))
-            if last and zmm.get("snapshot") and (last["fields"].get("snapshot") or "") > zmm["snapshot"]:
-                res.warnings.append("The workbook's ZMM sheet is older than the stored snapshot")
+            from .jobs.fetch_zmm import snapshot_of
+            snap = snapshot_of(workbook_bytes)
+            if last and (last["fields"].get("snapshot") or "") > (snap or ""):
+                # a newer SAP report is loaded: keep it; take only the mapping and the corrections from this sheet
+                harvest = await engine.harvest_workbook_zmm(workbook_bytes, user.get("email") or "admin")
+                res.warnings.append(f"The workbook's ZMM sheet ({snap}) is older than the loaded ZMM "
+                                    f"({last['fields'].get('snapshot')}) — kept the loaded one; took {harvest['links']} "
+                                    f"link(s) and {harvest['corrections']} correction(s) from the sheet")
+                await recalc_tracker()
+            else:
+                zmm = await engine.run_zmm_pipeline(workbook_bytes, file.filename, "workbook", by=user.get("email"))
         else:
             await recalc_tracker()
         await bump_version()
-        counts = {"opex_tracker": len(res.datasets["opex_tracker"]["rows"]), "po_links": len(link_upd), "line_status": len(st_upd)}
+        counts = {"opex_tracker": len(res.datasets["opex_tracker"]["rows"]), "po_links": len(link_upd), "line_status": len(st_upd),
+                  **({"zmm_links": harvest["links"], "zmm_corrections": harvest["corrections"]} if harvest else {})}
         await db.aop_imports.insert_one({"id": gen_id(), "kind": "opex", "file": file.filename, "at": now_iso(), "by": user.get("email"),
                                          "meta": res.meta, "warnings": res.warnings, "rejected": res.rejected, "counts": counts})
         await write_audit(db, entity_type="aop_import", entity_id="opex", action="import", user=user,
