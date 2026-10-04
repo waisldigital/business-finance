@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import api from "@/lib/api";
 import {
   MagnifyingGlass, CaretLeft, CaretRight, Columns, UploadSimple, DownloadSimple, Trash, ArrowClockwise,
-  ClipboardText, HourglassMedium, CheckCircle, WarningCircle, Plus,
+  ClipboardText, HourglassMedium, CheckCircle, WarningCircle, Plus, CalendarBlank, CaretDown,
 } from "@phosphor-icons/react";
 import DataGrid from "./DataGrid";
 import PivotTable from "./PivotTable";
@@ -16,6 +16,7 @@ import PoDrawer, { reviewBase } from "./PoDrawer";
 import PoHistoryDrawer from "./PoHistoryDrawer";
 import { download } from "./format";
 import Modal from "@/components/common/Modal";
+import Popover from "@/components/common/Popover";
 
 const PO_COLUMNS = ["po", "latest_po", "previous_po", "merged_into_po", "purchase_order", "linked_old_po", "linked_forecast_s_no", "dims.po"];
 // clicks that open a line's PO history instead of a single PO
@@ -108,6 +109,13 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
     off.has(g) ? off.delete(g) : off.add(g);
     return { groupsOff: [...off] };
   });
+  const periodSummary = useMemo(() => {
+    const on = allGroups.filter((g) => g && groups?.has(g));
+    if (!on.length) return "Period";
+    const m = on.filter((g) => monthsOpen(view, g)).map(groupLabel);
+    const years = on.length <= 2 ? on.map(groupLabel).join(", ") : `${on.length === allGroups.filter(Boolean).length ? "All " : ""}${on.length} years`;
+    return `${years}${m.length ? ` · 12M ${m.join(", ")}` : ""}`;
+  }, [allGroups, groups, view]);
   const groupMonths = (g) => columns.some((c) => isMonthCol(c) && c.group === g);
   const toggle12 = (g) => updateView((v) => {
     const cur = v.twelveM === true ? Object.fromEntries(allGroups.filter(groupMonths).map((x) => [x, true])) : { ...(v.twelveM || {}) };
@@ -261,19 +269,37 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
           <input className="input-sm pl-6 w-56" placeholder="Search key, PO, vendor, AOP code…" value={q} onChange={(e) => setQ(e.target.value)} data-testid="ds-search" />
         </form>
         <GridSettings cols={arranged} view={view} update={updateView} reset={resetView} shared={sharedView} hasMonths={hasMonths} align="left" testid="ds-grid" />
-        <div className="seg" title="Years: click a year to show / hide it; 12M opens that year month by month" data-testid="ds-years">
+        <Popover align="left" panelClassName="mt-1 z-50 w-64 bg-[var(--surface)] border border-[var(--border)] shadow-lg text-xs" panelTestid="ds-years-panel"
+                 button={(open, toggle) => (
+                   <button className={`icon-btn ${open ? "!border-[var(--gold)] !text-[var(--gold)]" : ""}`} onClick={toggle} data-testid="ds-years"
+                           title="Periods: which years are shown, and which open month by month (12M)">
+                     <CalendarBlank size={13} />
+                     <span className="max-w-[260px] truncate">{periodSummary}</span>
+                     <CaretDown size={10} />
+                   </button>
+                 )}>
+          <div className="px-3 py-1.5 border-b border-[var(--border)] text-[10px] tracking-overline text-[var(--muted)] flex items-center">
+            <span className="flex-1">Period</span><span className="w-10 text-center">12M</span>
+          </div>
           {allGroups.map((g) => (
-            <React.Fragment key={g || "details"}>
-              <button className={groups?.has(g) ? "on" : ""} onClick={() => toggleGroup(g)} data-testid={`ds-year-${g || "details"}`}>
-                {groupLabel(g)}
-              </button>
-              {g && groups?.has(g) && groupMonths(g) && (
-                <button className={`!px-1.5 !text-[9.5px] ${monthsOpen(view, g) ? "on" : ""}`} onClick={() => toggle12(g)}
-                        title={`${groupLabel(g)}: ${monthsOpen(view, g) ? "back to the FY total" : "show the 12 months"}`} data-testid={`ds-12m-${g}`}>12M</button>
-              )}
-            </React.Fragment>
+            <div key={g || "details"} className="flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--row-hover)]">
+              <label className="flex-1 flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" className="accent-[var(--gold)]" checked={!!groups?.has(g)} onChange={() => toggleGroup(g)} data-testid={`ds-year-${g || "details"}`} />
+                <span className={groups?.has(g) ? "font-semibold" : "text-[var(--muted)]"}>{groupLabel(g)}</span>
+              </label>
+              <span className="w-10 flex justify-center">
+                {g && groupMonths(g) && (
+                  <input type="checkbox" className="accent-[var(--gold)]" disabled={!groups?.has(g)} checked={monthsOpen(view, g)}
+                         onChange={() => toggle12(g)} title={`${groupLabel(g)}: show the 12 months`} data-testid={`ds-12m-${g}`} />
+                )}
+              </span>
+            </div>
           ))}
-        </div>
+          <div className="px-3 py-1.5 border-t border-[var(--border)] flex items-center gap-2">
+            <button className="underline text-[var(--muted)]" onClick={() => updateView({ groupsOff: [] })}>All years</button>
+            <button className="underline text-[var(--muted)]" onClick={() => updateView({ twelveM: false })}>All as FY totals</button>
+          </div>
+        </Popover>
         <div className="flex-1" />
         <span className="text-[11px] text-[var(--muted)] tabular-nums">
           {total ? (filtered.length !== rows.length ? `${filtered.length.toLocaleString("en-IN")} of ${total.toLocaleString("en-IN")} (filtered)` :
