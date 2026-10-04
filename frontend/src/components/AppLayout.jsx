@@ -8,7 +8,7 @@ import { usePermissions } from "@/lib/permissions";
 import {
   Database, UploadSimple, GavelIcon, ClockCounterClockwise, SignOut, Truck, UserCircle, Palette,
   Gear, CaretDoubleLeft, CaretDoubleRight, Table, Gauge, FileArrowUp, CheckSquareOffset,
-  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple, CaretDown, CaretRight, ListChecks,
+  PresentationChart, Stamp, ListMagnifyingGlass, GearSix, LockSimple, CaretDown, CaretRight, ListChecks, SquaresFour,
 } from "@phosphor-icons/react";
 import { useApprovalsInbox } from "@/lib/approvals";
 import { useReviewBadge } from "@/lib/review";
@@ -37,6 +37,7 @@ const USER_NAV = [
 const ADMIN_NAV = [
   { title: "AOP administration", items: [
     { to: "/admin",               label: "Overview",      icon: Gauge,           testid: "sidebar-admin-home", end: true },
+    { to: "/admin/aop/sections",  label: "AOP sections",  icon: SquaresFour,     testid: "sidebar-admin-sections" },
     { to: "/admin/aop/data",      label: "Data manager",  icon: Database,        testid: "sidebar-admin-data" },
     { to: "/admin/aop/imports",   label: "Imports",       icon: FileArrowUp,     testid: "sidebar-admin-imports" },
     { to: "/admin/aop/approvals", label: "AOP approvals", icon: CheckSquareOffset, testid: "sidebar-admin-aop-approvals" },
@@ -81,7 +82,7 @@ export default function AppLayout({ children, portal = "app" }) {
 
   const asideWidth = collapsed ? "w-16" : "w-64";
   const inbox = useApprovalsInbox({ enabled: portal === "app" });
-  const reviewOk = portal === "admin" || !!permissions?.aop_review?.can_view || !!permissions?.aop_opex?.can_edit;
+  const reviewOk = portal === "admin"; // PO mapping and corrections are admin work
   const reviewBadge = useReviewBadge({ enabled: reviewOk });
   const onApprovals = typeof window !== "undefined" && window.location.pathname.startsWith("/app/approvals");
   const canSee = (n) => {

@@ -187,7 +187,7 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
                   return (
                     <td key={c.key} data-cell={`${r}-${ci}`} className={cls}
                         style={{ left: ci === 0 ? (selectable ? 28 : 0) : undefined }}
-                        title={pend ? `Pending approval: ${pend.value ?? "(blank)"}` : undefined}
+                        title={pend ? `${pend.status === "draft" ? "Draft — not submitted yet" : "Submitted — awaiting approval"}: ${pend.value ?? "(blank)"} · approved value ${pend.old ?? "(blank)"}${pend.by ? ` · by ${pend.by}` : ""}` : undefined}
                         onMouseDown={(e) => {
                           if (e.target.closest("[data-link]")) return; // let PO links receive their click
                           if (editing && (editing.r !== r || editing.c !== ci)) finishEdit();
