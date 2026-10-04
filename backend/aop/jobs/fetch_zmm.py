@@ -12,6 +12,7 @@ Env:
     ZMM_SUBJECT_CONTAINS     only messages whose subject contains this text (case-insensitive)
     ZMM_ATTACHMENT_PATTERN   attachment name pattern (default *.xlsx)
     MONGO_URL, DB_NAME       the database
+    FX_AUTO_FETCH            true (default) — also refresh the last 7 days of FX rates for the PO currencies
 
 Selection: messages received since the last processed one, from the sender, subject matching, with an attachment.
 Idempotent: a message (internetMessageId) or attachment (SHA-256) already in zmm_runs is skipped; a file whose newest
@@ -187,23 +188,40 @@ def env_cfg() -> Dict[str, str]:
             "subject": os.environ.get("ZMM_SUBJECT_CONTAINS", ""), "pattern": os.environ.get("ZMM_ATTACHMENT_PATTERN", "*.xlsx")}
 
 
+async def refresh_fx(engine, days: int = 7):
+    """Daily: the last week's exchange rates for the currencies on the POs (FX_AUTO_FETCH, default on)."""
+    from datetime import date, timedelta
+    from aop.po_pipeline import fx_auto_fetch
+    if not fx_auto_fetch():
+        return None
+    try:
+        need = await engine.po_fx_need((date.today() - timedelta(days=days)).isoformat(), date.today().isoformat())
+        res = await engine.fetch_fx(need, by=BOT)
+        logger.info("FX rates: %s saved %s", res["saved"], "; ".join(res["errors"]))
+        return res
+    except Exception as e:  # noqa: BLE001 — never block the ZMM fetch on FX
+        logger.warning("FX refresh failed: %s", e)
+        return None
+
+
 async def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     env = Path(__file__).resolve().parents[2] / ".env"
     if env.exists():
         from dotenv import load_dotenv
         load_dotenv(env)
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from storage import make_storage
+    db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+    engine = make_engine(db, make_storage(db))
+    await refresh_fx(engine)
     if os.environ.get("ZMM_FETCH_ENABLED", "false").strip().lower() not in ("1", "true", "yes", "on"):
-        logger.info("ZMM_FETCH_ENABLED is off — nothing to do")
+        logger.info("ZMM_FETCH_ENABLED is off — nothing more to do")
         return 0
     cfg = env_cfg()
     if not cfg["mailbox"]:
         logger.error("ZMM_MAILBOX is not set")
         return 2
-    from motor.motor_asyncio import AsyncIOMotorClient
-    from storage import make_storage
-    db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
-    engine = make_engine(db, make_storage(db))
     runs = await fetch_and_run(db, engine, GraphMail(cfg["mailbox"]), cfg)
     for r in runs:
         logger.info("%s %s %s %s", r.get("run_id"), r.get("status"), r.get("file_name"), r.get("error") or "")

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import api from "@/lib/api";
 import {
   MagnifyingGlass, CaretLeft, CaretRight, Columns, UploadSimple, DownloadSimple, Trash, ArrowClockwise,
-  ClipboardText, HourglassMedium, CheckCircle, WarningCircle, Plus, CalendarBlank, CaretDown,
+  ClipboardText, HourglassMedium, CheckCircle, WarningCircle, Plus, CalendarBlank, CaretDown, CloudArrowDown,
 } from "@phosphor-icons/react";
 import DataGrid from "./DataGrid";
 import PivotTable from "./PivotTable";
@@ -310,6 +310,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
         <button className="icon-btn" onClick={load} title="Reload"><ArrowClockwise size={13} className={loading ? "animate-spin" : ""} /></button>
         <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
         <button className="icon-btn" onClick={downloadView} title="Download this view (csv) — filters, sort and columns as shown" data-testid="ds-download-view"><DownloadSimple size={14} />view</button>
+        {canUpload && dataset.key === "fx_rates" && <FxFetch onDone={(m) => { setMsg(m); load(); onChanged && onChanged(); }} />}
         {canUpload && (
           <>
             <button className="icon-btn" onClick={() => setShowUpload(true)} title="Bulk upload (add / modify / replace) — rows matched on the unique line id" data-testid="ds-upload"><UploadSimple size={14} /></button>
@@ -404,5 +405,48 @@ function AddRowDialog({ dataset, columns, filter, onClose, onDone }) {
         {err && <div className="col-span-2 text-[var(--danger)]">{String(err)}</div>}
       </div>
     </Modal>
+  );
+}
+
+/** Fetch exchange rates from the internet into "FX rates by date": for the PO dates (default) or a date range. */
+function FxFetch({ onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [range, setRange] = useState({ start: "", end: "", currencies: "", overwrite: false });
+  const run = async (body, close) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/aop/fx-rates/fetch", body);
+      const per = Object.entries(data.by_currency || {}).map(([c, n]) => `${c} ${n}`).join(", ");
+      onDone({ tone: data.errors?.length ? "warn" : "ok",
+               text: `FX rates: ${data.saved} new / updated${per ? ` (${per})` : ""}${data.errors?.length ? ` · ${data.errors.join("; ")}` : ""}` +
+                     (data.saved ? " · re-upload the ZMM report (or wait for the next e-mail run) to re-convert POs" : "") });
+      close && close();
+    } catch (e) { onDone({ tone: "err", text: e.response?.data?.detail || e.message }); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button className="icon-btn primary" disabled={busy} onClick={() => run({})} data-testid="fx-fetch"
+              title="Fetch from the internet the rate of every foreign currency on the POs for each PO date (ECB reference rates; other currencies from daily market rates). Rates typed by hand are kept.">
+        <CloudArrowDown size={14} className={busy ? "animate-pulse" : ""} />{busy ? "Fetching…" : "Fetch rates"}
+      </button>
+      <Popover align="right" panelClassName="mt-1 z-50 w-72 bg-[var(--surface)] border border-[var(--border)] shadow-lg text-xs p-3 space-y-2"
+               button={(open, toggle) => <button className="icon-btn" onClick={toggle} title="Fetch a date range" data-testid="fx-fetch-range"><CaretDown size={10} /></button>}>
+        {(close) => (
+          <>
+            <div className="font-semibold">Fetch a date range</div>
+            <label className="flex items-center gap-2">From<input type="date" className="input-sm flex-1" value={range.start} onChange={(e) => setRange({ ...range, start: e.target.value })} /></label>
+            <label className="flex items-center gap-2">To<input type="date" className="input-sm flex-1" value={range.end} onChange={(e) => setRange({ ...range, end: e.target.value })} /></label>
+            <input className="input-sm w-full" placeholder="Currencies, e.g. USD, EUR (blank = those on the POs)" value={range.currencies}
+                   onChange={(e) => setRange({ ...range, currencies: e.target.value })} />
+            <label className="flex items-center gap-1"><input type="checkbox" className="accent-[var(--gold)]" checked={range.overwrite}
+                   onChange={(e) => setRange({ ...range, overwrite: e.target.checked })} />Refresh rates fetched earlier (hand-entered rates are kept)</label>
+            <button className="icon-btn primary w-full justify-center" disabled={busy}
+                    onClick={() => run({ start: range.start || null, end: range.end || null, currencies: range.currencies, overwrite: range.overwrite }, close)}>
+              <CloudArrowDown size={13} />Fetch{range.start || range.end ? "" : " last 30 days"}
+            </button>
+          </>
+        )}
+      </Popover>
+    </>
   );
 }
