@@ -7,6 +7,9 @@
 .aop-grid tr:hover .aop-td { background: var(--row-hover); }
 .aop-grid .aop-td.aop-editable { background: color-mix(in srgb, var(--gold-soft) 7%, var(--surface)); }
 .aop-grid .aop-td.aop-sel { background: color-mix(in srgb, var(--gold) 16%, var(--surface)) !important; }
+.aop-grid .aop-th.aop-tot { color: var(--text); font-size: 11px; background: color-mix(in srgb, var(--gold) 8%, var(--table-header-bg)); }
+.tsel { background: color-mix(in srgb, var(--gold) 18%, transparent) !important; }
+.tsel-active { outline: 2px solid var(--gold); outline-offset: -2px; }
 .aop-grid .aop-td.aop-active { outline: 2px solid var(--gold); outline-offset: -2px; }
 .aop-grid .aop-td.aop-pending { box-shadow: inset 3px 0 0 var(--warning); }
 .aop-cell-input { width: 100%; min-width: 80px; border: none; outline: none; background: var(--input-bg); font: inherit; padding: 0; }

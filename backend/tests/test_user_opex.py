@@ -72,6 +72,13 @@ def test_user_opex_tabs_drafts_batches_and_views(client, admin, make_user):
     adm = client.get(f"/api/aop/datasets/opex_lines/rows?keys={key}", headers=admin).json()["rows"][0]
     assert adm["fields"]["B27__annual"] == 99 and adm["fields"]["B27__2026-04"] == round(99 / 12, 2)
 
+    # ---- % increment sets the FY'28 budget (this year's budget × (1 + %) when no forecast), phased evenly
+    r = client.patch("/api/aop/datasets/opex_lines/rows", headers=admin, json=[{"key": key, "field": "increment_pct", "value": "10%"}])
+    assert r.json()["applied"] == 1
+    adm = client.get(f"/api/aop/datasets/opex_lines/rows?keys={key}", headers=admin).json()["rows"][0]["fields"]
+    assert adm["B28__annual"] == round(99 * 1.1, 2) and abs(adm["B28__2027-04"] - 99 * 1.1 / 12) < 0.01
+    assert adm["latest_po"] == "4200000001" and adm["latest_po_supplier"] == "Oracle"
+
     # ---- discard drafts
     client.patch("/api/aop/datasets/opex_lines/rows", headers=user, json=[{"key": key, "field": "B27__annual", "value": 5}])
     assert client.post("/api/aop/changes/discard", headers=user, json={}).json()["discarded"] == 1

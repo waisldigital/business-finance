@@ -386,6 +386,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         await recalc_budget(dataset, changed)
         if not changed:
             return
+        await increment_budget(dataset, sorted({k for k, fld in changed if fld == "increment_pct"}))
         if dataset in OPEX_DATASETS:  # a new next-FY budget is phased evenly over its months (Opex layout)
             _, nxt = opex_schema.fys_for(dataset, await get_config())
             ann = f"B{nxt[2:]}__annual"
@@ -622,6 +623,15 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                 docs = ordered
         if dataset == "opex_lines" and docs:  # latest / old POs from the tracker's PO mapping
             await link_opex_lines([d["fields"] for d in docs])
+            T = await draft_version()
+            plan = (await get_config())["plan_fy"][2:]
+            for d in docs:  # a pending % increment shows the draft-year budget it gives, until approved
+                pend = d.get("pending") or {}
+                if "increment_pct" in pend and f"{T}__annual" not in pend and isinstance(d["fields"].get("increment_pct"), (int, float)):
+                    f = d["fields"]
+                    fc = sum(float(f.get(k) or 0) for k in f if k.startswith(f"F{plan}__"))
+                    basis = fc if fc else float(f.get(f"B{plan}__annual") or 0)
+                    f[f"{T}__annual"] = round(basis * (1 + f["increment_pct"]), 2)
         if dataset in OPEX_DATASETS and docs:  # computed columns (YTD, totals, variance, bridge check)
             cfg = await get_config()
             acts = await opex_actuals([d["key"] for d in docs]) if dataset == "opex_lines" else {}
@@ -647,21 +657,57 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
     async def tracker_for(f: Dict[str, Any]) -> Optional[tuple]:
         return pick_tracker(f, await tracker_index())
 
+    PO_DETAIL_KEYS = ["latest_po", "latest_pr", "latest_po_supplier", "latest_po_value_inr", "latest_po_start", "latest_po_end",
+                      "previous_po", "previous_po_supplier", "previous_po_value_inr", "previous_po_start", "previous_po_end"]
+
+    def own_po_details(f: Dict[str, Any]) -> Dict[str, Any]:
+        return {"latest_po": f.get("po"), "latest_po_supplier": f.get("supplier_name") or f.get("vendor"),
+                "latest_po_value_inr": f.get("net_po") or f.get("po_amount"), "latest_po_start": f.get("po_start"),
+                "latest_po_end": f.get("po_end")}
+
+    def apply_tracker(f: Dict[str, Any], t: Optional[tuple], fc_prefix: str):
+        if not t:
+            for k, v in own_po_details(f).items():
+                f.setdefault(k, v)
+            return
+        tf = t[1]
+        n = tf.get("active_po_count") or 0
+        f.update({k: v for k, v in tf.items() if k.startswith(fc_prefix)})  # the running FY forecast
+        f.update(tracker_line_id=t[0], active_po_count=n, mapping_status=tf.get("mapping_status"))
+        if n:
+            f.update({k: tf.get(k) for k in PO_DETAIL_KEYS})
+        else:
+            f.update(own_po_details(f))
+
     async def link_opex_lines(rows_: List[Dict[str, Any]]):
-        """An Opex line shows the latest PO and the old PO(s) of its tracker line (same PO, same AOP code)."""
+        """An Opex line shows the latest PO and the old PO of its tracker line (same PO, same AOP code) with their
+        supplier, amount and service period, and the plan year's running forecast."""
         idx = await tracker_index()
-        fc_prefix = "F" + (await get_config())["plan_fy"][2:] + "__"
+        cfg = await get_config()
+        fc_prefix = "F" + cfg["plan_fy"][2:] + "__"
         for f in rows_:
-            t = pick_tracker(f, idx)
-            if not t:
-                f.setdefault("latest_po", f.get("po"))
+            apply_tracker(f, pick_tracker(f, idx), fc_prefix)
+
+    async def increment_budget(dataset: str, keys: List[str]):
+        """Opex lines: % increment sets the draft year's budget = this year's forecast (else its budget) × (1 + %),
+        phased evenly."""
+        if dataset != "opex_lines" or not keys:
+            return
+        cfg = await get_config()
+        T = await draft_version()
+        plan = cfg["plan_fy"]
+        for k in keys:
+            doc = await db.aop_rows.find_one({"dataset": dataset, "key": k}, {"_id": 0, "fields": 1})
+            f = dict((doc or {}).get("fields") or {})
+            pct = f.get("increment_pct")
+            if not isinstance(pct, (int, float)):
                 continue
-            tf = t[1]
-            n = tf.get("active_po_count") or 0
-            f.update({k: v for k, v in tf.items() if k.startswith(fc_prefix)})  # the running FY forecast
-            f.update(tracker_line_id=t[0], latest_po=tf.get("latest_po") if n else f.get("po"),
-                     previous_po=tf.get("previous_po") if n else None, latest_pr=tf.get("latest_pr"),
-                     active_po_count=n, mapping_status=tf.get("mapping_status"))
+            await link_opex_lines([f])
+            fc = sum(float(f.get(f"F{plan[2:]}__{m}") or 0) for m in fy_months(plan))
+            basis = fc if fc else float(f.get(f"B{plan[2:]}__annual") or 0)
+            await db.aop_rows.update_one({"dataset": dataset, "key": k},
+                                         {"$set": {f"fields.{T}__annual": round(basis * (1 + pct), 2), "fields.increment_basis": basis}})
+            await recalc_budget(dataset, [(k, f"{T}__annual")])
 
     async def opex_actuals(keys: Optional[List[str]] = None) -> Dict[str, Dict[str, float]]:
         """Booked opex actuals per opex line (ref = line id) for the base year."""
@@ -1070,9 +1116,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                     continue
                 f = {**f, **opex_schema.derive(f, dataset, cfg, acts.get(d["key"]))}
                 if dataset == "opex_lines":
-                    t = pick_tracker(f, idx)
-                    if t and (t[1].get("active_po_count") or 0):
-                        f.update(latest_po=t[1].get("latest_po"), previous_po=t[1].get("previous_po"), latest_pr=t[1].get("latest_pr"))
+                    apply_tracker(f, pick_tracker(f, idx), "F" + cfg["plan_fy"][2:] + "__")
                 rows_out.append([f.get(c["key"]) for c in lay])
         name = f"{dataset}{'_template' if template else ''}"
         if fmt == "csv":

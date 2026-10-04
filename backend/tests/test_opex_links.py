@@ -236,3 +236,17 @@ def test_type_prefill_and_suggestions():
              {"line_id": "L2", "wbs": "WOIN.999"}]
     s = P.suggest_lines({"wbs": "WOIN.001", "supplier_code": "1000001", "location": "DIAL"}, lines)
     assert s[0]["line_id"] == "L1" and s[0]["score"] == 6 and len(s) == 1
+
+
+def test_old_po_details_and_po_date_order():
+    """Old PO comes with supplier, amount and service period; a PO without a service period is placed by its PO date."""
+    detail = [{"po": "A", "amount": 10, "value": 10, "start": "2025-04-01", "end": "2026-03-31", "has_period": True,
+               "supplier_name": "Old Co", "created_on": "2025-03-01"},
+              {"po": "B", "amount": 0, "value": 30, "start": None, "end": None, "has_period": False, "no_segment": True,
+               "supplier_name": "New Co", "created_on": "2026-05-01"}]
+    lp = P.latest_previous({"po": "OWN"}, detail)
+    assert lp["latest_po"] == "B" and lp["latest_po_value_inr"] == 30
+    assert lp["previous_po"] == "A" and lp["previous_po_supplier"] == "Old Co" and lp["previous_po_value_inr"] == 10
+    assert lp["previous_po_start"] == "2025-04-01" and lp["previous_po_end"] == "2026-03-31"
+    own = P.latest_previous({"po": "OWN", "vendor": "V", "net_po": 5, "po_start": "2024-04-01", "po_end": "2025-03-31"}, detail[:1])
+    assert own["previous_po"] == "OWN" and own["previous_po_value_inr"] == 5 and own["previous_po_supplier"] == "V"

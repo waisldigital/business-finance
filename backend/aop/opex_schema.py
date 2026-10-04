@@ -89,6 +89,14 @@ OPEX_LINE_COLUMNS: List[Dict[str, Any]] = [
     C("latest_pr", "New PR", role="computed", match=["New PR"], editable=False),
     C("previous_po", "Old PO No.", role="computed", match=["Old PO No."], editable=False),
     C("latest_po", "New PO No.", role="computed", match=["New PO No."], editable=False),
+    C("latest_po_supplier", "Latest PO supplier", role="computed", editable=False),
+    C("latest_po_value_inr", "Latest PO amount (INR)", "number", role="computed", editable=False),
+    C("latest_po_start", "Latest PO service start", "date", role="computed", editable=False),
+    C("latest_po_end", "Latest PO service end", "date", role="computed", editable=False),
+    C("previous_po_supplier", "Old PO supplier", role="computed", editable=False),
+    C("previous_po_value_inr", "Old PO amount (INR)", "number", role="computed", editable=False),
+    C("previous_po_start", "Old PO service start", "date", role="computed", editable=False),
+    C("previous_po_end", "Old PO service end", "date", role="computed", editable=False),
     {"key": CUR_MONTHS}, {"key": CUR_YTD}, {"key": CUR_TOTAL}, {"key": CARRY},
     C("expected_start", "Expected Start Date"),
     C("expected_close", "Expected Close Date"),
@@ -122,10 +130,6 @@ TRACKER_ONLY_COLUMNS: List[Dict[str, Any]] = [
     C("override_amount", "Override amount", "number", aliases=["Override Amount (INPUT)"]),
     C("override_start", "Override start", "date", aliases=["Override Start (INPUT)"]),
     C("override_end", "Override end", "date", aliases=["Override End (INPUT)"]),
-    C("latest_po_supplier", "Latest PO supplier", role="computed", editable=False),
-    C("latest_po_value_inr", "Latest PO value (INR)", "number", role="computed", editable=False),
-    C("latest_po_start", "Latest PO start", "date", role="computed", editable=False),
-    C("latest_po_end", "Latest PO end", "date", role="computed", editable=False),
     C("latest_po_grn_pct", "Latest PO GRN %", "percent", role="computed", editable=False),
     C("active_po_count", "Active POs", "number", role="computed", editable=False),
     C("supplier_changed", "Supplier changed", role="computed", editable=False),
@@ -153,6 +157,8 @@ COPY_TO_ADDON = ["aop_code", "wbs", "wbs_l1", "wbs_desc", "wbs_l1_desc", "cost_c
                  "project_id", "project_name", "geo", "region", "grouping", "airport_type", "tag", "category",
                  "category2", "package_l1", "package_l2", "package_l3", "nature_of_expense", "owner"]
 
+BRIDGE_KEYS_ORDER = ["br_price_escalation", "br_timing", "br_scope", "br_post_dlp", "br_spares", "br_forex", "br_new_ca",
+                     "br_pax", "br_wipro_opt", "br_optimization", "br_others", "bridge_check"]
 BRIDGE_KEYS = ["br_price_escalation", "br_timing", "br_scope", "br_post_dlp", "br_spares", "br_forex", "br_new_ca",
                "br_pax", "br_wipro_opt", "br_optimization", "br_others"]
 ZMM_KEYS = [c["key"] for c in OPEX_LINE_COLUMNS if c.get("role") == "zmm"]
@@ -235,6 +241,8 @@ def meta_columns(dataset: str, cfg: Dict[str, Any], existing: Optional[List[Dict
             if old.get("user_editable") is not None and c.get("role") not in ("computed", "system", "key"):
                 col["user_editable"] = old["user_editable"]
         out.append(col)
+    if dataset == "opex_lines":
+        out = grid_order(out)
     if dataset == "opex_lines":  # the plan year's running forecast (from the tracker), next to its budget
         F = "F" + cfg["plan_fy"][2:]
         at = next((i for i, c in enumerate(out) if c["key"] == vkey("B" + cfg["plan_fy"][2:], "annual")), len(out) - 1) + 1
@@ -246,6 +254,35 @@ def meta_columns(dataset: str, cfg: Dict[str, Any], existing: Optional[List[Dict
         out = out[:at] + fc + out[at:]
     known = {c["key"] for c in out}
     out += [c for c in existing or [] if c.get("custom") and c["key"] not in known]
+    return out
+
+
+# The Opex lines grid in a logical order: what the line is, its latest and old PO, the original PO details, the
+# year values, and every input at the end (the draft year's budget inputs follow after those)
+GRID_BLOCKS = [
+    ["line_id", "aop_code", "category", "category2", "tag", "geo", "region", "grouping", "airport_type", "bau_growth",
+     "retro_location", "project_id", "project_name", "wbs", "wbs_l1", "wbs_desc", "wbs_l1_desc", "cost_centre", "gl_code",
+     "gl_name", "nature_of_expense", "recurring", "package_l1", "package_l2", "package_l3"],
+    ["latest_po", "latest_po_supplier", "latest_po_value_inr", "latest_po_start", "latest_po_end", "latest_pr",
+     "previous_po", "previous_po_supplier", "previous_po_value_inr", "previous_po_start", "previous_po_end"],
+    ["po", "po_date", "supplier_code", "supplier_name", "vendor_code", "vendor", "po_description", "material_type", "material",
+     "material_description", "po_start", "po_end", "tech_refresh_date", "qty", "rate", "currency", "po_amount_doc",
+     "po_amount", "net_po", "pr_no"],
+    "@values",
+    ["carry_forward", "expected_start", "expected_close", "increment_pct", *BRIDGE_KEYS_ORDER,
+     "ops_remarks", "finance_remarks", "owner", "po_link"],
+]
+
+
+def grid_order(cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by = {c["key"]: c for c in cols}
+    named = {k for b in GRID_BLOCKS if b != "@values" for k in b}
+    out = []
+    for b in GRID_BLOCKS:
+        if b == "@values":
+            out += [c for c in cols if c["key"] not in named]
+        else:
+            out += [by[k] for k in b if k in by]
     return out
 
 
