@@ -547,6 +547,8 @@ class OpexEngine:
         if gone:
             await self.db.aop_rows.delete_many({"dataset": "po_items", "key": {"$in": gone}})
         await self.bulk_set("po_items", item_upd, upsert=True, by=by)
+        # 3a. mapping typed in the file ("Linked Forecast S.No" / "Opex line(s)") → links, added to the existing ones
+        file_links, file_link_errors = await self._mapping_from_file(docs, by)
         # 3. triage enrichment + auto triage
         new_pos = await self._triage(docs, fresh, triage, cfg, by)
         # 5. PO changes on mapped items
@@ -566,7 +568,60 @@ class OpexEngine:
                 "forecast_before": before, "forecast_after": after, "forecast_delta": round(after - before, 2),
                 "first_run": first_run, "header": header[:120],
                 "unconverted": len([1 for it in fresh.values() if P.fx_flagged(it.get("fx_source"))]),
-                "fx_fetched": fx.fetched, "fx_fetch_error": fx.error}
+                "fx_fetched": fx.fetched, "fx_fetch_error": fx.error,
+                "links_from_file": file_links, "link_errors": file_link_errors[:50]}
+
+    async def harvest_workbook_zmm(self, content: bytes, by: str) -> Dict[str, Any]:
+        """The ZMM sheet of the Opex forecast file when a newer SAP report is already loaded: its rows are NOT loaded
+        (they would roll the POs back); only the mapping typed there ("Linked Forecast S.No") is added, and the values
+        the admin corrected in it — service period and WBS different from SAP's — become corrections (provisional
+        overrides, Review → Corrections), for PO items that are in the current report."""
+        from .mapping import Mapping
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        name = next((s_ for s_ in wb.sheetnames if s_.strip().lower().replace(" ", "_") == "zmm_po_report"), None)
+        if not name:
+            return {"links": 0, "corrections": 0}
+        _, raw = P.read_zmm([tuple(r) for r in wb[name].iter_rows(values_only=True, max_col=90)])
+        docs = [{"fields": f} for f in raw]
+        links, errors = await self._mapping_from_file(docs, by)
+        fx = FxTable({}, await self.rate_map())
+        theirs = P.build_items(raw, fx.rate, (await self.get_config())["plan_fy"])
+        ours = await self.fields("po_items")
+        m = Mapping(self.db, self, cache=True)
+        made = 0
+        for k, t in theirs.items():
+            cur = ours.get(k)
+            if not cur:
+                continue
+            for fld in ("period_start", "period_end", "wbs"):
+                tv = t.get(fld)
+                sap = cur.get(f"accepted_{fld}", cur.get(fld))
+                if tv in (None, "") or str(tv) == str(sap or ""):
+                    continue
+                try:
+                    if await m.set_correction(cur["po"], cur.get("item") or "", fld, tv, by, source="Opex forecast file",
+                                              remarks="Corrected in the Opex forecast file (ZMM sheet)"):
+                        made += 1
+                except ValueError as e:
+                    errors.append(str(e))
+        return {"links": links, "corrections": made, "errors": errors[:50]}
+
+    async def _mapping_from_file(self, docs, by) -> Tuple[int, List[str]]:
+        from .mapping import Mapping
+        m = Mapping(self.db, self, cache=True)
+        wanted: Dict[Tuple[str, str], str] = {}
+        for d in docs:
+            f = d["fields"]
+            v = f.get("linked_forecast_s_no") or f.get("opex_line_s") or f.get("opex_lines") or f.get("linked_lines")
+            if v not in (None, ""):
+                wanted.setdefault((str(f["purchase_order"]), str(f.get("purchase_order_item") or "")), v)
+        added, errors = 0, []
+        for (po, item), v in wanted.items():
+            try:
+                added += (await m.set_item_mapping(po, item, v, by, source="ZMM file", add_only=True))["added"]
+            except ValueError as e:
+                errors.append(str(e))
+        return added, errors
 
     async def _triage(self, docs, fresh, triage, cfg, by) -> int:
         prefix = cfg.get("po_nature_prefix") or P.DEFAULT_PREFIX
@@ -748,14 +803,19 @@ PO_META: Dict[str, List[Dict[str, Any]]] = {
         _c("pending_inr", "Pending (INR)", "number"), _c("fy_impact_inr", "FY impact (INR)", "number"),
         _c("flags", "Flags"), _c("source", "Source"), _c("resolved_at", "Resolved at", hidden=True)],
     "po_items": [
-        _c("po", "PO", role="key"), _c("item", "Item", role="key"), _c("material", "Material"),
-        _c("material_description", "Material description"), _c("supplier_code", "Supplier code"),
-        _c("supplier_name", "Supplier"), _c("created_on", "Created on", "date"), _c("pr_no", "PR"), _c("wbs", "WBS"),
+        _c("po", "PO", role="key"), _c("item", "Item", role="key"),
+        _c("linked_lines", "Opex line(s)", editable=True), _c("linked_aop_codes", "AOP code (line)"),
+        _c("corrected", "Corrected (SAP → used)"), _c("material", "Material"),
+        _c("material_description", "Material description"), _c("supplier_code", "Supplier code", editable=True),
+        _c("supplier_name", "Supplier", editable=True), _c("created_on", "Created on", "date"), _c("pr_no", "PR"),
+        _c("wbs", "WBS", editable=True),
         _c("aop_code", "AOP code (Short ID)"), _c("wbs_name", "WBS name"), _c("material_type", "Material type"),
-        _c("currency", "Currency"), _c("quantity", "Qty", "number"), _c("net_price", "Net order price", "number"),
-        _c("net_order_value", "Net order value", "number"),
-        _c("value_inr", "Value (INR)", "number"), _c("fx_rate", "FX rate (PO date)", "number"), _c("fx_date", "FX at (PO date)", "date"), _c("fx_source", "FX source"), _c("period_start", "Period start", "date"),
-        _c("period_end", "Period end", "date"), _c("delivery_date", "Delivery date", "date"), _c("active", "Active"),
+        _c("currency", "Currency", editable=True), _c("quantity", "Qty", "number", True),
+        _c("net_price", "Net order price", "number", True),
+        _c("net_order_value", "Net order value", "number", True),
+        _c("value_inr", "Value (INR)", "number", True), _c("fx_rate", "FX rate (PO date)", "number"), _c("fx_date", "FX at (PO date)", "date"), _c("fx_source", "FX source"),
+        _c("period_start", "Period start", "date", True),
+        _c("period_end", "Period end", "date", True), _c("delivery_date", "Delivery date", "date", True), _c("active", "Active"),
         _c("deletion_indicator", "Deletion indicator"), _c("grn_inr", "GRN (INR)", "number"),
         _c("pending_inr", "Pending (INR)", "number"), _c("grn_pct", "GRN %", "percent"),
         _c("invoiced_inr", "Invoiced (INR)", "number"), _c("last_grn_date", "Last GRN", "date"),

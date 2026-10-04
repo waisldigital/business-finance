@@ -18,10 +18,12 @@ import { download } from "./format";
 import Modal from "@/components/common/Modal";
 import Popover from "@/components/common/Popover";
 
-const PO_COLUMNS = ["po", "latest_po", "previous_po", "merged_into_po", "purchase_order", "linked_old_po", "linked_forecast_s_no", "dims.po"];
+const PO_COLUMNS = ["po", "latest_po", "previous_po", "merged_into_po", "purchase_order", "linked_old_po", "linked_forecast_s_no", "linked_lines", "dims.po"];
+// the ZMM sheet: rows come from SAP; only the mapping and the corrections are typed here
+const SHEET_DATASETS = new Set(["po_items", "po_register"]);
 // clicks that open a line's PO history instead of a single PO
 const HISTORY_COLUMNS = { opex_tracker: ["po", "previous_po"], opex_lines: ["po", "previous_po"],
-                          po_register: ["linked_old_po", "linked_forecast_s_no"],
+                          po_register: ["linked_old_po", "linked_forecast_s_no"], po_items: ["linked_lines"],
                           po_links: ["line_id"] };
 const PAGE = 5000; // datasets up to this size load whole, so sort / filter / pivot work on every row
 
@@ -65,6 +67,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
     if ((HISTORY_COLUMNS[dataset.key] || []).includes(c.key)) {
       if (dataset.key === "opex_tracker" || dataset.key === "opex_lines") return setHist({ lineId: row.key, po: first(f[c.key]) });
       if (dataset.key === "po_links") return setHist({ lineId: f.line_id, po: f.po });
+      if (dataset.key === "po_items") { const l = first(f.linked_lines); return l ? setHist({ lineId: l, po: f.po }) : undefined; }
       const lid = first(f.linked_forecast_s_no);
       if (lid) return setHist({ lineId: lid, po: c.key === "linked_old_po" ? first(f.linked_old_po) : f.purchase_order });
     }
@@ -138,7 +141,8 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
   const monthsOf = useCallback((v) => columns.filter((c) => isMonthCol(c) && c.key.startsWith(`${v}__`)), [columns]);
   // actual months come from the single actual source and are never typed over
   const canEdit = useCallback((c) => (preview || c.actual ? false : c.virtual ? monthsOf(c.version).some((m) => !m.actual && (admin || !!m.user_editable))
-    : admin || !!c.user_editable), [admin, monthsOf, preview]);
+    : SHEET_DATASETS.has(dataset.key) ? admin && c.role === "input" // ZMM sheet: mapping + correctable SAP columns only
+    : admin || !!c.user_editable), [admin, monthsOf, preview, dataset.key]);
   const downloadView = () => {
     csvDownload([visible.map((c) => c.label), ...filtered.map((r) => visible.map((c) => cellValue(r, c)))], `${dataset.key}_view.csv`);
   };
@@ -170,7 +174,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
     try {
       const { data } = await api.patch(`/aop/datasets/${dataset.key}/rows`, batch);
       const parts = [];
-      if (data.applied) parts.push(`${data.applied} saved`);
+      if (data.applied) parts.push(`${data.applied} saved${data.mapping ? ` · ${data.mapping} mapping` : ""}${data.correction ? ` · ${data.correction} correction (Review → Corrections)` : ""}`);
       if (data.queued) parts.push(`${data.queued} kept as draft — submit for approval when ready`);
       if (data.rejected?.length) parts.push(`${data.rejected.length} not allowed (${data.rejected[0].reason})`);
       setMsg({ tone: data.rejected?.length ? "warn" : "ok", text: parts.join(" · ") || "No change" });
@@ -327,7 +331,8 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
       </div>
 
       <div className="flex items-center gap-3 text-[10.5px] text-[var(--muted)] min-h-[18px]">
-        {admin && !preview && <span className="flex items-center gap-1"><ClipboardText size={12} /> Admin: every cell is editable · paste blocks from Excel · Ctrl+C copies selection</span>}
+        {admin && !preview && !SHEET_DATASETS.has(dataset.key) && <span className="flex items-center gap-1"><ClipboardText size={12} /> Admin: every cell is editable · paste blocks from Excel · Ctrl+C copies selection{(dataset.key === "opex_lines" || dataset.key === "opex_tracker") && " · New PO(s) mapped: type the POs (4200000218, 4400000018_9700001103, PO/item) or a status in words"}</span>}
+        {admin && !preview && SHEET_DATASETS.has(dataset.key) && <span className="flex items-center gap-1"><ClipboardText size={12} /> {dataset.key === "po_items" ? "Opex line(s)" : "Linked Forecast S.No"}: type S. No., TRK-… or OPX-… to map · type over a SAP value (period, WBS, value…) to correct it — SAP's value is kept and shown in “Corrected” until SAP is fixed · or download, edit in Excel, upload back</span>}
         {(drafts.drafts > 0 || drafts.submitted > 0) && <span className="flex items-center gap-1"><HourglassMedium size={11} className="text-[var(--warning)]" /> pending approval (your numbers until approved)</span>}
         {drafts.drafts > 0 && (
           <span className="flex items-center gap-1.5 text-[var(--text)]" data-testid="ds-drafts">
