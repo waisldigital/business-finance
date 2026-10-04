@@ -63,6 +63,8 @@ DEFAULT_CONFIG = {
     "cutoffs": {"default": "2025-12", "overhead": "2025-11"}, "tax_rate": 0.25,
     "edit_modes": {s: "approval" for s in AOP_SECTIONS}, "data_version": 0,
     "po_change_mode": "hold", "po_nature_prefix": dict(PO.DEFAULT_PREFIX),
+    # tabs (datasets) users see per AOP section; a section not listed shows all its datasets. Admins see everything.
+    "user_tabs": {"aop_opex": ["opex_lines"]},
 }
 OPEX_DATASETS = ("opex_lines", "opex_tracker")
 # PO datasets the system writes (read-only in the grid; edited through Review)
@@ -172,6 +174,9 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             return False
         if spec.sensitive and not p["sections"]["aop_payroll"]["can_view"]:
             return False
+        tabs = ((await get_config()).get("user_tabs") or {}).get(spec.section)
+        if tabs is not None and dataset not in tabs:
+            return False  # an admin keeps this tab to themselves
         sp = p["sections"].get(spec.section, {})
         return bool(sp.get({"view": "can_view", "upload": "can_upload"}.get(action, "can_edit")))
 
@@ -381,6 +386,15 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         await recalc_budget(dataset, changed)
         if not changed:
             return
+        if dataset in OPEX_DATASETS:  # a new next-FY budget is phased evenly over its months (Opex layout)
+            _, nxt = opex_schema.fys_for(dataset, await get_config())
+            ann = f"B{nxt[2:]}__annual"
+            for k in {k for k, fld in changed if fld == ann}:
+                doc = await db.aop_rows.find_one({"dataset": dataset, "key": k}, {"_id": 0, "fields": 1})
+                f = dict((doc or {}).get("fields") or {})
+                opex_schema.phase_budget(f, nxt)
+                await db.aop_rows.update_one({"dataset": dataset, "key": k},
+                                             {"$set": {f"fields.B{nxt[2:]}__{m}": f.get(f"B{nxt[2:]}__{m}") for m in fy_months(nxt)}})
         if dataset == "po_links":  # allocation is shared across lines: re-resolve every line
             for k in {k for k, fld in changed if fld == "alloc_pct"}:  # a user-entered % is never changed by the system
                 await db.aop_rows.update_one({"dataset": "po_links", "key": k}, {"$set": {"fields.alloc_auto": False}})
@@ -404,7 +418,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
     async def update_config(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
         require_admin(user)
         allowed = {"base_fy", "plan_fy", "draft_fy", "cutoffs", "tax_rate", "edit_modes", "drivers", "report_formats",
-                   "mis_segments", "mis_solutions_noncute", "dept_aliases"}
+                   "mis_segments", "mis_solutions_noncute", "dept_aliases", "user_tabs"}
         upd = {k: v for k, v in payload.items() if k in allowed}
         if "report_formats" in upd:
             keys = {f["key"] for f in mis.FORMATS}
@@ -414,6 +428,9 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         if "dept_aliases" in upd:
             upd["dept_aliases"] = {str(k).strip(): [str(x).strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
                                    for k, v in (upd["dept_aliases"] or {}).items() if str(k).strip()}
+        if "user_tabs" in upd:
+            upd["user_tabs"] = {sec: [d for d in (v or []) if d in SPECS and SPECS[d].section == sec]
+                                for sec, v in (upd["user_tabs"] or {}).items() if sec in AOP_SECTIONS}
         if "edit_modes" in upd:
             upd["edit_modes"] = {k: ("approval" if v == "approval" else "direct") for k, v in upd["edit_modes"].items() if k in AOP_SECTIONS}
         await db.aop_config.update_one({"id": "aop"}, {"$set": upd}, upsert=True)
@@ -423,7 +440,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
 
     # ------------------------------------------------------------------ admin default views (every report / grid)
     VIEW_FIELDS = {"order", "hidden", "pivot", "subtotals", "repeatLabels", "filtersOn", "twelveM", "sort", "period",
-                   "measures", "segments", "variance", "subs", "section", "view", "selected"}
+                   "measures", "segments", "variance", "subs", "section", "view", "selected", "groupsOff", "filters"}
 
     @r.get("/views")
     async def views(user: dict = Depends(get_current_user)):
@@ -569,14 +586,22 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         else:
             total = await db.aop_rows.count_documents(mq)
             docs = [d async for d in db.aop_rows.find(mq, proj).sort("seq", 1).skip(offset).limit(limit)]
-        pending = {}
+        pending: Dict[str, Dict[str, Any]] = {}
         if docs:
-            async for c in db.aop_changes.find({"dataset": dataset, "status": "pending", "key": {"$in": [d["key"] for d in docs]}},
-                                               {"_id": 0, "key": 1, "field": 1, "new": 1, "id": 1}):
-                pending.setdefault(c["key"], {})[c["field"]] = {"value": c["new"], "id": c["id"]}
+            cq: Dict[str, Any] = {"dataset": dataset, "key": {"$in": [d["key"] for d in docs]}}
+            if p["admin"]:
+                cq["status"] = "pending"  # admins see what was submitted, marked on the approved values
+            else:
+                cq.update(status={"$in": ["draft", "pending"]}, requested_by=user.get("email"))
+            async for c in db.aop_changes.find(cq, {"_id": 0, "key": 1, "field": 1, "new": 1, "old": 1, "id": 1, "status": 1,
+                                                    "updated_at": 1, "requested_by_name": 1}).sort("updated_at", 1):
+                pending.setdefault(c["key"], {})[c["field"]] = {"value": c["new"], "old": c.get("old"), "id": c["id"],
+                                                                "status": c["status"], "by": c.get("requested_by_name")}
         for d in docs:
             if d["key"] in pending:
                 d["pending"] = pending[d["key"]]
+                if not p["admin"]:  # until approved, the user keeps seeing their own numbers
+                    d["fields"] = {**(d.get("fields") or {}), **{f: v["value"] for f, v in pending[d["key"]].items()}}
         if dataset in ACTUAL_LINKS and docs:
             await actual_months(dataset, docs)
         if dataset == "opex_tracker" and docs:  # add-on lines sort under their parent
@@ -595,12 +620,48 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                     ordered.append(d)
                     ordered += kids.get(d["key"], [])
                 docs = ordered
+        if dataset == "opex_lines" and docs:  # latest / old POs from the tracker's PO mapping
+            await link_opex_lines([d["fields"] for d in docs])
         if dataset in OPEX_DATASETS and docs:  # computed columns (YTD, totals, variance, bridge check)
             cfg = await get_config()
             acts = await opex_actuals([d["key"] for d in docs]) if dataset == "opex_lines" else {}
             for d in docs:
                 d["fields"] = {**d.get("fields", {}), **opex_schema.derive(d.get("fields") or {}, dataset, cfg, acts.get(d["key"]))}
         return {"total": total, "rows": docs}
+
+    async def tracker_index() -> Dict[str, List[tuple]]:
+        idx: Dict[str, List[tuple]] = {}
+        async for d in db.aop_rows.find({"dataset": "opex_tracker"}, {"_id": 0, "key": 1, "fields": 1}):
+            f = d.get("fields") or {}
+            if f.get("po") not in (None, "") and not f.get("parent_line_id"):
+                idx.setdefault(str(f["po"]), []).append((d["key"], f))
+        return idx
+
+    def pick_tracker(f: Dict[str, Any], idx: Dict[str, List[tuple]]) -> Optional[tuple]:
+        cands = idx.get(str(f.get("po") or ""), [])
+        if not cands:
+            return None
+        same = [c for c in cands if norm(c[1].get("aop_code")) == norm(f.get("aop_code"))]
+        return (same or cands)[0]
+
+    async def tracker_for(f: Dict[str, Any]) -> Optional[tuple]:
+        return pick_tracker(f, await tracker_index())
+
+    async def link_opex_lines(rows_: List[Dict[str, Any]]):
+        """An Opex line shows the latest PO and the old PO(s) of its tracker line (same PO, same AOP code)."""
+        idx = await tracker_index()
+        fc_prefix = "F" + (await get_config())["plan_fy"][2:] + "__"
+        for f in rows_:
+            t = pick_tracker(f, idx)
+            if not t:
+                f.setdefault("latest_po", f.get("po"))
+                continue
+            tf = t[1]
+            n = tf.get("active_po_count") or 0
+            f.update({k: v for k, v in tf.items() if k.startswith(fc_prefix)})  # the running FY forecast
+            f.update(tracker_line_id=t[0], latest_po=tf.get("latest_po") if n else f.get("po"),
+                     previous_po=tf.get("previous_po") if n else None, latest_pr=tf.get("latest_pr"),
+                     active_po_count=n, mapping_status=tf.get("mapping_status"))
 
     async def opex_actuals(keys: Optional[List[str]] = None) -> Dict[str, Dict[str, float]]:
         """Booked opex actuals per opex line (ref = line id) for the base year."""
@@ -656,10 +717,13 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                 rejected.append({"key": key, "field": fld, "reason": "the department can't be changed"}); continue
             old = (doc.get("fields") or {}).get(fld)
             if old == val:
+                if mode == "approval":  # typed back to the approved value: drop the draft
+                    await db.aop_changes.delete_many({"dataset": dataset, "key": key, "field": fld, "status": "draft",
+                                                      "requested_by": user.get("email")})
                 continue
             if mode == "approval":
                 await db.aop_changes.update_one(
-                    {"dataset": dataset, "key": key, "field": fld, "status": "pending", "requested_by": user.get("email")},
+                    {"dataset": dataset, "key": key, "field": fld, "status": "draft", "requested_by": user.get("email")},
                     {"$set": {"new": val, "old": old, "updated_at": now_iso(), "section": spec.section if spec else ""},
                      "$setOnInsert": {"id": gen_id(), "created_at": now_iso(), "requested_by_name": user.get("name")}},
                     upsert=True)
@@ -998,12 +1062,17 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         rows_out: List[List[Any]] = []
         if not template:
             acts = await opex_actuals() if dataset == "opex_lines" else {}
+            idx = await tracker_index() if dataset == "opex_lines" else {}
             scope = (await perms_for(user)).get("departments")
             async for d in db.aop_rows.find({"dataset": dataset}, {"_id": 0, "key": 1, "fields": 1}).sort("seq", 1):
                 f = d.get("fields") or {}
                 if not dept_scope.row_allowed(scope, dataset, f):
                     continue
                 f = {**f, **opex_schema.derive(f, dataset, cfg, acts.get(d["key"]))}
+                if dataset == "opex_lines":
+                    t = pick_tracker(f, idx)
+                    if t and (t[1].get("active_po_count") or 0):
+                        f.update(latest_po=t[1].get("latest_po"), previous_po=t[1].get("previous_po"), latest_pr=t[1].get("latest_pr"))
                 rows_out.append([f.get(c["key"]) for c in lay])
         name = f"{dataset}{'_template' if template else ''}"
         if fmt == "csv":
@@ -1738,21 +1807,138 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
 
     # ------------------------------------------------------------------ approvals of user edits
     @r.get("/changes")
-    async def changes(status: str = "pending", user: dict = Depends(get_current_user)):
+    async def changes(status: str = "pending", batch: Optional[str] = None, user: dict = Depends(get_current_user)):
         q: Dict[str, Any] = {"status": status}
+        if batch:
+            q["batch_id"] = batch
         if user.get("role") != "admin":
             q["requested_by"] = user.get("email")
-        return [d async for d in db.aop_changes.find(q, {"_id": 0}).sort("created_at", -1).limit(1000)]
+        return [d async for d in db.aop_changes.find(q, {"_id": 0}).sort("created_at", -1).limit(5000)]
 
-    @r.post("/changes/decide")
-    async def decide(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
-        require_admin(user)
-        ids = payload.get("ids") or []
-        approve = bool(payload.get("approve"))
-        comment = payload.get("comment") or ""
+    # Edits in "with approval" sections are the user's drafts (they keep seeing their numbers) until they submit
+    # them; a submission is one batch the admin reviews, downloads as one file and approves or rejects at once.
+    @r.get("/changes/drafts")
+    async def drafts_summary(user: dict = Depends(get_current_user)):
+        by: Dict[str, int] = {}
+        async for c in db.aop_changes.find({"status": "draft", "requested_by": user.get("email")}, {"_id": 0, "dataset": 1}):
+            by[c["dataset"]] = by.get(c["dataset"], 0) + 1
+        pend = await db.aop_changes.count_documents({"status": "pending", "requested_by": user.get("email")})
+        return {"drafts": sum(by.values()), "by_dataset": by, "submitted": pend}
+
+    @r.post("/changes/submit")
+    async def submit_changes(payload: Dict[str, Any] = Body(default={}), user: dict = Depends(get_current_user)):
+        q: Dict[str, Any] = {"status": "draft", "requested_by": user.get("email")}
+        if payload.get("dataset"):
+            q["dataset"] = payload["dataset"]
+        drafts = [d async for d in db.aop_changes.find(q, {"_id": 0})]
+        if not drafts:
+            raise HTTPException(400, "Nothing to submit — no unsubmitted changes")
+        bid = gen_id()
+        n = await db.aop_change_batches.count_documents({}) + 1
+        ds = sorted({d["dataset"] for d in drafts})
+        batch = {"id": bid, "number": f"AOP-{n:05d}", "status": "pending", "requested_by": user.get("email"),
+                 "requested_by_name": user.get("name"), "submitted_at": now_iso(), "note": (payload.get("note") or "").strip(),
+                 "datasets": ds, "sections": sorted({SPECS[x].section for x in ds if x in SPECS}),
+                 "count": len(drafts), "lines": len({(d["dataset"], d["key"]) for d in drafts})}
+        await db.aop_change_batches.insert_one(dict(batch))
+        # an earlier submitted value of the same cell is replaced by this one
+        for d in drafts:
+            await db.aop_changes.update_many({"dataset": d["dataset"], "key": d["key"], "field": d["field"], "status": "pending",
+                                              "requested_by": user.get("email")},
+                                             {"$set": {"status": "superseded", "decided_at": now_iso()}})
+        await db.aop_changes.update_many({"id": {"$in": [d["id"] for d in drafts]}},
+                                         {"$set": {"status": "pending", "batch_id": bid, "submitted_at": now_iso()}})
+        admins = await db.users.find({"role": "admin"}, {"_id": 0, "id": 1}).to_list(200)
+        if admins:
+            await db.notifications_inapp.insert_many([{
+                "id": gen_id(), "user_id": a["id"], "kind": "aop_batch", "read": False, "created_at": now_iso(),
+                "title": f"AOP changes submitted for approval · {batch['number']}",
+                "body": f"{user.get('name') or user.get('email')}: {len(drafts)} change(s) on {batch['lines']} line(s)"
+                        + (f" — {batch['note']}" if batch["note"] else ""),
+                "link": f"/admin/aop/approvals?batch={bid}"} for a in admins if a.get("id")])
+        await write_audit(db, entity_type="aop_changes", entity_id=bid, action="submit", user=user,
+                          field_changes={"count": len(drafts), "datasets": ds})
+        batch.pop("_id", None)
+        return batch
+
+    @r.post("/changes/discard")
+    async def discard_changes(payload: Dict[str, Any] = Body(default={}), user: dict = Depends(get_current_user)):
+        q: Dict[str, Any] = {"status": "draft", "requested_by": user.get("email")}
+        if payload.get("ids"):
+            q["id"] = {"$in": payload["ids"]}
+        if payload.get("dataset"):
+            q["dataset"] = payload["dataset"]
+        res = await db.aop_changes.delete_many(q)
+        return {"discarded": res.deleted_count}
+
+    @r.get("/change-batches")
+    async def change_batches(status: Optional[str] = "pending", user: dict = Depends(get_current_user)):
+        q: Dict[str, Any] = {} if status in (None, "", "all") else {"status": status}
+        if user.get("role") != "admin":
+            q["requested_by"] = user.get("email")
+        return [d async for d in db.aop_change_batches.find(q, {"_id": 0}).sort("submitted_at", -1).limit(500)]
+
+    async def batch_or_404(bid: str, user: dict) -> Dict[str, Any]:
+        b = await db.aop_change_batches.find_one({"id": bid}, {"_id": 0})
+        if not b or (user.get("role") != "admin" and b.get("requested_by") != user.get("email")):
+            raise HTTPException(404, "Batch not found")
+        return b
+
+    async def batch_rows(bid: str) -> List[Dict[str, Any]]:
+        """The batch's changes with each line's identifying fields and the column labels."""
+        chs = [c async for c in db.aop_changes.find({"batch_id": bid}, {"_id": 0}).sort([("dataset", 1), ("key", 1)])]
+        labels: Dict[str, Dict[str, str]] = {}
+        lines: Dict[tuple, Dict[str, Any]] = {}
+        for ds in {c["dataset"] for c in chs}:
+            labels[ds] = {c["key"]: c["label"] for c in await columns_with_draft(ds)}
+            keys = [c["key"] for c in chs if c["dataset"] == ds]
+            async for d in db.aop_rows.find({"dataset": ds, "key": {"$in": keys}}, {"_id": 0, "key": 1, "fields": 1}):
+                lines[(ds, d["key"])] = d.get("fields") or {}
+        out = []
+        for c in chs:
+            f = lines.get((c["dataset"], c["key"]), {})
+            out.append({**c, "dataset_label": SPECS[c["dataset"]].label if c["dataset"] in SPECS else c["dataset"],
+                        "field_label": labels.get(c["dataset"], {}).get(c["field"], c["field"]),
+                        "line": {k: f.get(k) for k in ("aop_code", "po", "vendor", "tag", "wbs", "department", "cost_centre",
+                                                         "gl", "aop_head", "description", "project_name") if f.get(k) not in (None, "")},
+                        "current": f.get(c["field"])})
+        return out
+
+    @r.get("/change-batches/{bid}")
+    async def change_batch(bid: str, user: dict = Depends(get_current_user)):
+        b = await batch_or_404(bid, user)
+        return {**b, "changes": await batch_rows(bid)}
+
+    @r.get("/change-batches/{bid}/export")
+    async def change_batch_export(bid: str, user: dict = Depends(get_current_user)):
+        """The whole submission as one Excel file."""
+        b = await batch_or_404(bid, user)
+        rows_ = await batch_rows(bid)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = b["number"]
+        ws.append([f"{b['number']} · submitted by {b.get('requested_by_name') or b['requested_by']} on {str(b['submitted_at'])[:16]}"
+                   + (f" — {b['note']}" if b.get("note") else "")])
+        head = ["Dataset", "Line", "AOP code", "PO", "Vendor", "Location", "Description", "Column", "Approved value",
+                "Proposed value", "Change", "Status"]
+        ws.append(head)
+        for c in rows_:
+            ln = c["line"]
+            delta = (c["new"] - c["old"]) if isinstance(c.get("new"), (int, float)) and isinstance(c.get("old"), (int, float)) else None
+            ws.append([c["dataset_label"], c["key"], ln.get("aop_code"), ln.get("po"), ln.get("vendor"), ln.get("tag"),
+                       ln.get("description") or ln.get("aop_head") or ln.get("project_name"), c["field_label"],
+                       c.get("old"), c.get("new"), delta, c.get("status")])
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": f'attachment; filename="{b["number"]}.xlsx"'})
+
+    async def decide_ids(ids: List[str], approve: bool, comment: str, user: dict) -> int:
         done = 0
         changed: Dict[str, List[tuple]] = {}
-        async for c in db.aop_changes.find({"id": {"$in": ids}, "status": "pending"}, {"_id": 0}):
+        batches = set()
+        async for c in db.aop_changes.find({"id": {"$in": ids}, "status": "pending"}, {"_id": 0}).sort("updated_at", 1):
             if approve:
                 await db.aop_rows.update_one({"dataset": c["dataset"], "key": c["key"]},
                                              {"$set": {f"fields.{c['field']}": c["new"], "updated_at": now_iso(),
@@ -1763,14 +1949,62 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             await db.aop_changes.update_one({"id": c["id"]}, {"$set": {"status": "approved" if approve else "rejected",
                                                                        "decided_by": user.get("email"), "decided_at": now_iso(),
                                                                        "comment": comment}})
+            if c.get("batch_id"):
+                batches.add(c["batch_id"])
             done += 1
         for ds, ch in changed.items():
             await after_edit(ds, ch)
         if approve and done:
             await bump_version()
+        for bid in batches:  # a batch's status follows its changes
+            sts = {c["status"] async for c in db.aop_changes.find({"batch_id": bid}, {"_id": 0, "status": 1})} - {"superseded"}
+            st = "pending" if "pending" in sts else ("approved" if sts == {"approved"} else "rejected" if sts == {"rejected"} else "partly approved")
+            b = await db.aop_change_batches.find_one_and_update(
+                {"id": bid}, {"$set": {"status": st, "decided_by": user.get("email"), "decided_at": now_iso(), "comment": comment}})
+            if b and st != "pending":
+                req = await db.users.find_one({"email": b.get("requested_by")}, {"_id": 0, "id": 1})
+                if req:
+                    await db.notifications_inapp.insert_one({
+                        "id": gen_id(), "user_id": req["id"], "kind": "aop_batch", "read": False, "created_at": now_iso(),
+                        "title": f"{b.get('number')} {st}", "body": comment or None, "link": "/app/aop/changes"})
+        return done
+
+    @r.post("/changes/decide")
+    async def decide(payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
+        require_admin(user)
+        approve = bool(payload.get("approve"))
+        done = await decide_ids(payload.get("ids") or [], approve, payload.get("comment") or "", user)
         await write_audit(db, entity_type="aop_changes", entity_id="batch", action="approve" if approve else "reject", user=user,
                           field_changes={"count": done})
         return {"decided": done}
+
+    @r.post("/change-batches/{bid}/decide")
+    async def decide_batch(bid: str, payload: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
+        """Approve or reject a whole submission at once (or only ``ids`` of it)."""
+        require_admin(user)
+        await batch_or_404(bid, user)
+        approve = bool(payload.get("approve"))
+        ids = payload.get("ids") or [c["id"] async for c in db.aop_changes.find({"batch_id": bid, "status": "pending"}, {"_id": 0, "id": 1})]
+        done = await decide_ids(ids, approve, payload.get("comment") or "", user)
+        await write_audit(db, entity_type="aop_change_batch", entity_id=bid, action="approve" if approve else "reject", user=user,
+                          field_changes={"count": done})
+        return {"decided": done, "batch": await db.aop_change_batches.find_one({"id": bid}, {"_id": 0})}
+
+    # ------------------------------------------------------------------ each user's own grid / report views
+    @r.get("/my-views")
+    async def my_views(user: dict = Depends(get_current_user)):
+        return {d["key"]: d.get("view") or {} async for d in db.aop_user_views.find({"user": user.get("email")}, {"_id": 0})}
+
+    @r.put("/my-views/{key}")
+    async def save_my_view(key: str, view: Dict[str, Any] = Body(...), user: dict = Depends(get_current_user)):
+        await db.aop_user_views.update_one({"user": user.get("email"), "key": key},
+                                           {"$set": {"view": view, "updated_at": now_iso()}}, upsert=True)
+        return {"ok": True}
+
+    @r.delete("/my-views/{key}")
+    async def clear_my_view(key: str, user: dict = Depends(get_current_user)):
+        await db.aop_user_views.delete_one({"user": user.get("email"), "key": key})
+        return {"ok": True}
 
     @r.get("/history/{dataset}/{key}")
     async def history(dataset: str, key: str, user: dict = Depends(get_current_user)):
@@ -1782,6 +2016,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
     # Review (To map, PO changes, Corrections, Checks, Upload log), PO / line history drawers, add-ons
     register_review(r, SimpleNamespace(db=db, engine=engine, get_current_user=get_current_user, perms_for=perms_for,
                                        get_config=get_config, write_audit=write_audit, bump_version=bump_version,
-                                       recalc_tracker=recalc_tracker, storage=storage, notify_run=notify_run))
+                                       recalc_tracker=recalc_tracker, storage=storage, notify_run=notify_run,
+                                       tracker_for=tracker_for))
     return r
 

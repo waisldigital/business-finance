@@ -225,10 +225,8 @@ def test_review_end_to_end(client, admin):
     assert s["to_map"] == 0 and "badge" in s
 
 
-def test_review_requires_opex_edit(client, make_user):
-    viewer = make_user({"aop_opex": {"can_view": True}})
-    assert client.get("/api/aop/review/summary", headers=viewer).status_code == 403
-    editor = make_user({"aop_opex": {"can_view": True, "can_edit": True}})
-    assert client.get("/api/aop/review/summary", headers=editor).status_code == 200
-    assert client.post("/api/aop/import/zmm", headers=viewer,
+def test_review_is_admin_only(client, make_user):
+    editor = make_user({"aop_opex": {"can_view": True, "can_edit": True, "can_upload": True}})
+    assert client.get("/api/aop/review/summary", headers=editor).status_code == 403
+    assert client.post("/api/aop/import/zmm", headers=editor,
                        files={"file": ("z.xlsx", zmm_book(BASE_ZMM), XLSX)}).status_code == 403

@@ -43,8 +43,8 @@ export default function GridSettings({ cols, view, update, reset, shared, hasMon
           <div className="px-3 py-2 border-b border-[var(--border)] space-y-2">
             <div className="flex items-center gap-2">
               {hasMonths && (
-                <button className={`icon-btn !h-7 ${view.twelveM ? "!border-[var(--gold)] !text-[var(--gold)]" : ""}`} onClick={() => update({ twelveM: !view.twelveM })}
-                        title="Show every month" data-testid={`${testid}-12m`}>
+                <button className={`icon-btn !h-7 ${view.twelveM === true ? "!border-[var(--gold)] !text-[var(--gold)]" : ""}`} onClick={() => update({ twelveM: view.twelveM !== true })}
+                        title="Every FY month by month (or switch 12M per FY on the year buttons)" data-testid={`${testid}-12m`}>
                   <CalendarBlank size={12} /><span>12M</span>
                 </button>
               )}

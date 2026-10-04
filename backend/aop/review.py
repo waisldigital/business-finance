@@ -4,8 +4,8 @@ Tabs: To map (new PO items needing a type and destination), PO changes (flagged 
 Corrections (POs to fix in SAP), Checks (non-blocking data checks), Upload log (every ZMM run).
 Plus the PO drawer, the line history drawer, add-on lines, re-splitting allocations and a full recalculation.
 
-Writes go through write_audit and follow the destination section's edit right (Opex → aop_opex, Overheads →
-aop_overheads, Capex → aop_capex); everything else needs edit on aop_opex or aop_review.
+Review is admin work (mapping, PO changes, corrections); users see the result on their Opex lines and open the PO
+drawer / line history read-only. Every write goes through write_audit.
 """
 from __future__ import annotations
 
@@ -45,18 +45,10 @@ def register_review(r, ctx: SimpleNamespace):
 
     # ------------------------------------------------------------------ access
     async def review_access(user: dict, action: str = "view", section: Optional[str] = None) -> Dict[str, Any]:
+        """Mapping, PO changes and corrections are admin work."""
         p = await ctx.perms_for(user)
-        if p["admin"]:
-            return p
-        secs = p["sections"]
-        if section:
-            ok = secs.get(section, {}).get("can_edit")
-        elif action == "view":
-            ok = secs["aop_opex"]["can_edit"] or secs.get("aop_review", {}).get("can_view")
-        else:
-            ok = secs["aop_opex"]["can_edit"] or secs.get("aop_review", {}).get("can_edit")
-        if not ok:
-            raise HTTPException(403, "Review needs edit rights on Opex (or the Review section)")
+        if not p["admin"]:
+            raise HTTPException(403, "Review is for administrators")
         return p
 
     async def audit(user, entity, action, changes):
@@ -619,8 +611,15 @@ def register_review(r, ctx: SimpleNamespace):
         plan = cfg["plan_fy"]
         lines = await engine.fields("opex_tracker", {"key": line_id})
         line = lines.get(line_id)
-        if not line:
-            raise HTTPException(404, "Line not found")
+        if not line:  # an Opex line (approved budget): follow its PO to the tracker line, else show its own PO
+            ol = (await engine.fields("opex_lines", {"key": line_id})).get(line_id)
+            if not ol:
+                raise HTTPException(404, "Line not found")
+            tk = await ctx.tracker_for(ol)
+            if tk:
+                line_id, line = tk
+            else:
+                line = ol
         F = "F" + plan[2:]
         addons = [k for k in (await engine.fields("opex_tracker", {"fields.parent_line_id": line_id}))]
         header = {"line_id": line_id, "aop_code": line.get("aop_code"), "wbs": line.get("wbs"), "tag": line.get("tag"),
