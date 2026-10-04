@@ -15,7 +15,8 @@ import { fmtCell, parseTSV, toTSV } from "./format";
  *        columns flagged `link`), selectable (row checkboxes), selected Set, onSelect(Set)
  */
 export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink, linkColumns = [], renderHeader,
-                                   selectable = false, selected, onSelect, height = "calc(100vh - 230px)", testid = "data-grid" }) {
+                                   selectable = false, selected, onSelect, height = "calc(100vh - 230px)", testid = "data-grid",
+                                   totals = false }) {
   const cols = useMemo(() => columns.filter((c) => !c.hidden), [columns]);
   const [active, setActive] = useState({ r: 0, c: 0 });
   const [anchor, setAnchor] = useState(null);
@@ -127,9 +128,48 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
   };
 
   const allSelected = selectable && rows.length > 0 && rows.every((r) => selected?.has(r.key));
+  const isNum = (c) => c && (c.type === "number" || c.type === "percent" || c.type === "money");
+
+  // the selection's numbers: count, sum, average (like Excel's status bar)
+  const stats = useMemo(() => {
+    let cells = 0, n = 0, sum = 0;
+    for (let r = sel.r1; r <= sel.r2 && r < rows.length; r++) for (let c = sel.c1; c <= sel.c2 && c < cols.length; c++) {
+      cells += 1;
+      const v = rows[r]?.fields?.[cols[c].key];
+      const x = typeof v === "number" ? v : (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v.replace(/,/g, ""))) ? Number(v.replace(/,/g, "")) : null);
+      if (x !== null && isNum(cols[c])) { n += 1; sum += x; }
+    }
+    return { cells, n, sum };
+  }, [sel, rows, cols]);
+
+  // subtotal of the rows shown (filters applied) for every numeric column
+  const colTotals = useMemo(() => {
+    if (!totals) return null;
+    const t = {};
+    cols.forEach((c) => {
+      if (!isNum(c) || c.type === "percent") return;
+      let s = 0, any = false;
+      for (const r of rows) { const v = r.fields?.[c.key]; if (typeof v === "number") { s += v; any = true; } }
+      if (any) t[c.key] = s;
+    });
+    return t;
+  }, [totals, rows, cols]);
+  const totalsRef = useRef(null);
+  const [headTop, setHeadTop] = useState(0);
+  useEffect(() => { setHeadTop(totals && totalsRef.current ? totalsRef.current.offsetHeight : 0); }, [totals, colTotals]);
 
   return (
     <div className="relative border border-[var(--border)] bg-[var(--surface)]" data-testid={testid}>
+      {stats.cells > 1 && (
+        <div className="absolute right-2 -top-6 text-[11px] text-[var(--muted)] tabular-nums flex items-center gap-3" data-testid={`${testid}-selstats`}>
+          <span>{stats.cells.toLocaleString("en-IN")} cells</span>
+          {stats.n > 0 && <>
+            <span>Count <b className="text-[var(--text)]">{stats.n.toLocaleString("en-IN")}</b></span>
+            <span>Sum <b className="text-[var(--text)]">{fmtCell(stats.sum, "number")}</b></span>
+            <span>Average <b className="text-[var(--text)]">{fmtCell(stats.sum / stats.n, "number")}</b></span>
+          </>}
+        </div>
+      )}
       <div
         ref={wrapRef}
         tabIndex={0}
@@ -142,16 +182,28 @@ export default function DataGrid({ columns, rows, canEdit, onCommit, onCellLink,
       >
         <table className="border-separate border-spacing-0 text-[12px] w-max min-w-full">
           <thead>
+            {colTotals && (
+              <tr ref={totalsRef} data-testid={`${testid}-totals`}>
+                {selectable && <th className="aop-th aop-tot sticky left-0 z-20" />}
+                {cols.map((c, ci) => (
+                  <th key={c.key} className={`aop-th aop-tot ${ci === 0 ? "sticky z-20 text-left" : "z-10"} ${isNum(c) ? "text-right tabular-nums" : ""}`}
+                      style={{ left: ci === 0 ? (selectable ? 28 : 0) : undefined }}>
+                    {ci === 0 ? `Subtotal · ${rows.length.toLocaleString("en-IN")} line${rows.length === 1 ? "" : "s"}` :
+                      colTotals[c.key] !== undefined ? fmtCell(colTotals[c.key], "number") : ""}
+                  </th>
+                ))}
+              </tr>
+            )}
             <tr>
               {selectable && (
-                <th className="aop-th sticky left-0 z-20 w-7">
+                <th className="aop-th sticky left-0 z-20 w-7" style={{ top: headTop }}>
                   <input type="checkbox" className="accent-[var(--gold)]" checked={allSelected}
                          onChange={(e) => onSelect?.(e.target.checked ? new Set(rows.map((r) => r.key)) : new Set())} />
                 </th>
               )}
               {cols.map((c, ci) => (
                 <th key={c.key} className={`aop-th ${ci === 0 ? "sticky z-20" : "z-10"} ${c.type === "number" || c.type === "percent" ? "text-right" : "text-left"}`}
-                    style={{ left: ci === 0 ? (selectable ? 28 : 0) : undefined, minWidth: c.width || (c.type === "number" ? 84 : 64) }}
+                    style={{ left: ci === 0 ? (selectable ? 28 : 0) : undefined, minWidth: c.width || (c.type === "number" ? 84 : 64), top: headTop }}
                     title={c.key}>
                   <span className="inline-flex items-center gap-1">
                     {!canEdit(c) && <LockSimple size={10} className="opacity-40" />}

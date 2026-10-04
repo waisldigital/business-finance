@@ -351,6 +351,7 @@ export default function DatasetWorkspace({ dataset, admin = false, onChanged, fo
       <DataGrid
         columns={visible}
         rows={filtered}
+        totals={["aop_opex", "aop_overheads"].includes(dataset.section)}
         renderHeader={(c) => <ColumnHeader col={c} rows={rowsV} view={view} update={updateView} align={c.type === "number" || c.type === "percent" ? "right" : "left"} testid={`ds-h-${c.key}`} />}
         canEdit={canEdit}
         onCommit={onCommit}

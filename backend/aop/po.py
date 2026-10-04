@@ -544,9 +544,16 @@ def segments(line: Dict[str, Any], links: List[Dict[str, Any]], cover: Dict[str,
             amt = float(it["value_inr"]) * pct
             s = d(ln.get("coverage_from")) or d(it.get("period_start"))
             e = d(ln.get("coverage_to")) or d(it.get("period_end"))
+            has_period = bool(s and e)
             if not (s and e):
                 if recurring:
                     flags.append(f"{k}: no service period")
+                    # no forecast segment, but the PO still counts for latest / old PO (ordered by its PO date)
+                    detail.append({"link": ln["_key"], "item": k, "po": it["po"], "amount": 0.0, "no_segment": True,
+                                   "value": round(amt, 2), "start": None, "end": None, "has_period": False, "alloc_pct": pct,
+                                   "supplier_code": it.get("supplier_code"), "supplier_name": it.get("supplier_name"),
+                                   "created_on": it.get("created_on"), "grn_inr": it.get("grn_inr"),
+                                   "value_inr": it.get("value_inr"), "pr_no": it.get("pr_no")})
                     continue
                 one = d(it.get("delivery_date")) or d(it.get("created_on"))
                 if not one:
@@ -557,7 +564,8 @@ def segments(line: Dict[str, Any], links: List[Dict[str, Any]], cover: Dict[str,
                 flags.append(f"{k}: period ends before it starts")
                 continue
             segs.append((amt, s, e))
-            detail.append({"link": ln["_key"], "item": k, "po": it["po"], "amount": round(amt, 2), "start": s.isoformat(),
+            detail.append({"link": ln["_key"], "item": k, "po": it["po"], "amount": round(amt, 2), "value": round(amt, 2),
+                           "has_period": has_period, "start": s.isoformat(),
                            "end": e.isoformat(), "alloc_pct": pct, "supplier_code": it.get("supplier_code"),
                            "supplier_name": it.get("supplier_name"), "created_on": it.get("created_on"),
                            "grn_inr": it.get("grn_inr"), "value_inr": it.get("value_inr"), "pr_no": it.get("pr_no")})
@@ -570,24 +578,42 @@ def fy_amount(segs: List[Tuple[float, date, date]], fy: str) -> float:
 
 # ---------------------------------------------------------------------------------------------- latest / previous PO
 def latest_previous(line: Dict[str, Any], detail: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Latest = the active linked PO with the latest period start (fallback created on; tie → higher allocated value);
-    previous = the next PO in that order with a different number, else the line's own PO."""
+    """Latest = the linked PO whose service period starts last (a PO without a service period is placed by its PO
+    date; tie → higher allocated value); previous (old) = the next PO in that order with a different number, else the
+    line's own PO. Both come with supplier, amount and service start / end for the sheet."""
     by_po: Dict[str, Dict[str, Any]] = {}
     for x in detail:
-        e = by_po.setdefault(x["po"], {"po": x["po"], "start": x["start"], "end": x["end"], "value": 0.0, "grn": 0.0,
-                                       "gross": 0.0, "supplier_code": x.get("supplier_code"),
+        e = by_po.setdefault(x["po"], {"po": x["po"], "start": None, "end": None, "value": 0.0, "grn": 0.0,
+                                       "supplier_code": x.get("supplier_code"), "has_period": False,
                                        "supplier_name": x.get("supplier_name"), "pr_no": x.get("pr_no"),
                                        "created_on": x.get("created_on")})
-        e["value"] += x["amount"]
+        e["value"] += x.get("value", x["amount"])
         e["grn"] += num(x.get("grn_inr")) * x.get("alloc_pct", 1)
-        e["start"] = min(e["start"], x["start"])
-        e["end"] = max(e["end"], x["end"])
-    order = sorted(by_po.values(), key=lambda e: (e["start"] or e.get("created_on") or "", e["value"]), reverse=True)
+        if x.get("start"):
+            e["start"] = min(e["start"], x["start"]) if e["start"] else x["start"]
+            e["end"] = max(e["end"], x["end"]) if e["end"] else x["end"]
+        e["has_period"] = e["has_period"] or bool(x.get("has_period", bool(x.get("start"))))
+        if x.get("created_on") and (not e.get("created_on") or x["created_on"] < e["created_on"]):
+            e["created_on"] = x["created_on"]
+    when = lambda e: (e["start"] if e["has_period"] and e["start"] else e.get("created_on") or e["start"] or "")  # noqa: E731
+    order = sorted(by_po.values(), key=lambda e: (when(e), e["value"]), reverse=True)
     own = line.get("po")
+    own_details = {"supplier": line.get("supplier_name") or line.get("vendor"),
+                   "value": line.get("net_po") or line.get("po_amount"), "start": line.get("po_start"), "end": line.get("po_end")}
     if not order:
-        return {"latest_po": own, "previous_po": None, "active_po_count": 0, "latest_pr": None}
+        return {"latest_po": own, "previous_po": None, "active_po_count": 0, "latest_pr": None,
+                "latest_po_supplier": own_details["supplier"], "latest_po_value_inr": own_details["value"],
+                "latest_po_start": own_details["start"], "latest_po_end": own_details["end"],
+                "previous_po_supplier": None, "previous_po_value_inr": None, "previous_po_start": None, "previous_po_end": None}
     lt = order[0]
-    prev = next((e["po"] for e in order[1:] if e["po"] != lt["po"]), None) or (own if own != lt["po"] else None)
+    prev_e = next((e for e in order[1:] if e["po"] != lt["po"]), None)
+    prev = prev_e["po"] if prev_e else (own if own != lt["po"] else None)
+    if prev_e:
+        pd_ = {"supplier": prev_e.get("supplier_name"), "value": round(prev_e["value"], 2), "start": prev_e["start"], "end": prev_e["end"]}
+    elif prev:
+        pd_ = own_details
+    else:
+        pd_ = {"supplier": None, "value": None, "start": None, "end": None}
     old_sup = (str(line.get("supplier_code") or "").strip(), _norm_name(line.get("supplier_name") or line.get("vendor")))
     changed = None
     if lt.get("supplier_code") and old_sup[0]:
@@ -598,6 +624,8 @@ def latest_previous(line: Dict[str, Any], detail: List[Dict[str, Any]]) -> Dict[
             "latest_po_supplier": lt.get("supplier_name"), "latest_po_value_inr": round(lt["value"], 2),
             "latest_po_start": lt["start"], "latest_po_end": lt["end"],
             "latest_po_grn_pct": round(lt["grn"] / lt["value"], 4) if lt["value"] else None,
+            "previous_po_supplier": pd_["supplier"], "previous_po_value_inr": pd_["value"],
+            "previous_po_start": pd_["start"], "previous_po_end": pd_["end"],
             "active_po_count": len(order), "supplier_changed": ("Yes" if changed else "No") if changed is not None else None,
             "po_order": [e["po"] for e in order]}
 

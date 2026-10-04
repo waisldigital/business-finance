@@ -16,6 +16,7 @@ import { SECTIONS, GROUPS, AOP_SECTION_KEYS } from "@/config/sections";
 import NotificationBell from "./NotificationBell";
 import Popover from "@/components/common/Popover";
 import BrandMark from "@/components/common/BrandMark";
+import TableSelection from "@/components/common/TableSelection";
 import Modal from "@/components/common/Modal";
 import { useResizableColumns } from "@/lib/resizableColumns";
 
@@ -204,6 +205,7 @@ export default function AppLayout({ children, portal = "app" }) {
           </Modal>
         )}
         <main className="flex-1 overflow-auto">{children}</main>
+        <TableSelection />
       </div>
     </div>
   );
