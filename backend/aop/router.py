@@ -1277,6 +1277,27 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                 "zmm": {k: zmm.get(k) for k in ("run_id", "status", "error", "rows", "po_items", "to_map", "changes_flagged",
                                                 "forecast_delta")} if zmm else None}
 
+    @r.post("/fx-rates/fetch")
+    async def fetch_fx_rates(payload: Dict[str, Any] = Body(default={}), user: dict = Depends(get_current_user)):
+        """Fetch exchange rates (INR per unit) from the internet into "FX rates by date". Default: every foreign
+        currency on the PO items for their PO dates up to today; or ``start``/``end`` (and ``currencies``) for a range.
+        Rates entered by hand are kept; ``overwrite`` refreshes earlier auto-fetched rates."""
+        if not await can(user, "fx_rates", "upload"):
+            raise HTTPException(403, "Fetching FX rates needs the upload permission on Inputs")
+        curs = payload.get("currencies") or []
+        if isinstance(curs, str):
+            curs = [c for c in re.split(r"[\s,;]+", curs) if c]
+        try:
+            need = await engine.po_fx_need(payload.get("start") or None, payload.get("end") or None, curs)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        res = await engine.fetch_fx(need, by=user.get("email") or "fx", overwrite=bool(payload.get("overwrite")))
+        if not res["saved"] and res["errors"] and len(res["errors"]) >= len(need):
+            raise HTTPException(502, "Could not fetch FX rates: " + "; ".join(res["errors"]))
+        await write_audit(db, entity_type="aop_dataset", entity_id="fx_rates", action="fetch", user=user,
+                          field_changes={"saved": res["saved"], "currencies": sorted(need)})
+        return {**res, "currencies": sorted(need)}
+
     @r.post("/import/zmm")
     async def import_zmm(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
         """Manual ZMM run — admins, or roles with upload on the PO register's section."""

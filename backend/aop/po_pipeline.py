@@ -51,18 +51,58 @@ def _num(v) -> float:
         return 0.0
 
 
-FX_API = os.environ.get("FX_API_URL", "https://api.frankfurter.app")
+FX_API = os.environ.get("FX_API_URL", "https://api.frankfurter.dev/v1")
+# All-currency daily rates (incl. AED, SAR, QAR … that the ECB doesn't publish), one file per date; two mirrors.
+FX_API_ALT = [u for u in os.environ.get(
+    "FX_API_ALT_URLS", "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date}/v1/currencies/{cur}.json,"
+                       "https://{date}.currency-api.pages.dev/v1/currencies/{cur}.json").split(",") if u.strip()]
+FX_COMMON = ["USD", "EUR", "GBP", "AED", "SGD"]
+FX_MAX_ALT_DAYS = 400
 
 
-async def fetch_fx_series(cur: str, start: str, end: str) -> Dict[str, float]:
-    """INR per unit of ``cur`` for each business day in [start − 10 days, end] (ECB reference rates)."""
+def fx_auto_fetch() -> bool:
+    return os.environ.get("FX_AUTO_FETCH", "true").strip().lower() not in ("0", "false", "no", "off")
+
+
+async def _fetch_ecb(c, cur: str, lo: str, end: str) -> Dict[str, float]:
+    r = await c.get(f"{FX_API}/{lo}..{end}", params={"from": cur, "to": "INR"})
+    if r.status_code in (404, 422):  # currency not published by the ECB
+        return {}
+    r.raise_for_status()
+    return {dt: float(v["INR"]) for dt, v in (r.json().get("rates") or {}).items() if v.get("INR")}
+
+
+async def _fetch_alt(c, cur: str, day: str) -> Optional[float]:
+    for tpl in FX_API_ALT:
+        try:
+            r = await c.get(tpl.strip().format(date=day, cur=cur.lower()))
+            if r.status_code == 200:
+                v = (r.json().get(cur.lower()) or {}).get("inr")
+                if v:
+                    return float(v)
+        except Exception:  # noqa: BLE001 — try the next mirror
+            continue
+    return None
+
+
+async def fetch_fx_series(cur: str, start: str, end: str, dates: Optional[List[str]] = None) -> Tuple[Dict[str, float], str]:
+    """INR per unit of ``cur`` by date for [start − 10 days, end]: ECB reference rates (business days); for a
+    currency the ECB doesn't publish, the daily all-currency rates for ``dates`` (else every day in the range)."""
     import httpx
     from datetime import date as _d, timedelta
     lo = (_d.fromisoformat(start) - timedelta(days=10)).isoformat()
-    async with httpx.AsyncClient(timeout=20) as c:
-        r = await c.get(f"{FX_API}/{lo}..{end}", params={"from": cur, "to": "INR"})
-    r.raise_for_status()
-    return {dt: float(v["INR"]) for dt, v in (r.json().get("rates") or {}).items() if v.get("INR")}
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+        out = await _fetch_ecb(c, cur, lo, end)
+        if out:
+            return out, "ECB reference (auto)"
+        days = sorted(set(dates or [])) or [(_d.fromisoformat(start) + timedelta(days=i)).isoformat()
+                                            for i in range((_d.fromisoformat(end) - _d.fromisoformat(start)).days + 1)]
+        today = _d.today().isoformat()
+        for day in [x for x in days if x <= today][-FX_MAX_ALT_DAYS:]:
+            v = await _fetch_alt(c, cur, day)
+            if v:
+                out[day] = v
+    return out, "Daily market rate (auto)"
 
 
 class FxTable:
@@ -161,23 +201,72 @@ class OpexEngine:
             if cur not in ("", "INR") and dt:
                 need[cur].append(dt)
         table = FxTable(stored, await self.rate_map())
-        missing = {c: ds for c, ds in need.items() if any(table.lookup(c, x) is None for x in ds)}
-        if missing and os.environ.get("FX_AUTO_FETCH", "true").strip().lower() not in ("0", "false", "no", "off"):
-            new: Dict[str, Dict[str, Any]] = {}
-            for cur, ds in missing.items():
-                try:
-                    got = await fetch_fx_series(cur, min(ds), max(ds))
-                except Exception as e:  # noqa: BLE001 — no network / API down: fall back to the assumptions, flagged
-                    table.error = f"{cur}: {e}"[:300]
-                    continue
-                for dt, rate in got.items():
-                    stored[cur][dt] = rate
-                    new[f"{cur}|{dt}"] = {"currency": cur, "date": dt, "rate": rate, "source": "ECB reference (auto)"}
-            if new:
-                await self.bulk_set("fx_rates", new, upsert=True, by=by)
-                table.fetched = len(new)
+        missing = {c: [x for x in ds if table.lookup(c, x) is None] for c, ds in need.items()}
+        missing = {c: ds for c, ds in missing.items() if ds}
+        if missing and fx_auto_fetch():
+            res = await self.fetch_fx(missing, by=by, stored=stored)
+            table.fetched, table.error = res["saved"], "; ".join(res["errors"]) or None
         table.reindex()
         return table
+
+    async def fetch_fx(self, need: Dict[str, List[str]], by: str = "system",
+                       stored: Optional[Dict[str, Dict[str, float]]] = None, overwrite: bool = False) -> Dict[str, Any]:
+        """Fetch rates from the internet for ``{currency: [dates]}`` (the range min..max of the dates is fetched) and
+        save them in fx_rates. Rates typed or uploaded by hand (source not "… (auto)") are never overwritten."""
+        cur_rows = await self.fields("fx_rates")
+        manual = {k for k, f in cur_rows.items() if f.get("source") and "(auto)" not in str(f.get("source"))}
+        new: Dict[str, Dict[str, Any]] = {}
+        errors: List[str] = []
+        per_cur: Dict[str, int] = {}
+        for cur, ds in need.items():
+            cur = str(cur).upper()
+            if cur in ("", "INR") or not ds:
+                continue
+            try:
+                got, src = await fetch_fx_series(cur, min(ds), max(ds), ds)
+            except Exception as e:  # noqa: BLE001 — no network / API down: callers fall back to the assumptions
+                errors.append(f"{cur}: {e}"[:300])
+                continue
+            if not got:
+                errors.append(f"{cur}: no rates published")
+            n = 0
+            for dt, rate in got.items():
+                k = f"{cur}|{dt}"
+                if k in manual or (k in cur_rows and (not overwrite or cur_rows[k].get("rate") == rate)):
+                    continue
+                if stored is not None:
+                    stored.setdefault(cur, {})[dt] = rate
+                new[k] = {"currency": cur, "date": dt, "rate": rate, "source": src}
+                n += 1
+            per_cur[cur] = n
+        if new:
+            await self.bulk_set("fx_rates", new, upsert=True, by=by)
+            if self.bump:
+                await self.bump()
+        return {"saved": len(new), "by_currency": per_cur, "errors": errors}
+
+    async def po_fx_need(self, start: Optional[str] = None, end: Optional[str] = None,
+                         currencies: Optional[List[str]] = None) -> Dict[str, List[str]]:
+        """What to fetch: every foreign currency on the PO items (else the common ones) for their PO dates;
+        with ``start``/``end`` the whole range instead (default: the last 30 days up to today)."""
+        from datetime import date as _d, timedelta
+        po_dates: Dict[str, List[str]] = defaultdict(list)
+        for f in (await self.fields("po_items")).values():
+            cur = str(f.get("currency") or "INR").strip().upper()
+            dt = str(f.get("created_on") or "")[:10]
+            if cur not in ("", "INR") and dt:
+                po_dates[cur].append(dt)
+        curs = [c.upper() for c in (currencies or [])] or sorted(po_dates) or FX_COMMON
+        if start or end or not po_dates:
+            hi = end or _d.today().isoformat()
+            lo = start or (_d.fromisoformat(hi) - timedelta(days=30)).isoformat()
+            n = (_d.fromisoformat(hi) - _d.fromisoformat(lo)).days
+            if n < 0:
+                raise ValueError("From date is after To date")
+            days = [(_d.fromisoformat(lo) + timedelta(days=i)).isoformat() for i in range(min(n, FX_MAX_ALT_DAYS) + 1)]
+            return {c: days for c in curs}
+        today = _d.today().isoformat()
+        return {c: sorted(set(po_dates.get(c) or [])) + [today] for c in curs}
 
     async def corrections_overrides(self) -> Dict[str, Dict[str, Any]]:
         out: Dict[str, Dict[str, Any]] = {}

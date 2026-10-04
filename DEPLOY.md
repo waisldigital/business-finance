@@ -74,6 +74,11 @@ is the only recurring input:
   `MS_CLIENT_ID`, `MS_CLIENT_SECRET`). Give that app the **Mail.Read** application permission and restrict it
   to the report mailbox with an Exchange Application Access Policy
   (`New-ApplicationAccessPolicy -AppId <MS_CLIENT_ID> -PolicyScopeGroupId <mailbox> -AccessRight RestrictAccess`).
+* **FX rates:** POs are converted to INR at the rate of the PO date, from Inputs → *FX rates by date*. Rates are
+  fetched from the internet automatically — on every ZMM run (missing dates), by the daily cron job (last 7 days)
+  and with the **Fetch rates** button — from the ECB reference rates (`api.frankfurter.dev`) and, for currencies
+  the ECB doesn't publish (AED, SAR…), daily market rates (`cdn.jsdelivr.net/npm/@fawazahmed0/currency-api`).
+  The backend needs outbound HTTPS to those hosts; `FX_AUTO_FETCH=false` turns it off.
 
 Each run rebuilds the PO items, flags changes on mapped POs (held until accepted), re-resolves the PO links and
 recalculates the forecast; the admins get an e-mail and an in-app notification. All human work sits in **Review**
