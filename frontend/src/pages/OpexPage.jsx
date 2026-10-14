@@ -289,32 +289,35 @@ export default function OpexPage() {
           </div>
         )}
 
-        <div className="tile overflow-x-auto">
-          {tab === "aop" && (
-            <AopTable rows={filteredAop} loading={loading} mode={mode} inrPerUsd={inrPerUsd} showMonthly={showMonthly} />
-          )}
-          {tab === "zmm" && (
-            <ZmmTable rows={filteredZmm} loading={loading} mode={mode} inrPerUsd={inrPerUsd} onViewPo={setDrawerPo} />
-          )}
-          {tab === "links" && (
-            <LinksTable
-              rows={filteredLinks}
-              loading={loading}
-              aopRows={aopRows}
-              onViewPo={setDrawerPo}
-              onEdit={(row) => { setEditLink(row); setShowLinkModal(true); }}
-              onDelete={deleteLink}
-            />
-          )}
-          {tab === "corrections" && (
-            <CorrTable
-              rows={filteredCorr}
-              loading={loading}
-              onEdit={(row) => { setEditCorr(row); setShowCorrModal(true); }}
-              onDelete={deleteCorr}
-            />
-          )}
-          {tab === "cute" && (
+        {tab !== "cute" ? (
+          <div className="tile overflow-x-auto">
+            {tab === "aop" && (
+              <AopTable rows={filteredAop} loading={loading} mode={mode} inrPerUsd={inrPerUsd} showMonthly={showMonthly} />
+            )}
+            {tab === "zmm" && (
+              <ZmmTable rows={filteredZmm} loading={loading} mode={mode} inrPerUsd={inrPerUsd} onViewPo={setDrawerPo} />
+            )}
+            {tab === "links" && (
+              <LinksTable
+                rows={filteredLinks}
+                loading={loading}
+                aopRows={aopRows}
+                onViewPo={setDrawerPo}
+                onEdit={(row) => { setEditLink(row); setShowLinkModal(true); }}
+                onDelete={deleteLink}
+              />
+            )}
+            {tab === "corrections" && (
+              <CorrTable
+                rows={filteredCorr}
+                loading={loading}
+                onEdit={(row) => { setEditCorr(row); setShowCorrModal(true); }}
+                onDelete={deleteCorr}
+              />
+            )}
+          </div>
+        ) : (
+          <div className="tile">
             <CuteDriversPanel
               rows={cuteRows}
               configs={airportConfigs}
@@ -323,8 +326,8 @@ export default function OpexPage() {
               inrPerUsd={inrPerUsd}
               onReload={loadAll}
             />
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {showAopUpload && <UploadModal type="aop" onClose={() => setShowAopUpload(false)} onDone={() => { setShowAopUpload(false); loadAll(); }} />}
