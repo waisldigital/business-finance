@@ -41,7 +41,7 @@
   --mis-head: #0f1f3d; --mis-cacr: #31869b; --mis-sol: #963634; --mis-tot: #1e3a5f;
   --mis-cacr-t: color-mix(in srgb, #b7dee8 55%, var(--surface));
   --mis-sol-t: color-mix(in srgb, #e6b8b7 50%, var(--surface));
-  --mis-tot-t: color-mix(in srgb, #c5d9f1 55%, var(--surface));
+  --mis-tot-t: color-mix(in srgb, #b0c9e2 68%, var(--surface));
   --mis-key: color-mix(in srgb, #ebf5ff 80%, var(--surface));
   --mis-band: color-mix(in srgb, #edf2f7 80%, var(--surface));
   --mis-child: color-mix(in srgb, #f2f2f2 70%, var(--surface));
@@ -50,7 +50,7 @@
 html[data-theme="charcoal"] .mis, html[data-theme="midnight"] .mis {
   --mis-cacr-t: color-mix(in srgb, #31869b 22%, var(--surface));
   --mis-sol-t: color-mix(in srgb, #963634 22%, var(--surface));
-  --mis-tot-t: color-mix(in srgb, #1e3a5f 35%, var(--surface));
+  --mis-tot-t: color-mix(in srgb, #1e3a5f 46%, var(--surface));
   --mis-key: color-mix(in srgb, #3b82f6 12%, var(--surface));
   --mis-band: color-mix(in srgb, #94a3b8 8%, var(--surface));
   --mis-child: color-mix(in srgb, #94a3b8 4%, var(--surface));
