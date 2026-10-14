@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 
