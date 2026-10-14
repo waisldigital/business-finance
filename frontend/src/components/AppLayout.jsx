@@ -8,6 +8,7 @@ import {
   ChartLineUp, FolderSimple, Database, UploadSimple, GavelIcon,
   ShieldCheck, ClockCounterClockwise, SignOut, Wallet, UsersThree, Truck, UserCircle,
   Palette, Gear, FunnelSimple, ArrowsClockwise, CaretLeft, CaretRight, Stack, IdentificationBadge,
+  Receipt,
 } from "@phosphor-icons/react";
 import NotificationBell from "./NotificationBell";
 
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/change-requests",  label: "Change Requests",  icon: ArrowsClockwise,testid: "sidebar-change-requests",  section: "change_requests" },
   { to: "/customers",        label: "Customer Profile", icon: UsersThree,     testid: "sidebar-customers",        section: "customer_profile" },
   { to: "/wbs-budget",       label: "WBS and Budget",   icon: Stack,          testid: "sidebar-wbs-budget",       section: "wbs_budget" },
+  { to: "/opex",             label: "Opex",             icon: Receipt,        testid: "sidebar-opex",             section: "opex" },
 ];
 
 // Administration nav — visible to admin role ONLY

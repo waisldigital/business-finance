@@ -32,6 +32,10 @@ from models import (
     WBSElementIn, WBSElementOut,
     ChangeRequestIn, ChangeRequestOut, CRAttachmentOut, CR_AIRPORTS,
     InAppNotificationOut,
+    OpexAopLineIn, OpexAopLineOut,
+    OpexZmmLineIn, OpexZmmLineOut,
+    OpexPoLinkIn, OpexPoLinkOut,
+    OpexZmmCorrectionIn, OpexZmmCorrectionOut,
 )
 from services import (
     can_transition, write_audit, compute_margin, find_matching_rule, create_approval_request,
@@ -96,6 +100,16 @@ async def on_startup():
     await db.roles.create_index("id", unique=True)
     await db.roles.create_index("name", unique=True)
     await db.employees.create_index("employee_no", unique=False)
+
+    # Opex module indexes
+    await db.opex_aop_lines.create_index("id", unique=True)
+    await db.opex_zmm_lines.create_index("id", unique=True)
+    await db.opex_zmm_lines.create_index("po_number")
+    await db.opex_po_links.create_index("id", unique=True)
+    await db.opex_po_links.create_index("aop_line_id")
+    await db.opex_po_links.create_index("po_number")
+    await db.opex_zmm_corrections.create_index("id", unique=True)
+    await db.opex_zmm_corrections.create_index("po_number")
 
     # Migration: drop legacy employee rows that don't have employee_no (old schema)
     legacy = await db.employees.count_documents({"employee_no": {"$exists": False}})
@@ -3058,6 +3072,516 @@ async def mark_in_app_notification_read(nid: str, user: dict = Depends(get_curre
 async def mark_all_in_app_notifications_read(user: dict = Depends(get_current_user)):
     r = await db.notifications_inapp.update_many({"user_id": user["id"], "read": False}, {"$set": {"read": True}})
     return {"updated": r.modified_count}
+
+
+# ============================================================
+# OPEX MODULE
+# ============================================================
+
+MONTHS = ["apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "jan", "feb", "mar"]
+ACTUAL_FIELDS = [f"{m}_actual" for m in MONTHS]
+FORECAST_FIELDS = [f"{m}_forecast" for m in MONTHS]
+
+AOP_COLUMNS = [
+    "WBS Element", "Cost Centre", "GL Account", "Description",
+    "Department", "Category", "Vendor Name", "Original Budget",
+    "Apr Actual", "May Actual", "Jun Actual", "Jul Actual",
+    "Aug Actual", "Sep Actual", "Oct Actual", "Nov Actual",
+    "Dec Actual", "Jan Actual", "Feb Actual", "Mar Actual",
+    "Apr Forecast", "May Forecast", "Jun Forecast", "Jul Forecast",
+    "Aug Forecast", "Sep Forecast", "Oct Forecast", "Nov Forecast",
+    "Dec Forecast", "Jan Forecast", "Feb Forecast", "Mar Forecast",
+    "FY28 Budget", "Variance Notes", "Owner Email",
+]
+
+AOP_COL_TO_FIELD = {
+    "WBS Element": "wbs_element", "Cost Centre": "cost_centre", "GL Account": "gl_account",
+    "Description": "description", "Department": "department", "Category": "category",
+    "Vendor Name": "vendor_name", "Original Budget": "original_budget",
+    "Apr Actual": "apr_actual", "May Actual": "may_actual", "Jun Actual": "jun_actual",
+    "Jul Actual": "jul_actual", "Aug Actual": "aug_actual", "Sep Actual": "sep_actual",
+    "Oct Actual": "oct_actual", "Nov Actual": "nov_actual", "Dec Actual": "dec_actual",
+    "Jan Actual": "jan_actual", "Feb Actual": "feb_actual", "Mar Actual": "mar_actual",
+    "Apr Forecast": "apr_forecast", "May Forecast": "may_forecast", "Jun Forecast": "jun_forecast",
+    "Jul Forecast": "jul_forecast", "Aug Forecast": "aug_forecast", "Sep Forecast": "sep_forecast",
+    "Oct Forecast": "oct_forecast", "Nov Forecast": "nov_forecast", "Dec Forecast": "dec_forecast",
+    "Jan Forecast": "jan_forecast", "Feb Forecast": "feb_forecast", "Mar Forecast": "mar_forecast",
+    "FY28 Budget": "fy28_budget", "Variance Notes": "variance_notes", "Owner Email": "owner_email",
+}
+
+ZMM_COLUMNS = [
+    "PO Number", "PO Item", "Vendor Code", "Vendor Name",
+    "WBS Element", "Cost Centre", "GL Account", "Material",
+    "Short Text", "PO Value", "GR Value", "Invoice Value", "Open Value",
+    "PO Date", "Start Date", "End Date", "Delivery Date",
+    "Currency", "Plant", "Purchasing Group", "Document Type",
+]
+
+ZMM_COL_TO_FIELD = {
+    "PO Number": "po_number", "PO Item": "po_item", "Vendor Code": "vendor_code",
+    "Vendor Name": "vendor_name", "WBS Element": "wbs_element", "Cost Centre": "cost_centre",
+    "GL Account": "gl_account", "Material": "material", "Short Text": "short_text",
+    "PO Value": "po_value", "GR Value": "gr_value", "Invoice Value": "invoice_value",
+    "Open Value": "open_value", "PO Date": "po_date", "Start Date": "start_date",
+    "End Date": "end_date", "Delivery Date": "delivery_date", "Currency": "currency",
+    "Plant": "plant", "Purchasing Group": "purchasing_group", "Document Type": "document_type",
+}
+
+NUMERIC_ZMM = {"po_value", "gr_value", "invoice_value", "open_value"}
+NUMERIC_AOP = {"original_budget", "fy28_budget"} | set(ACTUAL_FIELDS) | set(FORECAST_FIELDS)
+
+
+def _coerce_opex(field: str, val, numerics: set):
+    if val is None or (isinstance(val, str) and not val.strip()):
+        return 0.0 if field in numerics else None
+    if field in numerics:
+        try:
+            return float(str(val).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return 0.0
+    if isinstance(val, float) and val.is_integer():
+        return str(int(val))
+    return str(val).strip() if val else None
+
+
+def _compute_aop_derived(doc: dict) -> dict:
+    ytd = sum(doc.get(f, 0.0) or 0.0 for f in ACTUAL_FIELDS)
+    full_year = ytd + sum(doc.get(f, 0.0) or 0.0 for f in FORECAST_FIELDS)
+    doc["ytd_actual"] = round(ytd, 2)
+    doc["full_year_estimate"] = round(full_year, 2)
+    return doc
+
+
+def _is_po_active(link: dict) -> bool:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    s = link.get("start_date") or link.get("po_date") or ""
+    e = link.get("end_date") or "9999-12-31"
+    if not s:
+        return False
+    return s <= today <= e
+
+
+# ---- AOP Lines ----
+
+@api.get("/opex/aop", response_model=List[OpexAopLineOut])
+async def list_aop_lines(_: dict = Depends(get_current_user)):
+    rows = await db.opex_aop_lines.find({}, {"_id": 0}).to_list(50000)
+    return [_compute_aop_derived(r) for r in rows]
+
+
+@api.post("/opex/aop", response_model=OpexAopLineOut)
+async def create_aop_line(payload: OpexAopLineIn, user: dict = Depends(get_current_user)):
+    doc = payload.model_dump()
+    doc["id"] = gen_id()
+    doc["created_at"] = now_iso()
+    doc["updated_at"] = doc["created_at"]
+    _compute_aop_derived(doc)
+    await db.opex_aop_lines.insert_one(doc)
+    await write_audit(db, entity_type="opex_aop", entity_id=doc["id"], action="create", user=user, field_changes=doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/opex/aop/{aid}", response_model=OpexAopLineOut)
+async def update_aop_line(aid: str, payload: OpexAopLineIn, user: dict = Depends(get_current_user)):
+    existing = await db.opex_aop_lines.find_one({"id": aid})
+    if not existing:
+        raise HTTPException(404, "Not found")
+    upd = payload.model_dump()
+    upd["updated_at"] = now_iso()
+    _compute_aop_derived(upd)
+    await db.opex_aop_lines.update_one({"id": aid}, {"$set": upd})
+    await write_audit(db, entity_type="opex_aop", entity_id=aid, action="update", user=user, field_changes=upd)
+    row = await db.opex_aop_lines.find_one({"id": aid}, {"_id": 0})
+    return _compute_aop_derived(row)
+
+
+@api.delete("/opex/aop/{aid}")
+async def delete_aop_line(aid: str, user: dict = Depends(get_current_user)):
+    await db.opex_aop_lines.delete_one({"id": aid})
+    await write_audit(db, entity_type="opex_aop", entity_id=aid, action="delete", user=user)
+    return {"ok": True}
+
+
+@api.get("/opex/aop/template")
+async def aop_template(_: dict = Depends(get_current_user)):
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "AOP Budget"
+    ws.append(AOP_COLUMNS)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="opex_aop_template.xlsx"'})
+
+
+@api.post("/opex/aop/bulk-upload")
+async def aop_bulk_upload(
+    file: UploadFile = File(...),
+    mode: str = Query("append", description="append | replace"),
+    user: dict = Depends(get_current_user),
+):
+    if mode not in ("append", "replace"):
+        raise HTTPException(400, "mode must be 'append' or 'replace'")
+    contents = await file.read()
+    fname = (file.filename or "").lower()
+    rows: List[Dict[str, Any]] = []
+    try:
+        if fname.endswith(".csv"):
+            import csv
+            text = contents.decode("utf-8-sig", errors="ignore")
+            reader = csv.DictReader(io.StringIO(text))
+            for r in reader:
+                rows.append(dict(r))
+        else:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+            ws = wb.active
+            headers = []
+            for ri, row in enumerate(ws.iter_rows(values_only=True)):
+                if ri == 0:
+                    headers = [str(h or "").strip() for h in row]
+                    continue
+                rd = {headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))}
+                rows.append(rd)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse file: {e}")
+
+    parsed = []
+    failures = []
+    for i, raw in enumerate(rows):
+        doc = {}
+        for col, field in AOP_COL_TO_FIELD.items():
+            doc[field] = _coerce_opex(field, raw.get(col), NUMERIC_AOP)
+        if not doc.get("wbs_element") and not doc.get("cost_centre"):
+            failures.append({"row": i + 2, "reason": "missing WBS Element and Cost Centre"})
+            continue
+        doc["id"] = gen_id()
+        doc["created_at"] = now_iso()
+        doc["updated_at"] = doc["created_at"]
+        _compute_aop_derived(doc)
+        parsed.append(doc)
+
+    saved = 0
+    if mode == "replace":
+        await db.opex_aop_lines.delete_many({})
+    if parsed:
+        await db.opex_aop_lines.insert_many(parsed)
+        saved = len(parsed)
+
+    log = {
+        "id": gen_id(), "entity_type": "opex_aop", "file_name": file.filename or "",
+        "total_rows": len(rows), "success_rows": saved, "failed_rows": len(failures),
+        "failures": failures[:100], "uploaded_by": user.get("email"),
+        "uploaded_at": now_iso(),
+    }
+    await db.upload_logs.insert_one(log)
+    await write_audit(db, entity_type="opex_aop", entity_id=log["id"], action="bulk_upload", user=user,
+                      field_changes={"mode": mode, "success": saved, "failed": len(failures)})
+    return {"success": saved, "failed": len(failures), "failures": failures[:100]}
+
+
+# ---- ZMM Lines ----
+
+@api.get("/opex/zmm", response_model=List[OpexZmmLineOut])
+async def list_zmm_lines(_: dict = Depends(get_current_user)):
+    rows = await db.opex_zmm_lines.find({}, {"_id": 0}).to_list(50000)
+    corrections = {}
+    async for c in db.opex_zmm_corrections.find({"active": True}, {"_id": 0}):
+        key = (c.get("po_number") or "") + "|" + (c.get("po_item") or "")
+        corrections[key] = c
+    for r in rows:
+        key = (r.get("po_number") or "") + "|" + (r.get("po_item") or "")
+        if key in corrections:
+            for field, val in corrections[key].get("corrected_fields", {}).items():
+                r[field] = val
+            r["_corrected"] = True
+    return rows
+
+
+@api.get("/opex/zmm/{zmm_id}")
+async def get_zmm_line(zmm_id: str, _: dict = Depends(get_current_user)):
+    row = await db.opex_zmm_lines.find_one({"id": zmm_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(404, "Not found")
+    corr = await db.opex_zmm_corrections.find_one(
+        {"po_number": row.get("po_number"), "po_item": row.get("po_item"), "active": True}, {"_id": 0})
+    if corr:
+        for field, val in corr.get("corrected_fields", {}).items():
+            row[f"_orig_{field}"] = row.get(field)
+            row[field] = val
+        row["_correction"] = corr
+    return row
+
+
+@api.get("/opex/zmm/template")
+async def zmm_template(_: dict = Depends(get_current_user)):
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ZMM PO Register"
+    ws.append(ZMM_COLUMNS)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="opex_zmm_template.xlsx"'})
+
+
+@api.post("/opex/zmm/bulk-upload")
+async def zmm_bulk_upload(
+    file: UploadFile = File(...),
+    mode: str = Query("append", description="append | replace"),
+    user: dict = Depends(get_current_user),
+):
+    if mode not in ("append", "replace"):
+        raise HTTPException(400, "mode must be 'append' or 'replace'")
+    contents = await file.read()
+    fname = (file.filename or "").lower()
+    rows: List[Dict[str, Any]] = []
+    try:
+        if fname.endswith(".csv"):
+            import csv
+            text = contents.decode("utf-8-sig", errors="ignore")
+            reader = csv.DictReader(io.StringIO(text))
+            for r in reader:
+                rows.append(dict(r))
+        else:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+            ws = wb.active
+            headers = []
+            for ri, row in enumerate(ws.iter_rows(values_only=True)):
+                if ri == 0:
+                    headers = [str(h or "").strip() for h in row]
+                    continue
+                rd = {headers[i]: (row[i] if i < len(row) else None) for i in range(len(headers))}
+                rows.append(rd)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to parse file: {e}")
+
+    batch_id = gen_id()
+    now = now_iso()
+    parsed = []
+    failures = []
+    for i, raw in enumerate(rows):
+        doc = {}
+        for col, field in ZMM_COL_TO_FIELD.items():
+            doc[field] = _coerce_opex(field, raw.get(col), NUMERIC_ZMM)
+        if not doc.get("po_number"):
+            failures.append({"row": i + 2, "reason": "missing PO Number"})
+            continue
+        doc["id"] = gen_id()
+        doc["triage_status"] = "unmapped"
+        doc["change_flag"] = None
+        doc["fetched_at"] = now
+        doc["upload_batch_id"] = batch_id
+        doc["created_at"] = now
+        parsed.append(doc)
+
+    saved = 0
+    if mode == "replace":
+        await db.opex_zmm_lines.delete_many({})
+    if parsed:
+        await db.opex_zmm_lines.insert_many(parsed)
+        saved = len(parsed)
+
+    # Auto-triage: mark mapped where PO links exist
+    linked_pos = set()
+    async for lnk in db.opex_po_links.find({}, {"po_number": 1}):
+        linked_pos.add(lnk.get("po_number"))
+    if linked_pos:
+        await db.opex_zmm_lines.update_many(
+            {"upload_batch_id": batch_id, "po_number": {"$in": list(linked_pos)}},
+            {"$set": {"triage_status": "mapped"}})
+
+    log = {
+        "id": gen_id(), "entity_type": "opex_zmm", "file_name": file.filename or "",
+        "total_rows": len(rows), "success_rows": saved, "failed_rows": len(failures),
+        "failures": failures[:100], "uploaded_by": user.get("email"),
+        "uploaded_at": now,
+    }
+    await db.upload_logs.insert_one(log)
+    await write_audit(db, entity_type="opex_zmm", entity_id=log["id"], action="bulk_upload", user=user,
+                      field_changes={"mode": mode, "batch_id": batch_id, "success": saved, "failed": len(failures)})
+    return {"success": saved, "failed": len(failures), "batch_id": batch_id, "failures": failures[:100]}
+
+
+# ---- PO Links ----
+
+@api.get("/opex/po-links", response_model=List[OpexPoLinkOut])
+async def list_po_links(_: dict = Depends(get_current_user)):
+    rows = await db.opex_po_links.find({}, {"_id": 0}).to_list(50000)
+    for r in rows:
+        r["is_active"] = _is_po_active(r)
+    return rows
+
+
+@api.get("/opex/po-links/by-aop/{aop_id}")
+async def po_links_by_aop(aop_id: str, _: dict = Depends(get_current_user)):
+    links = await db.opex_po_links.find({"aop_line_id": aop_id}, {"_id": 0}).to_list(500)
+    for lnk in links:
+        lnk["is_active"] = _is_po_active(lnk)
+    links.sort(key=lambda x: x.get("start_date") or x.get("po_date") or "")
+    return links
+
+
+@api.get("/opex/po-links/by-po/{po_number}")
+async def po_links_by_po(po_number: str, _: dict = Depends(get_current_user)):
+    links = await db.opex_po_links.find({"po_number": po_number}, {"_id": 0}).to_list(500)
+    for lnk in links:
+        lnk["is_active"] = _is_po_active(lnk)
+    return links
+
+
+@api.get("/opex/po-chain/{po_number}")
+async def po_chain(po_number: str, _: dict = Depends(get_current_user)):
+    """Get the full chronological chain of POs linked to the same AOP lines as the given PO."""
+    my_links = await db.opex_po_links.find({"po_number": po_number}, {"_id": 0}).to_list(100)
+    aop_ids = list(set(lnk["aop_line_id"] for lnk in my_links if lnk.get("aop_line_id")))
+    if not aop_ids:
+        return {"chain": [], "aop_lines": []}
+    all_links = await db.opex_po_links.find({"aop_line_id": {"$in": aop_ids}}, {"_id": 0}).to_list(5000)
+    for lnk in all_links:
+        lnk["is_active"] = _is_po_active(lnk)
+    all_links.sort(key=lambda x: (x.get("sequence_order", 999), x.get("start_date") or x.get("po_date") or ""))
+    aop_lines = await db.opex_aop_lines.find({"id": {"$in": aop_ids}}, {"_id": 0}).to_list(100)
+    po_nums = list(set(lnk["po_number"] for lnk in all_links))
+    zmm_rows = await db.opex_zmm_lines.find({"po_number": {"$in": po_nums}}, {"_id": 0}).to_list(5000)
+    corrections = {}
+    async for c in db.opex_zmm_corrections.find({"po_number": {"$in": po_nums}, "active": True}, {"_id": 0}):
+        key = (c.get("po_number") or "") + "|" + (c.get("po_item") or "")
+        corrections[key] = c
+    for r in zmm_rows:
+        key = (r.get("po_number") or "") + "|" + (r.get("po_item") or "")
+        if key in corrections:
+            corr = corrections[key]
+            r["_correction"] = corr
+            for field, val in corr.get("corrected_fields", {}).items():
+                r[f"_orig_{field}"] = r.get(field)
+                r[field] = val
+    return {"chain": all_links, "zmm_details": zmm_rows, "aop_lines": aop_lines}
+
+
+@api.post("/opex/po-links", response_model=OpexPoLinkOut)
+async def create_po_link(payload: OpexPoLinkIn, user: dict = Depends(get_current_user)):
+    doc = payload.model_dump()
+    doc["id"] = gen_id()
+    doc["created_by"] = user.get("email")
+    doc["created_at"] = now_iso()
+    doc["updated_at"] = doc["created_at"]
+    doc["is_active"] = _is_po_active(doc)
+    await db.opex_po_links.insert_one(doc)
+    # Auto-update triage status on linked ZMM rows
+    await db.opex_zmm_lines.update_many(
+        {"po_number": doc["po_number"]},
+        {"$set": {"triage_status": "mapped"}})
+    await write_audit(db, entity_type="opex_po_link", entity_id=doc["id"], action="create", user=user, field_changes=doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/opex/po-links/{lid}", response_model=OpexPoLinkOut)
+async def update_po_link(lid: str, payload: OpexPoLinkIn, user: dict = Depends(get_current_user)):
+    existing = await db.opex_po_links.find_one({"id": lid})
+    if not existing:
+        raise HTTPException(404, "Not found")
+    upd = payload.model_dump()
+    upd["updated_at"] = now_iso()
+    upd["is_active"] = _is_po_active(upd)
+    await db.opex_po_links.update_one({"id": lid}, {"$set": upd})
+    await write_audit(db, entity_type="opex_po_link", entity_id=lid, action="update", user=user, field_changes=upd)
+    row = await db.opex_po_links.find_one({"id": lid}, {"_id": 0})
+    row["is_active"] = _is_po_active(row)
+    return row
+
+
+@api.delete("/opex/po-links/{lid}")
+async def delete_po_link(lid: str, user: dict = Depends(get_current_user)):
+    lnk = await db.opex_po_links.find_one({"id": lid})
+    if lnk:
+        remaining = await db.opex_po_links.count_documents(
+            {"po_number": lnk["po_number"], "id": {"$ne": lid}})
+        if remaining == 0:
+            await db.opex_zmm_lines.update_many(
+                {"po_number": lnk["po_number"]},
+                {"$set": {"triage_status": "unmapped"}})
+    await db.opex_po_links.delete_one({"id": lid})
+    await write_audit(db, entity_type="opex_po_link", entity_id=lid, action="delete", user=user)
+    return {"ok": True}
+
+
+# ---- ZMM Corrections ----
+
+@api.get("/opex/corrections", response_model=List[OpexZmmCorrectionOut])
+async def list_corrections(_: dict = Depends(get_current_user)):
+    return await db.opex_zmm_corrections.find({}, {"_id": 0}).to_list(50000)
+
+
+@api.post("/opex/corrections", response_model=OpexZmmCorrectionOut)
+async def create_correction(payload: OpexZmmCorrectionIn, user: dict = Depends(get_current_user)):
+    doc = payload.model_dump()
+    doc["id"] = gen_id()
+    doc["corrected_by"] = user.get("email")
+    doc["corrected_at"] = now_iso()
+    doc["active"] = True
+    doc["created_at"] = now_iso()
+    await db.opex_zmm_corrections.insert_one(doc)
+    await write_audit(db, entity_type="opex_correction", entity_id=doc["id"], action="create", user=user, field_changes=doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/opex/corrections/{cid}", response_model=OpexZmmCorrectionOut)
+async def update_correction(cid: str, payload: OpexZmmCorrectionIn, user: dict = Depends(get_current_user)):
+    existing = await db.opex_zmm_corrections.find_one({"id": cid})
+    if not existing:
+        raise HTTPException(404, "Not found")
+    upd = payload.model_dump()
+    upd["corrected_by"] = user.get("email")
+    upd["corrected_at"] = now_iso()
+    await db.opex_zmm_corrections.update_one({"id": cid}, {"$set": upd})
+    await write_audit(db, entity_type="opex_correction", entity_id=cid, action="update", user=user, field_changes=upd)
+    return await db.opex_zmm_corrections.find_one({"id": cid}, {"_id": 0})
+
+
+@api.delete("/opex/corrections/{cid}")
+async def delete_correction(cid: str, user: dict = Depends(get_current_user)):
+    await db.opex_zmm_corrections.delete_one({"id": cid})
+    await write_audit(db, entity_type="opex_correction", entity_id=cid, action="delete", user=user)
+    return {"ok": True}
+
+
+# ---- Opex Summary / Stats ----
+
+@api.get("/opex/summary")
+async def opex_summary(_: dict = Depends(get_current_user)):
+    aop_count = await db.opex_aop_lines.count_documents({})
+    zmm_count = await db.opex_zmm_lines.count_documents({})
+    links_count = await db.opex_po_links.count_documents({})
+    corrections_count = await db.opex_zmm_corrections.count_documents({"active": True})
+    mapped = await db.opex_zmm_lines.count_documents({"triage_status": "mapped"})
+    unmapped = await db.opex_zmm_lines.count_documents({"triage_status": "unmapped"})
+    total_budget = 0.0
+    total_po_value = 0.0
+    async for row in db.opex_aop_lines.find({}, {"original_budget": 1}):
+        total_budget += row.get("original_budget", 0.0) or 0.0
+    async for row in db.opex_zmm_lines.find({}, {"po_value": 1}):
+        total_po_value += row.get("po_value", 0.0) or 0.0
+    return {
+        "aop_lines": aop_count,
+        "zmm_lines": zmm_count,
+        "po_links": links_count,
+        "corrections": corrections_count,
+        "mapped": mapped,
+        "unmapped": unmapped,
+        "total_budget": round(total_budget, 2),
+        "total_po_value": round(total_po_value, 2),
+    }
 
 
 @api.get("/health")

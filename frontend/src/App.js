@@ -19,6 +19,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import PipelinePage from "@/pages/PipelinePage";
 import ChangeRequestsPage from "@/pages/ChangeRequestsPage";
 import WBSBudgetPage from "@/pages/WBSBudgetPage";
+import OpexPage from "@/pages/OpexPage";
 import EmployeesPage from "@/pages/EmployeesPage";
 
 function Protected({ children, adminOnly }) {
@@ -69,6 +70,7 @@ function App() {
                 <Route path="/pipeline" element={<SectionProtected section="pipeline"><PipelinePage /></SectionProtected>} />
                 <Route path="/change-requests" element={<SectionProtected section="change_requests"><ChangeRequestsPage /></SectionProtected>} />
                 <Route path="/wbs-budget" element={<SectionProtected section="wbs_budget"><WBSBudgetPage /></SectionProtected>} />
+                <Route path="/opex" element={<SectionProtected section="opex"><OpexPage /></SectionProtected>} />
                 <Route path="/customers" element={<SectionProtected section="customer_profile"><MasterPage entityKey="customers" /></SectionProtected>} />
                 <Route path="/customers/:id" element={<SectionProtected section="customer_profile"><CustomerProfilePage /></SectionProtected>} />
                 <Route path="/suppliers" element={<Protected adminOnly><MasterPage entityKey="suppliers" /></Protected>} />
