@@ -788,3 +788,33 @@ class OpexZmmCorrectionOut(OpexZmmCorrectionIn):
     corrected_at: Optional[str] = None
     active: bool = True
     created_at: str
+
+
+# ── CUTE Drivers (PAX & Rate) ──
+
+class OpexCuteDriverIn(BaseModel):
+    airport: str
+    pax_type: str  # domestic / international
+    metric: str    # pax / rate
+    fy24_value: float = 0.0
+    fy25_value: float = 0.0
+    fy26_value: float = 0.0
+    fy27_value: float = 0.0
+    fy28_value: float = 0.0
+
+
+class OpexCuteDriverOut(OpexCuteDriverIn):
+    id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class OpexAirportConfigIn(BaseModel):
+    airport: str
+    manual_revenue: bool = False
+
+
+class OpexAirportConfigOut(OpexAirportConfigIn):
+    id: str
+    created_at: str
+    updated_at: Optional[str] = None

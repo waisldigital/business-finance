@@ -9,6 +9,8 @@ import {
   Plus, X, CaretDown, Check, ArrowRight,
   LinkSimple, Trash, Tag, CircleNotch, Eye,
   CaretLeft, CaretRight, PencilSimple, Warning,
+  SortAscending, SortDescending, FunnelSimple,
+  AirplaneTilt, CheckSquare,
 } from "@phosphor-icons/react";
 
 const MONTHS = ["apr","may","jun","jul","aug","sep","oct","nov","dec","jan","feb","mar"];
@@ -65,6 +67,20 @@ const CORR_COLS = [
   { key: "corrected_at", label: "Corrected At", date: true },
 ];
 
+const FY_COLS = [
+  { key: "fy24_value", label: "FY'24 A", num: true },
+  { key: "fy25_value", label: "FY'25 A", num: true },
+  { key: "fy26_value", label: "FY'26 F", num: true },
+  { key: "fy27_value", label: "FY'27 B", num: true },
+  { key: "fy28_value", label: "FY'28 B", num: true },
+];
+
+const CUTE_FILTER_COLS = [
+  { key: "airport", label: "Airport", hue: 40 },
+  { key: "pax_type", label: "PAX Type", hue: 160 },
+  { key: "metric", label: "Metric", hue: 270 },
+];
+
 
 export default function OpexPage() {
   const { user } = useAuth();
@@ -76,11 +92,14 @@ export default function OpexPage() {
   const [zmmRows, setZmmRows] = useState([]);
   const [linkRows, setLinkRows] = useState([]);
   const [corrRows, setCorrRows] = useState([]);
+  const [cuteRows, setCuteRows] = useState([]);
+  const [airportConfigs, setAirportConfigs] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [showAopUpload, setShowAopUpload] = useState(false);
   const [showZmmUpload, setShowZmmUpload] = useState(false);
+  const [showCuteUpload, setShowCuteUpload] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showCorrModal, setShowCorrModal] = useState(false);
   const [editLink, setEditLink] = useState(null);
@@ -91,18 +110,22 @@ export default function OpexPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [aop, zmm, links, corr, sum] = await Promise.all([
+      const [aop, zmm, links, corr, sum, cute, configs] = await Promise.all([
         api.get("/opex/aop"),
         api.get("/opex/zmm"),
         api.get("/opex/po-links"),
         api.get("/opex/corrections"),
         api.get("/opex/summary"),
+        api.get("/opex/cute-drivers"),
+        api.get("/opex/airport-configs"),
       ]);
       setAopRows(aop.data);
       setZmmRows(zmm.data);
       setLinkRows(links.data);
       setCorrRows(corr.data);
       setSummary(sum.data);
+      setCuteRows(cute.data);
+      setAirportConfigs(configs.data);
     } finally { setLoading(false); }
   }, []);
 
@@ -157,14 +180,14 @@ export default function OpexPage() {
     loadAll();
   };
 
-  const tabData = { aop: filteredAop, zmm: filteredZmm, links: filteredLinks, corrections: filteredCorr };
+  const tabData = { aop: filteredAop, zmm: filteredZmm, links: filteredLinks, corrections: filteredCorr, cute: cuteRows };
   const currentRows = tabData[tab] || [];
 
   return (
     <div data-testid="opex-page">
       <PageHeader
         title="Opex"
-        subtitle="AOP Budget · PO Register · PO Links · Corrections"
+        subtitle="AOP Budget · PO Register · PO Links · Corrections · CUTE Drivers"
         breadcrumb="HOME · OPEX"
         actions={
           <div className="flex gap-2">
@@ -198,31 +221,41 @@ export default function OpexPage() {
                 <Plus size={14} weight="bold" /> Add Correction
               </button>
             )}
+            {tab === "cute" && (
+              <>
+                <a className="btn-ghost flex items-center gap-2 text-xs" href={`${API_BASE}/opex/cute-drivers/template`} data-testid="opex-cute-template-btn">
+                  <DownloadSimple size={14} weight="bold" /> CUTE Template
+                </a>
+                <button className="btn-secondary flex items-center gap-2 text-xs" onClick={() => setShowCuteUpload(true)} data-testid="opex-cute-upload-btn">
+                  <UploadSimple size={14} weight="bold" /> Upload CUTE
+                </button>
+              </>
+            )}
           </div>
         }
       />
 
-      <div className="px-8 py-6 space-y-4">
-        {/* Stat chips */}
+      <div className="px-4 py-4 space-y-3">
         {summary && (
           <div className="flex flex-wrap items-center gap-2">
-            <StatChip label="AOP Lines" value={summary.aop_count} testid="chip-aop" />
-            <StatChip label="ZMM Lines" value={summary.zmm_count} testid="chip-zmm" />
-            <StatChip label="PO Links" value={summary.links_count} testid="chip-links" />
+            <StatChip label="AOP Lines" value={summary.aop_lines} testid="chip-aop" />
+            <StatChip label="ZMM Lines" value={summary.zmm_lines} testid="chip-zmm" />
+            <StatChip label="PO Links" value={summary.po_links} testid="chip-links" />
             <StatChip label="Mapped" value={summary.mapped} color="var(--success)" testid="chip-mapped" />
             <StatChip label="Unmapped" value={summary.unmapped} color="var(--warning)" testid="chip-unmapped" />
             <StatChip label="Total Budget" value={formatCurrency(summary.total_budget, mode, inrPerUsd)} testid="chip-budget" />
             <StatChip label="Total PO" value={formatCurrency(summary.total_po_value, mode, inrPerUsd)} testid="chip-po-value" />
+            <StatChip label="CUTE Drivers" value={summary.cute_drivers} testid="chip-cute" />
           </div>
         )}
 
-        {/* Sub-tabs + search */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="tile p-1 inline-flex gap-1" data-testid="opex-tabs">
             <TabButton active={tab === "aop"} onClick={() => setTab("aop")} testid="opex-tab-aop">AOP Lines</TabButton>
             <TabButton active={tab === "zmm"} onClick={() => setTab("zmm")} testid="opex-tab-zmm">PO Register</TabButton>
             <TabButton active={tab === "links"} onClick={() => setTab("links")} testid="opex-tab-links">PO Links</TabButton>
             <TabButton active={tab === "corrections"} onClick={() => setTab("corrections")} testid="opex-tab-corrections">Corrections</TabButton>
+            <TabButton active={tab === "cute"} onClick={() => setTab("cute")} testid="opex-tab-cute">CUTE Drivers</TabButton>
           </div>
           <div className="flex items-center gap-3">
             {tab === "aop" && (
@@ -234,26 +267,28 @@ export default function OpexPage() {
                 {showMonthly ? "Hide Monthly" : "Show Monthly"}
               </button>
             )}
-            <div className="relative">
-              <MagnifyingGlass size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-              <input
-                className="input pl-7 h-8 text-xs w-64"
-                placeholder="Search…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                data-testid="opex-search"
-              />
-            </div>
+            {tab !== "cute" && (
+              <div className="relative">
+                <MagnifyingGlass size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                <input
+                  className="input pl-7 h-8 text-xs w-64"
+                  placeholder="Search…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  data-testid="opex-search"
+                />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Count row */}
-        <div className="text-[11px] text-[var(--muted)] px-1">
-          {currentRows.length} {tab === "aop" ? "AOP lines" : tab === "zmm" ? "ZMM lines" : tab === "links" ? "PO links" : "corrections"}
-          {q && ` (filtered)`}
-        </div>
+        {tab !== "cute" && (
+          <div className="text-[11px] text-[var(--muted)] px-1">
+            {currentRows.length} {tab === "aop" ? "AOP lines" : tab === "zmm" ? "ZMM lines" : tab === "links" ? "PO links" : "corrections"}
+            {q && ` (filtered)`}
+          </div>
+        )}
 
-        {/* Table area */}
         <div className="tile overflow-x-auto">
           {tab === "aop" && (
             <AopTable rows={filteredAop} loading={loading} mode={mode} inrPerUsd={inrPerUsd} showMonthly={showMonthly} />
@@ -279,16 +314,24 @@ export default function OpexPage() {
               onDelete={deleteCorr}
             />
           )}
+          {tab === "cute" && (
+            <CuteDriversPanel
+              rows={cuteRows}
+              configs={airportConfigs}
+              loading={loading}
+              mode={mode}
+              inrPerUsd={inrPerUsd}
+              onReload={loadAll}
+            />
+          )}
         </div>
       </div>
 
-      {/* Modals */}
       {showAopUpload && <UploadModal type="aop" onClose={() => setShowAopUpload(false)} onDone={() => { setShowAopUpload(false); loadAll(); }} />}
       {showZmmUpload && <UploadModal type="zmm" onClose={() => setShowZmmUpload(false)} onDone={() => { setShowZmmUpload(false); loadAll(); }} />}
+      {showCuteUpload && <UploadModal type="cute" onClose={() => setShowCuteUpload(false)} onDone={() => { setShowCuteUpload(false); loadAll(); }} />}
       {showLinkModal && <PoLinkModal existing={editLink} aopRows={aopRows} onClose={() => setShowLinkModal(false)} onDone={() => { setShowLinkModal(false); loadAll(); }} />}
       {showCorrModal && <CorrectionModal existing={editCorr} onClose={() => setShowCorrModal(false)} onDone={() => { setShowCorrModal(false); loadAll(); }} />}
-
-      {/* PO Detail Drawer */}
       {drawerPo && <PoDetailDrawer poNumber={drawerPo} mode={mode} inrPerUsd={inrPerUsd} onClose={() => setDrawerPo(null)} />}
     </div>
   );
@@ -339,6 +382,408 @@ function LoadingRow({ cols }) {
 }
 
 
+/* ─── Filter Dropdown (Excel-style column filter) ─── */
+
+function FilterDropdown({ column, options, selected, onChange, sort, onSort }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef();
+
+  useEffect(() => {
+    const onDocClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const isActive = (selected && selected.size > 0) || !!sort;
+  const filteredOptions = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return options;
+    return options.filter((o) => o.toLowerCase().includes(qq));
+  }, [options, q]);
+
+  const toggle = (v) => {
+    const next = new Set(selected || []);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    onChange(next);
+  };
+  const selectAllVisible = () => {
+    const next = new Set(selected || []);
+    for (const o of filteredOptions) next.add(o);
+    onChange(next);
+  };
+  const clear = () => { onChange(new Set()); if (onSort) onSort(null); };
+
+  const tint = `hsl(${column.hue || 40} 70% 50%)`;
+  const tintBg = `hsl(${column.hue || 40} 70% 50% / 0.10)`;
+  const tintBorder = `hsl(${column.hue || 40} 70% 50% / 0.45)`;
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] tracking-overline border transition-all"
+        style={{
+          background: isActive ? tintBg : "var(--surface-2)",
+          borderColor: isActive ? tintBorder : "var(--border)",
+          color: isActive ? tint : "var(--text)",
+        }}
+        data-testid={`opex-filter-${column.key}`}
+      >
+        <span className="w-1.5 h-1.5" style={{ background: tint }} />
+        {column.label}
+        {isActive && selected?.size > 0 && <span className="font-mono normal-case ml-0.5">({selected.size})</span>}
+        <CaretDown size={10} weight="bold" />
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 mt-1 w-64 bg-[var(--surface)] border shadow-xl"
+          style={{ borderColor: tintBorder, zIndex: 100 }}
+          data-testid={`opex-filter-popup-${column.key}`}
+        >
+          {onSort && (
+            <div className="border-b" style={{ borderColor: "var(--border)" }}>
+              <button
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-[var(--surface-2)] ${sort === "asc" ? "text-[var(--gold)]" : "text-[var(--text)]"}`}
+                onClick={() => { onSort(sort === "asc" ? null : "asc"); }}
+              >
+                <SortAscending size={13} weight="bold" /> Sort A → Z
+              </button>
+              <button
+                className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-[var(--surface-2)] ${sort === "desc" ? "text-[var(--gold)]" : "text-[var(--text)]"}`}
+                onClick={() => { onSort(sort === "desc" ? null : "desc"); }}
+              >
+                <SortDescending size={13} weight="bold" /> Sort Z → A
+              </button>
+            </div>
+          )}
+          <div className="p-2 border-b" style={{ borderColor: "var(--border)" }}>
+            <div className="relative">
+              <MagnifyingGlass size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+              <input
+                autoFocus
+                className="input pl-7 h-7 text-xs w-full"
+                placeholder={`Search ${column.label.toLowerCase()}…`}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                data-testid={`opex-filter-search-${column.key}`}
+              />
+            </div>
+            <div className="flex items-center justify-between mt-1.5 text-[10px] tracking-overline">
+              <button className="text-[var(--gold)]" onClick={selectAllVisible}>Select all{q ? " filtered" : ""}</button>
+              <button className="text-[var(--muted)]" onClick={clear}>Clear</button>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto py-1">
+            {filteredOptions.length === 0 && (
+              <div className="text-xs text-[var(--muted)] px-3 py-2">No values</div>
+            )}
+            {filteredOptions.map((o) => {
+              const checked = selected && selected.has(o);
+              return (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => toggle(o)}
+                  className="w-full text-left px-3 py-1 text-xs hover:bg-[var(--surface-2)] flex items-center gap-2"
+                  data-testid={`opex-filter-option-${column.key}-${o}`}
+                >
+                  <span
+                    className="w-3.5 h-3.5 border flex items-center justify-center"
+                    style={{ background: checked ? tint : "transparent", borderColor: checked ? tint : "var(--border)" }}
+                  >
+                    {checked && <Check size={9} weight="bold" color="#fff" />}
+                  </span>
+                  <span className="truncate flex-1">{o}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ─── CUTE Drivers Panel ─── */
+
+function CuteDriversPanel({ rows, configs, loading, mode, inrPerUsd, onReload }) {
+  const [filters, setFilters] = useState({});
+  const [sorts, setSorts] = useState({});
+  const [editingCell, setEditingCell] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const configMap = useMemo(() => {
+    const m = {};
+    for (const c of configs) m[c.airport] = c;
+    return m;
+  }, [configs]);
+
+  const allAirports = useMemo(() => [...new Set(rows.map(r => r.airport))].sort(), [rows]);
+  const allPaxTypes = useMemo(() => [...new Set(rows.map(r => r.pax_type))].sort(), [rows]);
+  const allMetrics = useMemo(() => [...new Set(rows.map(r => r.metric))].sort(), [rows]);
+
+  const filterOptions = useMemo(() => ({
+    airport: allAirports,
+    pax_type: allPaxTypes,
+    metric: allMetrics,
+  }), [allAirports, allPaxTypes, allMetrics]);
+
+  const filteredRows = useMemo(() => {
+    let data = [...rows];
+    for (const col of CUTE_FILTER_COLS) {
+      const sel = filters[col.key];
+      if (sel && sel.size > 0) {
+        data = data.filter(r => sel.has(r[col.key]));
+      }
+    }
+    const sortKey = Object.keys(sorts).find(k => sorts[k]);
+    if (sortKey) {
+      const dir = sorts[sortKey] === "asc" ? 1 : -1;
+      data.sort((a, b) => {
+        const av = (a[sortKey] || "").toString().toLowerCase();
+        const bv = (b[sortKey] || "").toString().toLowerCase();
+        return av < bv ? -dir : av > bv ? dir : 0;
+      });
+    }
+    return data;
+  }, [rows, filters, sorts]);
+
+  const filteredAirports = useMemo(() => {
+    const apSet = new Set(filteredRows.map(r => r.airport));
+    return [...apSet].sort();
+  }, [filteredRows]);
+
+  const buildDisplayRows = useMemo(() => {
+    const result = [];
+    for (const ap of filteredAirports) {
+      const apRows = filteredRows.filter(r => r.airport === ap);
+      const isManual = configMap[ap]?.manual_revenue || false;
+      const byType = {};
+      for (const r of apRows) {
+        const key = `${r.pax_type}_${r.metric}`;
+        byType[key] = r;
+      }
+
+      const domPax = byType["domestic_pax"];
+      const intlPax = byType["international_pax"];
+      const domRate = byType["domestic_rate"];
+      const intlRate = byType["international_rate"];
+
+      if (domPax) result.push({ ...domPax, _display: "data" });
+      if (intlPax) result.push({ ...intlPax, _display: "data" });
+
+      const totalPax = {};
+      for (const fc of FY_COLS) {
+        totalPax[fc.key] = (domPax?.[fc.key] || 0) + (intlPax?.[fc.key] || 0);
+      }
+      result.push({ airport: ap, pax_type: "total", metric: "pax", ...totalPax, _display: "total", _computed: true });
+
+      if (domRate) result.push({ ...domRate, _display: "data" });
+      if (intlRate) result.push({ ...intlRate, _display: "data" });
+
+      const domRevenue = {};
+      const intlRevenue = {};
+      const totalRevenue = {};
+      for (const fc of FY_COLS) {
+        const dp = domPax?.[fc.key] || 0;
+        const ip = intlPax?.[fc.key] || 0;
+        const dr = domRate?.[fc.key] || 0;
+        const ir = intlRate?.[fc.key] || 0;
+        domRevenue[fc.key] = isManual ? null : dp * dr;
+        intlRevenue[fc.key] = isManual ? null : ip * ir;
+        totalRevenue[fc.key] = isManual ? null : (dp * dr + ip * ir);
+      }
+      result.push({ airport: ap, pax_type: "domestic", metric: "revenue", ...domRevenue, _display: "revenue", _computed: true, _manual: isManual });
+      result.push({ airport: ap, pax_type: "international", metric: "revenue", ...intlRevenue, _display: "revenue", _computed: true, _manual: isManual });
+      result.push({ airport: ap, pax_type: "total", metric: "revenue", ...totalRevenue, _display: "revenue", _computed: true, _manual: isManual });
+    }
+    return result;
+  }, [filteredRows, filteredAirports, configMap]);
+
+  const toggleManualRevenue = async (airport) => {
+    const current = configMap[airport]?.manual_revenue || false;
+    try {
+      await api.post("/opex/airport-configs", { airport, manual_revenue: !current });
+      onReload();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const startEdit = (row, colKey) => {
+    if (row._computed) return;
+    const isKeyCol = colKey === "airport" || colKey === "pax_type" || colKey === "metric";
+    if (isKeyCol) return;
+    setEditingCell({ id: row.id, col: colKey });
+    setEditValue(String(row[colKey] ?? ""));
+  };
+
+  const saveEdit = async () => {
+    if (!editingCell) return;
+    setSaving(true);
+    try {
+      const row = rows.find(r => r.id === editingCell.id);
+      if (!row) return;
+      const payload = {
+        airport: row.airport,
+        pax_type: row.pax_type,
+        metric: row.metric,
+        fy24_value: row.fy24_value,
+        fy25_value: row.fy25_value,
+        fy26_value: row.fy26_value,
+        fy27_value: row.fy27_value,
+        fy28_value: row.fy28_value,
+        [editingCell.col]: parseFloat(editValue) || 0,
+      };
+      await api.put(`/opex/cute-drivers/${editingCell.id}`, payload);
+      setEditingCell(null);
+      onReload();
+    } catch (e) {
+      console.error(e);
+    } finally { setSaving(false); }
+  };
+
+  const cancelEdit = () => setEditingCell(null);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") saveEdit();
+    if (e.key === "Escape") cancelEdit();
+  };
+
+  let prevAirport = null;
+
+  return (
+    <div>
+      <div className="p-3 border-b border-[var(--border)] flex flex-wrap items-center gap-2">
+        <FunnelSimple size={14} weight="bold" className="text-[var(--muted)]" />
+        {CUTE_FILTER_COLS.map(col => (
+          <FilterDropdown
+            key={col.key}
+            column={col}
+            options={filterOptions[col.key] || []}
+            selected={filters[col.key]}
+            onChange={(sel) => setFilters(f => ({ ...f, [col.key]: sel }))}
+            sort={sorts[col.key]}
+            onSort={(dir) => setSorts(s => ({ ...s, [col.key]: dir }))}
+          />
+        ))}
+        <div className="text-[11px] text-[var(--muted)] ml-auto">
+          {filteredRows.length} of {rows.length} drivers{filteredRows.length < rows.length ? " (filtered)" : ""}
+        </div>
+      </div>
+
+      <div className="p-3 bg-[var(--surface-2)] border-b border-[var(--border)] flex items-center justify-between">
+        <div>
+          <div className="text-xs font-semibold flex items-center gap-2">
+            <AirplaneTilt size={14} weight="duotone" className="text-[var(--gold)]" />
+            CUTE drivers (PAX & Rate)
+          </div>
+          <div className="text-[10px] text-[var(--muted)] mt-0.5">
+            Key: airport + pax_type + metric · Monthly PAX and rate per PAX by airport
+          </div>
+        </div>
+        <div className="text-[10px] text-[var(--muted)] text-right">
+          every cell is editable · click a value to edit
+        </div>
+      </div>
+
+      <table className="tbl w-full" data-testid="opex-cute-table">
+        <thead>
+          <tr>
+            <th>Airport</th>
+            <th>Passenger</th>
+            <th>Metric</th>
+            {FY_COLS.map(c => <th key={c.key} className="num">{c.label}</th>)}
+            <th className="w-20 text-center">Manual Rev</th>
+          </tr>
+        </thead>
+        <tbody>
+          {loading && <LoadingRow cols={4 + FY_COLS.length} />}
+          {!loading && buildDisplayRows.length === 0 && <EmptyRow cols={4 + FY_COLS.length} msg="No CUTE drivers — upload data to populate." />}
+          {!loading && buildDisplayRows.map((r, idx) => {
+            const isNewAirport = r.airport !== prevAirport;
+            prevAirport = r.airport;
+            const isTotalRow = r._display === "total";
+            const isRevenueRow = r._display === "revenue";
+            const isComputed = r._computed;
+
+            return (
+              <tr
+                key={r.id || `${r.airport}-${r.pax_type}-${r.metric}-${idx}`}
+                className={`${isNewAirport && idx > 0 ? "border-t-2 border-[var(--gold)]/20" : ""}
+                  ${isTotalRow ? "bg-[var(--surface-2)] font-semibold" : ""}
+                  ${isRevenueRow ? "bg-amber-900/5" : ""}`}
+                data-testid={`cute-row-${r.airport}-${r.pax_type}-${r.metric}`}
+              >
+                <td className="font-mono text-xs font-semibold">
+                  {isNewAirport ? r.airport : ""}
+                </td>
+                <td className="text-xs capitalize">{r.pax_type}</td>
+                <td className="text-xs capitalize">
+                  {r.metric}
+                  {isComputed && <span className="text-[9px] text-[var(--muted)] ml-1">(auto)</span>}
+                </td>
+                {FY_COLS.map(fc => {
+                  const isEditing = editingCell && editingCell.id === r.id && editingCell.col === fc.key;
+                  const val = r[fc.key];
+                  if (isEditing) {
+                    return (
+                      <td key={fc.key} className="num p-0">
+                        <input
+                          autoFocus
+                          type="number"
+                          className="w-full h-full px-2 py-1 text-xs font-mono text-right bg-[var(--gold)]/10 border border-[var(--gold)] outline-none"
+                          value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          onKeyDown={handleKeyDown}
+                          onBlur={saveEdit}
+                          disabled={saving}
+                        />
+                      </td>
+                    );
+                  }
+                  return (
+                    <td
+                      key={fc.key}
+                      className={`num font-mono text-xs ${!isComputed ? "cursor-pointer hover:bg-[var(--gold)]/5" : ""} ${isRevenueRow && r._manual ? "text-[var(--muted)] italic" : ""}`}
+                      onClick={() => !isComputed && startEdit(r, fc.key)}
+                      title={isComputed ? "Auto-computed" : "Click to edit"}
+                    >
+                      {isRevenueRow && r._manual ? "manual" : formatNumber(val != null ? Math.round(val * 100) / 100 : 0)}
+                    </td>
+                  );
+                })}
+                <td className="text-center">
+                  {isNewAirport && (
+                    <button
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] border transition-all ${
+                        configMap[r.airport]?.manual_revenue
+                          ? "border-amber-500 text-amber-400 bg-amber-900/10"
+                          : "border-[var(--border)] text-[var(--muted)]"
+                      }`}
+                      onClick={() => toggleManualRevenue(r.airport)}
+                      title={configMap[r.airport]?.manual_revenue ? "Revenue is manually entered" : "Revenue = PAX × Rate (auto)"}
+                      data-testid={`cute-manual-${r.airport}`}
+                    >
+                      <CheckSquare size={11} weight={configMap[r.airport]?.manual_revenue ? "fill" : "regular"} />
+                      {configMap[r.airport]?.manual_revenue ? "Manual" : "Auto"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
 /* ─── AOP Table ─── */
 
 function AopTable({ rows, loading, mode, inrPerUsd, showMonthly }) {
@@ -353,7 +798,7 @@ function AopTable({ rows, loading, mode, inrPerUsd, showMonthly }) {
   ];
 
   return (
-    <table className="tbl min-w-[1200px]" data-testid="opex-aop-table">
+    <table className="tbl w-full" data-testid="opex-aop-table">
       <thead>
         <tr>
           {AOP_ID_COLS.map(c => <th key={c.key}>{c.label}</th>)}
@@ -395,7 +840,7 @@ function AopTable({ rows, loading, mode, inrPerUsd, showMonthly }) {
 
 function ZmmTable({ rows, loading, mode, inrPerUsd, onViewPo }) {
   return (
-    <table className="tbl min-w-[1100px]" data-testid="opex-zmm-table">
+    <table className="tbl w-full" data-testid="opex-zmm-table">
       <thead>
         <tr>
           {ZMM_COLS.map(c => <th key={c.key} className={c.num ? "num" : ""}>{c.label}</th>)}
@@ -443,7 +888,7 @@ function LinksTable({ rows, loading, aopRows, onViewPo, onEdit, onDelete }) {
   }, [aopRows]);
 
   return (
-    <table className="tbl min-w-[1000px]" data-testid="opex-links-table">
+    <table className="tbl w-full" data-testid="opex-links-table">
       <thead>
         <tr>
           {LINK_COLS.map(c => <th key={c.key}>{c.label}</th>)}
@@ -495,7 +940,7 @@ function LinksTable({ rows, loading, aopRows, onViewPo, onEdit, onDelete }) {
 
 function CorrTable({ rows, loading, onEdit, onDelete }) {
   return (
-    <table className="tbl min-w-[800px]" data-testid="opex-corr-table">
+    <table className="tbl w-full" data-testid="opex-corr-table">
       <thead>
         <tr>
           {CORR_COLS.map(c => <th key={c.key}>{c.label}</th>)}
@@ -542,7 +987,7 @@ function CorrTable({ rows, loading, onEdit, onDelete }) {
 }
 
 
-/* ─── Upload Modal (AOP / ZMM) ─── */
+/* ─── Upload Modal (AOP / ZMM / CUTE) ─── */
 
 function UploadModal({ type, onClose, onDone }) {
   const [uploadMode, setUploadMode] = useState("append");
@@ -551,9 +996,12 @@ function UploadModal({ type, onClose, onDone }) {
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
 
-  const label = type === "aop" ? "AOP Lines" : "ZMM PO Register";
-  const endpoint = type === "aop" ? "/opex/aop/bulk-upload" : "/opex/zmm/bulk-upload";
-  const templateUrl = type === "aop" ? `${API_BASE}/opex/aop/template` : `${API_BASE}/opex/zmm/template`;
+  const labels = { aop: "AOP Lines", zmm: "ZMM PO Register", cute: "CUTE Drivers" };
+  const endpoints = { aop: "/opex/aop/bulk-upload", zmm: "/opex/zmm/bulk-upload", cute: "/opex/cute-drivers/bulk-upload" };
+  const templates = { aop: `${API_BASE}/opex/aop/template`, zmm: `${API_BASE}/opex/zmm/template`, cute: `${API_BASE}/opex/cute-drivers/template` };
+  const label = labels[type];
+  const endpoint = endpoints[type];
+  const templateUrl = templates[type];
 
   const submit = async () => {
     if (!file) { setErr("Choose a file first"); return; }
@@ -593,7 +1041,7 @@ function UploadModal({ type, onClose, onDone }) {
                   : "border-[var(--border)] text-[var(--muted)]"}`}
                 onClick={() => setUploadMode("append")}
               >
-                Append
+                Append / Update
               </button>
               <button
                 className={`px-3 py-2 text-xs border transition-all ${uploadMode === "replace"
@@ -912,7 +1360,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
         style={{ animation: "slideInRight 200ms ease-out" }}
         data-testid="opex-po-drawer"
       >
-        {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border)] shrink-0">
           <div className="min-w-0">
             <div className="text-[10px] tracking-overline text-[var(--muted)]">PO CHAIN DETAIL</div>
@@ -921,7 +1368,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
           <button className="btn-ghost shrink-0" onClick={onClose} aria-label="Close drawer"><X size={18} /></button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {loading && (
             <div className="flex items-center justify-center py-16 text-[var(--muted)]">
@@ -933,7 +1379,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
           )}
           {!loading && !err && data && (
             <>
-              {/* Chain timeline */}
               {chainPOs.length > 1 && (
                 <div>
                   <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">PO CHAIN ({chainPOs.length} POs)</div>
@@ -956,7 +1401,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                 </div>
               )}
 
-              {/* PO Selector dropdown (alternative for long chains) */}
               {chainPOs.length > 1 && (
                 <div>
                   <label className="text-[10px] tracking-overline text-[var(--muted)] mb-1 block">SELECT PO</label>
@@ -976,7 +1420,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                 </div>
               )}
 
-              {/* Summary table when multiple POs */}
               {allZmmSummary && (
                 <div>
                   <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">PO SUMMARY</div>
@@ -1011,7 +1454,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                 </div>
               )}
 
-              {/* Selected PO detail (ZMM lines) */}
               <div>
                 <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">
                   {chainPOs.length <= 1 ? "PO DETAIL" : `DETAIL — ${selectedPo}`}
@@ -1046,7 +1488,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                       <DetailRow label="Currency" value={z.currency} />
                       <DetailRow label="Purchasing Group" value={z.purchasing_group} />
 
-                      {/* Correction tags */}
                       {z._corrections && z._corrections.length > 0 && (
                         <div className="border-t border-[var(--border)] pt-2 mt-2">
                           <div className="text-[10px] tracking-overline text-amber-400 mb-1 flex items-center gap-1">
@@ -1068,7 +1509,6 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                 ))}
               </div>
 
-              {/* Linked AOP lines */}
               {aopLines.length > 0 && (
                 <div>
                   <div className="text-[10px] tracking-overline text-[var(--muted)] mb-2">LINKED AOP LINES</div>
