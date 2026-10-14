@@ -1,6 +1,6 @@
 """Workflow + Approval engine + Audit logging services."""
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 import uuid
 
 STAGE_ORDER = ["Pipeline", "Deal P&L", "Customer PO", "Operations", "Closure"]

@@ -2,13 +2,10 @@ import React, { useRef, useState } from "react";
 import { AirplaneTilt } from "@phosphor-icons/react";
 
 /**
- * AirplaneButton — primary CTA with an airplane that takes off when clicked.
+ * AirplaneButton — the CTA for moving work forward (stage advance, submit for approval): the airplane icon
+ * takes off as the action runs. Routine saves use a plain .btn-primary.
  *
- * Wrap any "Save", "Advance", "Submit", "Proceed" action with this. The
- * airplane icon flies to the right with a contrail before invoking the
- * provided onClick, giving the user a small joyful "departure" cue.
- *
- *   <AirplaneButton onClick={save}>Save Project</AirplaneButton>
+ *   <AirplaneButton onClick={() => advance(next)}>Advance to Operations</AirplaneButton>
  */
 export default function AirplaneButton({
   children,
@@ -26,23 +23,13 @@ export default function AirplaneButton({
 
   const fly = (e) => {
     if (disabled || taking) return;
-    // For submit buttons, let the native form submit fire FIRST. We just play
-    // the visual takeoff after, without interfering with the submit.
-    if (type === "submit") {
-      // Defer state update until after the native submit event has dispatched
-      Promise.resolve().then(() => setTaking(true));
+    // the action runs at once; the take-off plays alongside it (skipped when the user prefers reduced motion)
+    const still = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!still) {
+      setTaking(true);
       setTimeout(() => setTaking(false), 700);
-      return;
     }
-    e?.preventDefault?.();
-    setTaking(true);
-    setTimeout(() => {
-      try {
-        if (onClick) onClick(e);
-      } finally {
-        setTimeout(() => setTaking(false), 420);
-      }
-    }, 220);
+    if (type !== "submit" && onClick) onClick(e);
   };
 
   return (

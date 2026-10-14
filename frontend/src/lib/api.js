@@ -9,20 +9,53 @@ const instance = axios.create({
 
 // Attach Authorization header if token present (fallback for cross-origin cookie issues)
 instance.interceptors.request.use((cfg) => {
-  const token = localStorage.getItem("cp_token");
+  const token = localStorage.getItem("fs_token");
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
 
+// Session expiry: on a 401, refresh the session once (concurrent 401s share one refresh) and retry the
+// request; if that fails, sign out and go to the login page, which returns here afterwards (?next=).
+let refreshing = null;
+const isAuthCall = (url = "") => /\/auth\/(login|refresh|logout)/.test(url);
+
+async function refreshSession() {
+  const refresh_token = localStorage.getItem("fs_refresh");
+  const { data } = await axios.post(`${API}/auth/refresh`, refresh_token ? { refresh_token } : {}, { withCredentials: true });
+  if (!data?.access_token) throw new Error("no token");
+  localStorage.setItem("fs_token", data.access_token);
+  if (data.refresh_token) localStorage.setItem("fs_refresh", data.refresh_token);
+  return data.access_token;
+}
+
+export function sessionExpired() {
+  localStorage.removeItem("fs_token");
+  localStorage.removeItem("fs_refresh");
+  const { pathname, search } = window.location;
+  if (!pathname.startsWith("/login")) {
+    window.location.assign(`/login?next=${encodeURIComponent(pathname + search)}`);
+  }
+}
+
 instance.interceptors.response.use(
   (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      const path = window.location.pathname;
-      if (!path.startsWith("/login")) {
-        localStorage.removeItem("cp_token");
+  async (err) => {
+    const cfg = err.config || {};
+    if (err.response?.status !== 401 || isAuthCall(cfg.url)) return Promise.reject(err);
+    // (also when nothing is stored — the session may still be alive in the refresh cookie, or the stored token was
+    // cleared by another tab; either way renew it or send the user to sign in, never leave a dead screen)
+    if (!cfg._retried) {
+      cfg._retried = true;
+      try {
+        refreshing = refreshing || refreshSession().finally(() => { refreshing = null; });
+        const token = await refreshing;
+        cfg.headers = { ...(cfg.headers || {}), Authorization: `Bearer ${token}` };
+        return instance(cfg);
+      } catch {
+        /* fall through: the session is over */
       }
     }
+    sessionExpired();
     return Promise.reject(err);
   }
 );

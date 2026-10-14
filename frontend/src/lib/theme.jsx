@@ -12,11 +12,11 @@ const THEMES = [
 const ThemeCtx = createContext(null);
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem("cp_theme") || "alabaster");
+  const [theme, setTheme] = useState(() => localStorage.getItem("fs_theme") || "alabaster");
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("cp_theme", theme);
+    localStorage.setItem("fs_theme", theme);
   }, [theme]);
 
   return <ThemeCtx.Provider value={{ theme, setTheme, themes: THEMES }}>{children}</ThemeCtx.Provider>;

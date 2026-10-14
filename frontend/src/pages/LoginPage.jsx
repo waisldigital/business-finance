@@ -1,25 +1,26 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
-import { AirplaneTilt, Lock, EnvelopeSimple } from "@phosphor-icons/react";
-import AirplaneButton from "@/components/AirplaneButton";
+import { useAuth, homeFor, nextPath } from "@/lib/auth";
+import BrandMark from "@/components/common/BrandMark";
+import { ChartLineUp, Lock, EnvelopeSimple, Target, Receipt, ShieldCheck } from "@phosphor-icons/react";
 
 export default function LoginPage() {
   const { login, error, user } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@crackerpro.com");
-  const [password, setPassword] = useState("Admin@123");
+  const search = React.useRef(window.location.search); // ?next= as it was when the page opened
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
   React.useEffect(() => {
-    if (user && user.id) navigate("/dashboard", { replace: true });
+    if (user && user.id) navigate(nextPath(search.current, user) || homeFor(user), { replace: true });
   }, [user, navigate]);
 
   const doLogin = async () => {
     setBusy(true);
     const ok = await login(email, password);
     setBusy(false);
-    if (ok) navigate("/dashboard", { replace: true });
+    if (ok) navigate(nextPath(search.current, ok) || homeFor(ok), { replace: true });
   };
 
   const onSubmit = (e) => {
@@ -47,28 +48,38 @@ export default function LoginPage() {
         <div className="cloud-trail" />
         <div className="relative z-10 flex flex-col justify-between p-12 text-white w-full">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#FFC000] flex items-center justify-center rounded-sm">
-              <AirplaneTilt weight="fill" size={22} className="text-[#0A1628]" />
-            </div>
+            <BrandMark size={40} className="rounded-sm !bg-[#FFC000]" />
             <div>
-              <div className="font-display text-xl font-bold tracking-tight">WAISL · COLM</div>
-              <div className="text-[10px] tracking-overline text-[#FFD24A]">Customer Order Lifecycle · Aviation</div>
+              <div className="font-display text-xl font-bold tracking-tight">WAISL FinSight</div>
+              <div className="text-[10px] tracking-overline text-[#FFD24A]">Business Finance &amp; FP&amp;A</div>
             </div>
           </div>
           <div>
-            <div className="text-[10px] tracking-overline text-[#FFD24A] mb-3">Project Commercial Lifecycle</div>
+            <div className="text-[10px] tracking-overline text-[#FFD24A] mb-3">Business finance · simplified</div>
             <h2 className="font-display text-4xl xl:text-5xl font-bold leading-tight tracking-tight">
-              From Pipeline to Closure.
+              One source of truth.
               <br />
-              <span className="text-[#FFD24A]">Engineered for airports.</span>
+              <span className="text-[#FFD24A]">Every number, explained.</span>
             </h2>
             <p className="mt-6 text-white/70 max-w-md text-sm leading-relaxed">
-              Replace fragile Excels with audit-tracked workflows, configurable approvals, and a real-time
-              dashboard built for CFOs, controllers, and airport finance teams.
+              AOP planning, monthly MIS and P&amp;L, opex, capex and resource cost on a single actual source —
+              with drill-downs to every booking, controlled approvals and a full audit trail for WAISL's
+              finance and business teams.
             </p>
+            <div className="mt-8 grid grid-cols-3 gap-3 max-w-lg">
+              {[[Target, "Plan", "AOP, forecast & next-year budget"], [ChartLineUp, "Report", "MIS P&L, segments & airports"],
+                [Receipt, "Control", "Opex, POs, capex & overheads"]].map(([Icon, t, d]) => (
+                <div key={t} className="border border-white/15 bg-white/5 px-3 py-2.5">
+                  <Icon size={16} className="text-[#FFD24A]" />
+                  <div className="mt-1.5 text-xs font-semibold">{t}</div>
+                  <div className="text-[10.5px] text-white/60 leading-snug">{d}</div>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="text-[10px] tracking-overline text-white/40 flex items-center gap-2">
-            <span>© WAISL · Customer Order Lifecycle Management · Authorised access only</span>
+            <ShieldCheck size={12} />
+            <span>© WAISL · FinSight — Business Finance &amp; FP&amp;A · Authorised access only</span>
           </div>
         </div>
       </div>
@@ -80,18 +91,19 @@ export default function LoginPage() {
             <span className="inline-block w-3 h-[2px] bg-[#FF9933]" />
             <span className="inline-block w-3 h-[2px] bg-white border border-[#D8D6CC]" />
             <span className="inline-block w-3 h-[2px] bg-[#138808]" />
-            Sign in to your workspace
+            Sign in to FinSight
           </div>
-          <h1 className="font-display text-3xl font-bold tracking-tight text-[#111110] mb-1">Welcome aboard</h1>
-          <p className="text-sm text-[#5E5E5A] mb-8">Use your WAISL credentials. Passwords are admin-managed.</p>
+          <h1 className="font-display text-3xl font-bold tracking-tight text-[#111110] mb-1">Welcome back</h1>
+          <p className="text-sm text-[#5E5E5A] mb-8">Use your WAISL email and the password issued by your administrator.</p>
 
           <label className="block text-[11px] tracking-overline text-[#5E5E5A] mb-1.5">Email</label>
           <div className="relative mb-4">
-            <EnvelopeSimple size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#5E5E5A]" />
+            <EnvelopeSimple size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#5E5E5A] pointer-events-none z-10" />
             <input
               type="email"
               required
-              className="input pl-9"
+              className="input"
+              style={{ paddingLeft: 38 }}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               data-testid="login-email"
@@ -101,11 +113,12 @@ export default function LoginPage() {
 
           <label className="block text-[11px] tracking-overline text-[#5E5E5A] mb-1.5">Password</label>
           <div className="relative mb-2">
-            <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#5E5E5A]" />
+            <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#5E5E5A] pointer-events-none z-10" />
             <input
               type="password"
               required
-              className="input pl-9"
+              className="input"
+              style={{ paddingLeft: 38 }}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               data-testid="login-password"
@@ -119,17 +132,12 @@ export default function LoginPage() {
             </div>
           )}
 
-          <AirplaneButton
-            type="submit"
-            disabled={busy}
-            testid="login-submit"
-            className="w-full mt-6 justify-center"
-          >
-            {busy ? "Signing in…" : "Sign in & take off"}
-          </AirplaneButton>
+          <button type="submit" className="btn-primary w-full mt-6 justify-center" disabled={busy} data-testid="login-submit">
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
 
           <div className="mt-6 text-[11px] text-[#5E5E5A] border-t border-[#E5E5E0] pt-4">
-            Forgot your password? Contact your WAISL administrator. <span className="text-[#A67C00]">No OTP-based reset.</span>
+            Forgot your password? Ask your FinSight administrator to reset it.
           </div>
         </form>
       </div>

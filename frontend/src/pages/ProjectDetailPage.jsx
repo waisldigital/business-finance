@@ -2,21 +2,24 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import StageTracker, { STAGES } from "@/components/StageTracker";
+import StageTracker from "@/components/StageTracker";
+import { STAGES } from "@/config/stages";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
-import { ArrowLeft, ArrowRight, Plus, Trash, PencilSimple, X, UploadSimple, FileXls, ArrowCounterClockwise, AirplaneTakeoff } from "@phosphor-icons/react";
+import { formatMoney, formatDate, formatDateTime } from "@/aop/format";
+import { ArrowLeft, Plus, Trash, PencilSimple, X, FileXls, ArrowCounterClockwise } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
 import AirplaneButton from "@/components/AirplaneButton";
 import { useAuth } from "@/lib/auth";
+import Modal from "@/components/common/Modal";
+import StatTile, { InfoRow } from "@/components/common/StatTile";
 
 const TABS = ["Overview", "Revenue", "Cost", "Milestones", "Documents", "Queries", "Audit"];
 
 export default function ProjectDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { mode, inrPerUsd } = useCurrency();
+  const { mode, inrPerUsd, unit } = useCurrency();
   const { user } = useAuth();
 
   const [project, setProject] = useState(null);
@@ -69,7 +72,7 @@ export default function ProjectDetailPage() {
     setBusy(true); setError("");
     try {
       await api.delete(`/projects/${project.id}`);
-      navigate("/projects");
+      navigate("/app/projects");
     } catch (e) {
       setError(formatApiErrorDetail(e.response?.data?.detail) || e.message);
     } finally { setBusy(false); }
@@ -80,7 +83,7 @@ export default function ProjectDetailPage() {
       <PageHeader
         title={project.project_name}
         subtitle={`${project.wbs_element || ""}  ·  ${project.customer_name || ""}`}
-        breadcrumb={<><button onClick={() => navigate("/projects")} className="hover:text-[var(--gold)] inline-flex items-center gap-1"><ArrowLeft size={11} /> ALL PROJECTS</button> · {project.current_stage.toUpperCase()}</>}
+        breadcrumb={<><button onClick={() => navigate("/app/projects")} className="hover:text-[var(--gold)] inline-flex items-center gap-1"><ArrowLeft size={11} /> ALL PROJECTS</button> · {project.current_stage.toUpperCase()}</>}
         watermark
         actions={
           <div className="flex items-center gap-2">
@@ -119,11 +122,11 @@ export default function ProjectDetailPage() {
 
       {/* Quick stats */}
       <div className="px-8 py-5 grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Stat label="PO Value" value={formatCurrency(project.po_value, mode, inrPerUsd)} />
-        <Stat label="Revenue" value={formatCurrency(project.revenue_total, mode, inrPerUsd)} onClick={() => setTab("Revenue")} testid="stat-revenue" />
-        <Stat label="Cost" value={formatCurrency(project.cost_total, mode, inrPerUsd)} onClick={() => setTab("Cost")} testid="stat-cost" />
-        <Stat label="Margin" value={formatCurrency(project.margin_total, mode, inrPerUsd)} accent />
-        <Stat label="Deal Margin %" value={`${(project.margin_pct || 0).toFixed(1)}%`} accent={project.margin_pct >= 15} danger={project.margin_pct < 15} />
+        <StatTile label="PO Value" value={formatMoney(project.po_value, unit)} />
+        <StatTile label="Revenue" value={formatMoney(project.revenue_total, unit)} onClick={() => setTab("Revenue")} testid="stat-revenue" />
+        <StatTile label="Cost" value={formatMoney(project.cost_total, unit)} onClick={() => setTab("Cost")} testid="stat-cost" />
+        <StatTile label="Margin" value={formatMoney(project.margin_total, unit)} accent />
+        <StatTile label="Deal Margin %" value={`${(project.margin_pct || 0).toFixed(1)}%`} accent={project.margin_pct >= 15} danger={project.margin_pct < 15} />
       </div>
 
       {/* Tabs */}
@@ -164,22 +167,6 @@ export default function ProjectDetailPage() {
   );
 }
 
-function Stat({ label, value, accent, danger, onClick, testid }) {
-  const clickable = !!onClick;
-  return (
-    <div
-      className={`tile p-4 ${clickable ? "cursor-pointer transition-all hover:border-[var(--gold)] hover:translate-y-[-1px]" : ""}`}
-      onClick={onClick}
-      data-testid={testid}
-    >
-      <div className="text-[10px] tracking-overline text-[var(--muted)] flex items-center gap-1">
-        {label}
-        {clickable && <ArrowRight size={10} weight="bold" className="text-[var(--gold)] opacity-70" />}
-      </div>
-      <div className={`font-mono font-semibold text-xl mt-1 ${accent ? "text-[var(--gold)]" : danger ? "text-[var(--danger)]" : "text-[var(--text)]"}`}>{value}</div>
-    </div>
-  );
-}
 
 function Overview({ project }) {
   const [pipeline, setPipeline] = React.useState(null);
@@ -223,20 +210,20 @@ function Overview({ project }) {
           <div className="font-display text-lg font-bold">{pipeline.opportunity_title}</div>
           <div className="text-[11px] text-[var(--muted)] font-mono">{pipeline.opportunity_id}</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-xs">
-            <Info k="Solution Line" v={pipeline.solution_line} />
-            <Info k="Opportunity Type" v={pipeline.opportunity_type} />
-            <Info k="Lead Source" v={pipeline.lead_source} />
-            <Info k="BD Owner" v={pipeline.bd_owner} />
-            <Info k="Decision Maker" v={pipeline.decision_maker_name} />
-            <Info k="Customer Budget Approved" v={pipeline.customer_budget_approved ? "Yes" : "No"} />
-            <Info k="Final Commercial Value" v={(pipeline.final_commercial_value || 0).toLocaleString()} />
-            <Info k="Forecast Category" v={pipeline.forecast_category} />
-            <Info k="Probability %" v={`${(pipeline.probability_pct || 0).toFixed(0)}%`} />
-            <Info k="Expected Closure" v={pipeline.expected_closure_date} />
-            <Info k="Won Against" v={pipeline.won_against_competitor} />
-            <Info k="Customer PO" v={pipeline.customer_po_number} />
+            <InfoRow k="Solution Line" v={pipeline.solution_line} />
+            <InfoRow k="Opportunity Type" v={pipeline.opportunity_type} />
+            <InfoRow k="Lead Source" v={pipeline.lead_source} />
+            <InfoRow k="BD Owner" v={pipeline.bd_owner} />
+            <InfoRow k="Decision Maker" v={pipeline.decision_maker_name} />
+            <InfoRow k="Customer Budget Approved" v={pipeline.customer_budget_approved ? "Yes" : "No"} />
+            <InfoRow k="Final Commercial Value" v={(pipeline.final_commercial_value || 0).toLocaleString()} />
+            <InfoRow k="Forecast Category" v={pipeline.forecast_category} />
+            <InfoRow k="Probability %" v={`${(pipeline.probability_pct || 0).toFixed(1)}%`} />
+            <InfoRow k="Expected Closure" v={pipeline.expected_closure_date} />
+            <InfoRow k="Won Against" v={pipeline.won_against_competitor} />
+            <InfoRow k="Customer PO" v={pipeline.customer_po_number} />
           </div>
-          <a href="/pipeline" className="text-[11px] text-[var(--gold)] underline mt-3 inline-block">View pipeline →</a>
+          <a href="/app/pipeline" className="text-[11px] text-[var(--gold)] underline mt-3 inline-block">View pipeline →</a>
         </div>
       )}
 
@@ -270,14 +257,6 @@ function Overview({ project }) {
   );
 }
 
-function Info({ k, v }) {
-  return (
-    <div>
-      <div className="text-[9px] tracking-overline text-[var(--muted)]">{k}</div>
-      <div className="font-medium text-[var(--text)]">{v || "—"}</div>
-    </div>
-  );
-}
 
 function RevenueTab({ projectId, rows, reload, mode, inrPerUsd, project }) {
   const [show, setShow] = useState(false);
@@ -300,7 +279,7 @@ function RevenueTab({ projectId, rows, reload, mode, inrPerUsd, project }) {
               <td>{formatDate(r.recognition_date)}</td>
               <td>{formatDate(r.billing_date)}</td>
               <td><StatusBadge status={r.is_billed ? "Approved" : "Pending"} /></td>
-              <td className="num">{formatCurrency(r.amount, mode, inrPerUsd)}</td>
+              <td className="num">{formatMoney(r.amount, unit)}</td>
               <td><button className="btn-ghost" onClick={async () => { await api.delete(`/revenue/${r.id}`); reload(); }}><Trash size={14} /></button></td>
             </tr>
           ))}
@@ -333,7 +312,7 @@ function CostTab({ projectId, rows, reload, mode, inrPerUsd, project }) {
               <td>{r.description || "—"}</td>
               <td>{formatDate(r.expense_date)}</td>
               <td>{r.category || "—"}</td>
-              <td className="num">{formatCurrency(r.amount, mode, inrPerUsd)}</td>
+              <td className="num">{formatMoney(r.amount, unit)}</td>
               <td><button className="btn-ghost" onClick={async () => { await api.delete(`/cost/${r.id}`); reload(); }}><Trash size={14} /></button></td>
             </tr>
           ))}
@@ -359,7 +338,7 @@ function SapBulkUpload({ kind, projectId, project, reload }) {
     try {
       const { data } = await api.get(`/projects/${projectId}/sap-last-import?kind=${kind}`);
       setLastBatch(data?.has_batch ? data : null);
-    } catch (_) { setLastBatch(null); }
+    } catch { setLastBatch(null); }
   }, [projectId, kind]);
 
   React.useEffect(() => { loadLast(); }, [loadLast]);
@@ -457,40 +436,38 @@ function LineModal({ title, entity, projectId, onClose, onSaved }) {
     } finally { setBusy(false); }
   };
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-lg p-5 space-y-3" data-testid={`${entity}-line-modal`}>
-        <h3 className="font-display text-lg font-bold">{title}</h3>
-        {entity === "revenue" ? (
-          <>
-            <input className="input" placeholder="Revenue code" value={form.revenue_code} onChange={(e) => set("revenue_code", e.target.value)} />
-            <input className="input" placeholder="Description" value={form.description} onChange={(e) => set("description", e.target.value)} />
-            <div className="grid grid-cols-2 gap-3">
-              <input type="date" className="input" value={form.recognition_date} onChange={(e) => set("recognition_date", e.target.value)} />
-              <input type="date" className="input" value={form.billing_date} onChange={(e) => set("billing_date", e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <input type="number" className="input" placeholder="Amount" value={form.amount} onChange={(e) => set("amount", e.target.value)} />
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_billed} onChange={(e) => set("is_billed", e.target.checked)} /> Billed</label>
-            </div>
-          </>
-        ) : (
-          <>
-            <input className="input" placeholder="Vendor PO ref" value={form.vendor_po_ref} onChange={(e) => set("vendor_po_ref", e.target.value)} />
-            <input className="input" placeholder="Supplier name" value={form.supplier_name} onChange={(e) => set("supplier_name", e.target.value)} />
-            <input className="input" placeholder="Description" value={form.description} onChange={(e) => set("description", e.target.value)} />
-            <div className="grid grid-cols-2 gap-3">
-              <input type="date" className="input" value={form.expense_date} onChange={(e) => set("expense_date", e.target.value)} />
-              <input className="input" placeholder="Category" value={form.category} onChange={(e) => set("category", e.target.value)} />
-            </div>
+    <Modal onClose={onClose} as="form" onSubmit={submit} className="bg-[var(--surface)] border border-[var(--border)] w-full max-w-lg p-5 space-y-3" panelTestid={`${entity}-line-modal`}>
+      <h3 className="font-display text-lg font-bold">{title}</h3>
+      {entity === "revenue" ? (
+        <>
+          <input className="input" placeholder="Revenue code" value={form.revenue_code} onChange={(e) => set("revenue_code", e.target.value)} />
+          <input className="input" placeholder="Description" value={form.description} onChange={(e) => set("description", e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            <input type="date" className="input" value={form.recognition_date} onChange={(e) => set("recognition_date", e.target.value)} />
+            <input type="date" className="input" value={form.billing_date} onChange={(e) => set("billing_date", e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <input type="number" className="input" placeholder="Amount" value={form.amount} onChange={(e) => set("amount", e.target.value)} />
-          </>
-        )}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy} data-testid="line-modal-submit">{busy ? "Saving…" : "Save"}</button>
-        </div>
-      </form>
-    </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_billed} onChange={(e) => set("is_billed", e.target.checked)} /> Billed</label>
+          </div>
+        </>
+      ) : (
+        <>
+          <input className="input" placeholder="Vendor PO ref" value={form.vendor_po_ref} onChange={(e) => set("vendor_po_ref", e.target.value)} />
+          <input className="input" placeholder="Supplier name" value={form.supplier_name} onChange={(e) => set("supplier_name", e.target.value)} />
+          <input className="input" placeholder="Description" value={form.description} onChange={(e) => set("description", e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            <input type="date" className="input" value={form.expense_date} onChange={(e) => set("expense_date", e.target.value)} />
+            <input className="input" placeholder="Category" value={form.category} onChange={(e) => set("category", e.target.value)} />
+          </div>
+          <input type="number" className="input" placeholder="Amount" value={form.amount} onChange={(e) => set("amount", e.target.value)} />
+        </>
+      )}
+      <div className="flex justify-end gap-2 pt-2">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy} data-testid="line-modal-submit">{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -509,7 +486,7 @@ function Milestones({ project, mode, inrPerUsd }) {
               <tr key={i}>
                 <td>{m.milestone_name}</td>
                 <td>{formatDate(m.due_date)}</td>
-                <td className="num">{formatCurrency(m.value, mode, inrPerUsd)}</td>
+                <td className="num">{formatMoney(m.value, unit)}</td>
                 <td><StatusBadge status={m.is_billed ? "Approved" : "Pending"} /></td>
               </tr>
             ))}
@@ -865,21 +842,19 @@ function NewQueryModal({ projectId, onClose, onSaved }) {
     } finally { setBusy(false); }
   };
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-[var(--surface)] border w-full max-w-lg" data-testid="query-modal">
-        <div className="p-5 border-b border-[var(--border)] flex justify-between items-center">
-          <h3 className="font-display text-lg font-bold">Raise a Finance Query</h3>
-          <button type="button" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="p-5 space-y-3">
-          <input className="input" required placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} data-testid="query-subject" />
-          <textarea className="input" required rows={6} placeholder="Describe the query in detail…" value={description} onChange={(e) => setDescription(e.target.value)} data-testid="query-description" />
-        </div>
-        <div className="p-5 border-t flex justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={busy} data-testid="query-submit">{busy ? "Saving…" : "Raise Query"}</button>
-        </div>
-      </form>
-    </div>
+    <Modal onClose={onClose} as="form" onSubmit={submit} className="bg-[var(--surface)] border w-full max-w-lg" panelTestid="query-modal">
+      <div className="p-5 border-b border-[var(--border)] flex justify-between items-center">
+        <h3 className="font-display text-lg font-bold">Raise a Finance Query</h3>
+        <button type="button" onClick={onClose}><X size={16} /></button>
+      </div>
+      <div className="p-5 space-y-3">
+        <input className="input" required placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} data-testid="query-subject" />
+        <textarea className="input" required rows={6} placeholder="Describe the query in detail…" value={description} onChange={(e) => setDescription(e.target.value)} data-testid="query-description" />
+      </div>
+      <div className="p-5 border-t flex justify-end gap-2">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary" disabled={busy} data-testid="query-submit">{busy ? "Saving…" : "Raise Query"}</button>
+      </div>
+    </Modal>
   );
 }

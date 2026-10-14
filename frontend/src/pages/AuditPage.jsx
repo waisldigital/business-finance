@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime } from "@/aop/format";
 
 const ENTITY_TYPES = ["", "project", "customer", "employee", "supplier", "user", "approval_rule", "approval_request", "upload", "revenue_line", "cost_line"];
 

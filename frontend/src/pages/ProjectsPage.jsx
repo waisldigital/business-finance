@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatDate } from "@/lib/format";
+import { formatMoney, formatDate } from "@/aop/format";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
-import { STAGES } from "@/components/StageTracker";
+import { STAGES } from "@/config/stages";
 import { Plus, MagnifyingGlass, FunnelSimple, PencilSimple, UploadSimple, DownloadSimple } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
 
@@ -15,7 +15,7 @@ function isChangeRequest(p) {
 }
 
 export default function ProjectsPage() {
-  const { mode, inrPerUsd } = useCurrency();
+  const { unit } = useCurrency();
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [stage, setStage] = useState("");
@@ -175,7 +175,7 @@ export default function ProjectsPage() {
             </thead>
             <tbody>
               {filteredProjects.map((p) => (
-                <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/projects/${p.id}`)} data-testid={`project-row-${p.id}`}>
+                <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/app/projects/${p.id}`)} data-testid={`project-row-${p.id}`}>
                   <td>
                     <div className="font-medium text-[var(--text)]">{p.project_name}</div>
                     <div className="text-[11px] text-[var(--muted)]">{p.business_category} · {p.location}</div>
@@ -194,9 +194,9 @@ export default function ProjectsPage() {
                     {p.ceo_visibility && <span className="badge flag-low-margin" title="CEO Visibility">CEO</span>}
                   </td>
                   <td><StatusBadge status={p.approval_status} /></td>
-                  <td className="num">{formatCurrency(p.po_value, mode, inrPerUsd)}</td>
-                  <td className="num">{formatCurrency(p.revenue_total, mode, inrPerUsd)}</td>
-                  <td className="num">{formatCurrency(p.cost_total, mode, inrPerUsd)}</td>
+                  <td className="num">{formatMoney(p.po_value, unit)}</td>
+                  <td className="num">{formatMoney(p.revenue_total, unit)}</td>
+                  <td className="num">{formatMoney(p.cost_total, unit)}</td>
                   <td className={`num ${(p.margin_pct || 0) < 15 ? "text-[var(--danger)]" : ""}`}>{(p.margin_pct || 0).toFixed(1)}%</td>
                   <td>{formatDate(p.end_date)}</td>
                   <td className="text-right">

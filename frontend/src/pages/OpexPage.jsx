@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import api, { formatApiErrorDetail, API as API_BASE } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
-import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
+import { formatMoney, formatDate, formatNumber } from "@/aop/format";
 import { useAuth } from "@/lib/auth";
 import {
   Receipt, MagnifyingGlass, UploadSimple, DownloadSimple,
@@ -84,7 +84,7 @@ const CUTE_FILTER_COLS = [
 
 export default function OpexPage() {
   const { user } = useAuth();
-  const { mode, inrPerUsd } = useCurrency();
+  const { mode, inrPerUsd, unit } = useCurrency();
   const [tab, setTab] = useState("aop");
   const [search, setSearch] = useState("");
 
@@ -243,8 +243,8 @@ export default function OpexPage() {
             <StatChip label="PO Links" value={summary.po_links} testid="chip-links" />
             <StatChip label="Mapped" value={summary.mapped} color="var(--success)" testid="chip-mapped" />
             <StatChip label="Unmapped" value={summary.unmapped} color="var(--warning)" testid="chip-unmapped" />
-            <StatChip label="Total Budget" value={formatCurrency(summary.total_budget, mode, inrPerUsd)} testid="chip-budget" />
-            <StatChip label="Total PO" value={formatCurrency(summary.total_po_value, mode, inrPerUsd)} testid="chip-po-value" />
+            <StatChip label="Total Budget" value={formatMoney(summary.total_budget, unit)} testid="chip-budget" />
+            <StatChip label="Total PO" value={formatMoney(summary.total_po_value, unit)} testid="chip-po-value" />
             <StatChip label="CUTE Drivers" value={summary.cute_drivers} testid="chip-cute" />
           </div>
         )}
@@ -820,13 +820,13 @@ function AopTable({ rows, loading, mode, inrPerUsd, showMonthly }) {
               <td key={c.key} className={c.mono ? "font-mono text-xs" : ""}>{r[c.key] || "—"}</td>
             ))}
             {AOP_BUDGET_COLS.map(c => (
-              <td key={c.key} className="num font-mono text-xs">{formatCurrency(r[c.key] || 0, mode, inrPerUsd)}</td>
+              <td key={c.key} className="num font-mono text-xs">{formatMoney(r[c.key] || 0, unit)}</td>
             ))}
             {showMonthly && monthActualCols.map(c => (
-              <td key={c.key} className="num font-mono text-[11px]">{formatCurrency(r[c.key] || 0, mode, inrPerUsd)}</td>
+              <td key={c.key} className="num font-mono text-[11px]">{formatMoney(r[c.key] || 0, unit)}</td>
             ))}
             {showMonthly && monthForecastCols.map(c => (
-              <td key={c.key} className="num font-mono text-[11px] text-[var(--muted)]">{formatCurrency(r[c.key] || 0, mode, inrPerUsd)}</td>
+              <td key={c.key} className="num font-mono text-[11px] text-[var(--muted)]">{formatMoney(r[c.key] || 0, unit)}</td>
             ))}
           </tr>
         ))}
@@ -855,7 +855,7 @@ function ZmmTable({ rows, loading, mode, inrPerUsd, onViewPo }) {
             {ZMM_COLS.map(c => (
               <td key={c.key} className={c.num ? "num font-mono text-xs" : c.mono ? "font-mono text-xs" : ""}>
                 {c.badge ? <StatusBadge value={r[c.key]} />
-                  : c.num ? formatCurrency(r[c.key] || 0, mode, inrPerUsd)
+                  : c.num ? formatMoney(r[c.key] || 0, unit)
                   : c.date ? formatDate(r[c.key])
                   : (r[c.key] || "—")}
               </td>
@@ -1442,10 +1442,10 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                           onClick={() => setSelectedPo(s.po_number)}
                         >
                           <td className="font-mono">{s.po_number}</td>
-                          <td className="num font-mono">{formatCurrency(s.po_value, mode, inrPerUsd)}</td>
-                          <td className="num font-mono">{formatCurrency(s.gr_value, mode, inrPerUsd)}</td>
-                          <td className="num font-mono">{formatCurrency(s.invoice_value, mode, inrPerUsd)}</td>
-                          <td className="num font-mono">{formatCurrency(s.open_value, mode, inrPerUsd)}</td>
+                          <td className="num font-mono">{formatMoney(s.po_value, unit)}</td>
+                          <td className="num font-mono">{formatMoney(s.gr_value, unit)}</td>
+                          <td className="num font-mono">{formatMoney(s.invoice_value, unit)}</td>
+                          <td className="num font-mono">{formatMoney(s.open_value, unit)}</td>
                           <td>{s.lines}</td>
                         </tr>
                       ))}
@@ -1520,9 +1520,9 @@ function PoDetailDrawer({ poNumber, mode, inrPerUsd, onClose }) {
                       </div>
                       <div className="text-xs text-[var(--muted)] mb-1">{a.description || "—"}</div>
                       <div className="flex gap-4 text-xs">
-                        <span>Budget: <span className="font-mono font-semibold">{formatCurrency(a.original_budget, mode, inrPerUsd)}</span></span>
-                        <span>YTD: <span className="font-mono font-semibold">{formatCurrency(a.ytd_actual, mode, inrPerUsd)}</span></span>
-                        <span>FY Est: <span className="font-mono font-semibold">{formatCurrency(a.full_year_estimate, mode, inrPerUsd)}</span></span>
+                        <span>Budget: <span className="font-mono font-semibold">{formatMoney(a.original_budget, unit)}</span></span>
+                        <span>YTD: <span className="font-mono font-semibold">{formatMoney(a.ytd_actual, unit)}</span></span>
+                        <span>FY Est: <span className="font-mono font-semibold">{formatMoney(a.full_year_estimate, unit)}</span></span>
                       </div>
                     </div>
                   ))}
@@ -1564,7 +1564,7 @@ function CurrRow({ label, value, field, corrections, originals, mode, inrPerUsd 
         {isCorrected && <Tag size={9} weight="bold" className="text-amber-400" />}
       </span>
       <span className="font-mono font-semibold text-right">
-        {formatCurrency(value || 0, mode, inrPerUsd)}
+        {formatMoney(value || 0, unit)}
       </span>
     </div>
   );

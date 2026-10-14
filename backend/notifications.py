@@ -18,7 +18,7 @@ from typing import List, Optional, Tuple, Dict, Any
 
 import httpx
 
-logger = logging.getLogger("crackerpro.notifications")
+logger = logging.getLogger("finsight.notifications")
 
 GRAPH_TOKEN_URL = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 GRAPH_SENDMAIL_URL = "https://graph.microsoft.com/v1.0/users/{sender}/sendMail"
@@ -152,11 +152,11 @@ mailer = GraphMailer()
 def _wrap(title: str, body_html: str) -> str:
     return f"""<!doctype html><html><body style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#FAFAF8;margin:0;padding:24px;color:#111110">
   <div style="max-width:560px;margin:0 auto;background:#FFFFFF;border:1px solid #D8D6CC;border-radius:4px;overflow:hidden">
-    <div style="background:#5C2B84;color:#FFFFFF;padding:14px 20px;font-size:12px;letter-spacing:.18em;text-transform:uppercase">CRacker Pro · Notification</div>
+    <div style="background:#5C2B84;color:#FFFFFF;padding:14px 20px;font-size:12px;letter-spacing:.18em;text-transform:uppercase">WAISL FinSight · Notification</div>
     <div style="padding:20px">
       <h2 style="margin:0 0 12px 0;font-size:18px;color:#111110">{title}</h2>
       {body_html}
-      <p style="margin-top:24px;color:#5E5E5A;font-size:11px">This is an automated notification from CRacker Pro. Do not reply.</p>
+      <p style="margin-top:24px;color:#5E5E5A;font-size:11px">This is an automated notification from WAISL FinSight. Do not reply.</p>
     </div>
   </div>
 </body></html>"""
@@ -180,6 +180,6 @@ def tpl_approval_request(req: Dict[str, Any], project: Dict[str, Any]) -> Tuple[
 
 
 def tpl_test_email() -> Tuple[str, str]:
-    return ("CRacker Pro · Email integration test",
+    return ("WAISL FinSight · Email integration test",
             _wrap("Email Integration Test",
                   "<p style='font-size:13px'>If you received this, Microsoft Graph email notifications are configured correctly.</p>"))

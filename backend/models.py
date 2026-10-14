@@ -1,5 +1,7 @@
-"""Pydantic models for CRacker Pro."""
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+"""Pydantic models for WAISL FinSight."""
+from pydantic import BaseModel, EmailStr
+
+from sections import SECTIONS
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timezone
 import uuid
@@ -46,6 +48,7 @@ class UserOut(BaseModel):
     is_active: bool = True
     role_id: Optional[str] = None
     is_permanent_admin: bool = False
+    avatar: Optional[str] = None  # profile photo as a small data URL (set from the profile window)
     created_at: str
 
 
@@ -60,26 +63,25 @@ class PasswordChange(BaseModel):
 
 
 # ---------- ROLE (workspace section permissions) ----------
-WORKSPACE_SECTIONS = [
-    "dashboard",
-    "pipeline",
-    "projects",
-    "change_requests",
-    "customer_profile",
-    "wbs_budget",
-    "opex",
-]
+WORKSPACE_SECTIONS = SECTIONS  # every section a role can grant (sections.py)
 
 
 class SectionPermission(BaseModel):
     can_view: bool = False
     can_edit: bool = False  # Edit includes create + modify (NOT delete)
+    can_upload: bool = False  # bulk upload / download of the section's data files (granted by an admin)
 
 
 class RoleIn(BaseModel):
     name: str
     description: Optional[str] = ""
     permissions: Dict[str, SectionPermission] = {}
+    # AOP data scope: reporting tags (airports / entities) this role may see. Empty = all.
+    aop_tags: List[str] = []
+    # Overheads & payroll department scope: "all", "own" (the user's department from the employee master)
+    # or "list" (aop_departments only). "own" also adds aop_departments.
+    aop_dept_scope: Literal["all", "own", "list"] = "all"
+    aop_departments: List[str] = []
 
 
 class RoleOut(RoleIn):
