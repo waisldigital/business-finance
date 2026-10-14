@@ -36,12 +36,13 @@ const AdminDataPage = lazy(() => import("@/pages/admin/AdminDataPage"));
 const AdminImportsPage = lazy(() => import("@/pages/admin/AdminImportsPage"));
 const AdminAopApprovals = lazy(() => import("@/pages/admin/AdminAopApprovals"));
 const AdminPlanSettings = lazy(() => import("@/pages/admin/AdminPlanSettings"));
+const OpexPage = lazy(() => import("@/pages/OpexPage"));
 
 // the page each workspace section opens (sections sharing a path share its page and its route guard)
 const SECTION_PAGES = {
   dashboard: <DashboardPage />, pipeline: <PipelinePage />, projects: <ProjectsPage />,
   change_requests: <ChangeRequestsPage />, customer_profile: <MasterPage entityKey="customers" />,
-  wbs_budget: <WBSBudgetPage />, aop_pnl: <AopReportsPage />,
+  wbs_budget: <WBSBudgetPage />, opex: <OpexPage />, aop_pnl: <AopReportsPage />,
   ...Object.fromEntries(["aop_inputs", "aop_revenue", "aop_opex", "aop_overheads", "aop_payroll", "aop_capex"]
     .map((k) => [k, <AopSectionPage section={k} />])),
 };
@@ -167,7 +168,7 @@ function App() {
                   <Route path="/admin/roles" element={<Navigate to="/admin/settings?tab=roles" replace />} />
 
                   {/* ---------- legacy paths ---------- */}
-                  {["/dashboard", "/projects/*", "/projects", "/pipeline", "/change-requests/*", "/change-requests", "/wbs-budget", "/customers/*", "/customers"].map((p) => (
+                  {["/dashboard", "/projects/*", "/projects", "/pipeline", "/change-requests/*", "/change-requests", "/wbs-budget", "/opex", "/customers/*", "/customers"].map((p) => (
                     <Route key={p} path={p} element={<Legacy to="/app" />} />
                   ))}
                   {["/suppliers", "/employees", "/uploads", "/approvals", "/audit"].map((p) => (

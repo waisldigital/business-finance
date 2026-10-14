@@ -23,6 +23,8 @@ export const SECTIONS = [
     nav: { label: "Customer Profile", icon: UsersThree, testid: "sidebar-customers" } },
   { key: "wbs_budget", label: "WBS and Budget", path: "/app/wbs-budget", group: "workspace", landing: 14,
     nav: { label: "WBS and Budget", icon: Stack, testid: "sidebar-wbs-budget" } },
+  { key: "opex", label: "Opex", path: "/app/opex", group: "workspace", landing: 15,
+    nav: { label: "Opex", icon: Receipt, testid: "sidebar-opex" } },
   // AOP — the reports page serves both the P&L and the reports sections
   { key: "aop_pnl", label: "AOP · P&L", path: "/app/aop/reports", group: "aop", landing: 2,
     nav: { label: "AOP reports", icon: PresentationChart, testid: "sidebar-aop-reports", sections: ["aop_pnl", "aop_reports"] } },

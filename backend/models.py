@@ -672,3 +672,151 @@ class InAppNotificationOut(BaseModel):
     link: Optional[str] = None
     read: bool = False
     created_at: str
+
+
+# ============================================================
+# OPEX MODULE  (4 tables: AOP lines, ZMM lines, PO links, ZMM corrections)
+# ============================================================
+
+class OpexAopLineIn(BaseModel):
+    wbs_element: Optional[str] = None
+    cost_centre: Optional[str] = None
+    gl_account: Optional[str] = None
+    description: Optional[str] = None
+    department: Optional[str] = None
+    category: Optional[str] = None
+    vendor_name: Optional[str] = None
+    original_budget: float = 0.0
+    apr_actual: float = 0.0
+    may_actual: float = 0.0
+    jun_actual: float = 0.0
+    jul_actual: float = 0.0
+    aug_actual: float = 0.0
+    sep_actual: float = 0.0
+    oct_actual: float = 0.0
+    nov_actual: float = 0.0
+    dec_actual: float = 0.0
+    jan_actual: float = 0.0
+    feb_actual: float = 0.0
+    mar_actual: float = 0.0
+    apr_forecast: float = 0.0
+    may_forecast: float = 0.0
+    jun_forecast: float = 0.0
+    jul_forecast: float = 0.0
+    aug_forecast: float = 0.0
+    sep_forecast: float = 0.0
+    oct_forecast: float = 0.0
+    nov_forecast: float = 0.0
+    dec_forecast: float = 0.0
+    jan_forecast: float = 0.0
+    feb_forecast: float = 0.0
+    mar_forecast: float = 0.0
+    fy28_budget: float = 0.0
+    variance_notes: Optional[str] = None
+    owner_email: Optional[str] = None
+
+
+class OpexAopLineOut(OpexAopLineIn):
+    id: str
+    ytd_actual: float = 0.0
+    full_year_estimate: float = 0.0
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class OpexZmmLineIn(BaseModel):
+    po_number: Optional[str] = None
+    po_item: Optional[str] = None
+    vendor_code: Optional[str] = None
+    vendor_name: Optional[str] = None
+    wbs_element: Optional[str] = None
+    cost_centre: Optional[str] = None
+    gl_account: Optional[str] = None
+    material: Optional[str] = None
+    short_text: Optional[str] = None
+    po_value: float = 0.0
+    gr_value: float = 0.0
+    invoice_value: float = 0.0
+    open_value: float = 0.0
+    po_date: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    delivery_date: Optional[str] = None
+    currency: Optional[str] = "INR"
+    plant: Optional[str] = None
+    purchasing_group: Optional[str] = None
+    document_type: Optional[str] = None
+
+
+class OpexZmmLineOut(OpexZmmLineIn):
+    id: str
+    triage_status: str = "unmapped"
+    change_flag: Optional[str] = None
+    fetched_at: Optional[str] = None
+    upload_batch_id: Optional[str] = None
+    created_at: str
+
+
+class OpexPoLinkIn(BaseModel):
+    aop_line_id: str
+    po_number: str
+    po_item: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    predecessor_po: Optional[str] = None
+    successor_po: Optional[str] = None
+    sequence_order: int = 1
+    notes: Optional[str] = None
+
+
+class OpexPoLinkOut(OpexPoLinkIn):
+    id: str
+    is_active: bool = False
+    created_by: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class OpexZmmCorrectionIn(BaseModel):
+    po_number: str
+    po_item: Optional[str] = None
+    corrected_fields: Dict[str, Any] = {}
+    reason: Optional[str] = None
+
+
+class OpexZmmCorrectionOut(OpexZmmCorrectionIn):
+    id: str
+    corrected_by: Optional[str] = None
+    corrected_at: Optional[str] = None
+    active: bool = True
+    created_at: str
+
+
+# ── CUTE Drivers (PAX & Rate) ──
+
+class OpexCuteDriverIn(BaseModel):
+    airport: str
+    pax_type: str  # domestic / international
+    metric: str    # pax / rate
+    fy24_value: float = 0.0
+    fy25_value: float = 0.0
+    fy26_value: float = 0.0
+    fy27_value: float = 0.0
+    fy28_value: float = 0.0
+
+
+class OpexCuteDriverOut(OpexCuteDriverIn):
+    id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class OpexAirportConfigIn(BaseModel):
+    airport: str
+    manual_revenue: bool = False
+
+
+class OpexAirportConfigOut(OpexAirportConfigIn):
+    id: str
+    created_at: str
+    updated_at: Optional[str] = None
