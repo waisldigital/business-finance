@@ -1602,12 +1602,15 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         return {"geo": ["All", "India", "International"], "tags": (["All"] if not p["tags"] else []) + tags,
                 "base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"]}
 
+    def _ql(fy):
+        return "FY'" + fy[2:]
+
     PNL_BLOCKS = [  # (key, engine, part, label template, kind)
-        ("b_base", 0, "b_base", "B {base}", "budget"),
-        ("a_base", 0, "base", "A {base}", "actual"),
-        ("b_plan", 0, "plan", "B {plan}", "budget"),
-        ("af_plan", 1, "base", "{plan} A/F", "actual"),
-        ("b_draft", 1, "plan", "B {draft}", "budget"),
+        ("b_base", 0, "b_base", "{base_q} AOP", "budget"),
+        ("a_base", 0, "base", "{base_q} Actual", "actual"),
+        ("b_plan", 0, "plan", "{plan_q} AOP", "budget"),
+        ("af_plan", 1, "base", "{plan_q} Actual + Forecast", "actual"),
+        ("b_draft", 1, "plan", "{draft_q} Budget", "budget"),
     ]
 
     async def pnl_guard(user: dict, tag: str):
@@ -1637,7 +1640,8 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         flt = Filters(geo, tag, [x for x in (exclude or "").split(",") if x])
         runs = [PnLEngine(data, actuals, base, plan, cfg["cutoffs"], cfg.get("tax_rate", 0.25), approved_fy=plan).compute(flt),
                 PnLEngine(data, actuals, plan, draft, cfg["cutoffs"], cfg.get("tax_rate", 0.25), approved_fy=plan).compute(flt)]
-        names = {"base": base, "plan": plan, "draft": draft}
+        names = {"base": base, "plan": plan, "draft": draft,
+                 "base_q": _ql(base), "plan_q": _ql(plan), "draft_q": _ql(draft)}
         blocks = []
         for key, eng, part, label, kind in PNL_BLOCKS:
             cols_src = runs[eng]["columns"]
@@ -1651,9 +1655,9 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                              "src": (eng, "af_base" if part == "base" else "b_plan")})
             blocks.append({"key": key, "label": label.format(**names), "kind": kind, "columns": cols})
         blocks.append({"key": "var", "label": "Variance", "kind": "variance", "columns": [
-            {"key": "var:af_vs_b", "label": f"{plan} A/F vs B", "kind": "variance"},
-            {"key": "var:af_vs_b_pct", "label": f"{plan} A/F vs B %", "kind": "pct"},
-            {"key": "var:growth", "label": f"B {draft} vs {plan} A/F %", "kind": "pct"}]})
+            {"key": "var:af_vs_b", "label": f"{_ql(plan)} A+F vs AOP", "kind": "variance"},
+            {"key": "var:af_vs_b_pct", "label": f"{_ql(plan)} A+F vs AOP %", "kind": "pct"},
+            {"key": "var:growth", "label": f"{_ql(draft)} Budget vs {_ql(plan)} A+F %", "kind": "pct"}]})
         rows = []
         second = {r["id"]: r for r in runs[1]["rows"]}
         for r0 in runs[0]["rows"]:

@@ -13,9 +13,12 @@ import {
 function KpiTile({ label, value, sub, icon: Icon, onClick, accent, testid }) {
   return (
     <div
-      className={`tile ${onClick ? "tile-clickable" : ""} p-5 flex flex-col justify-between min-h-[112px]`}
+      className={`tile group ${onClick ? "tile-clickable cursor-pointer hover:border-[var(--gold)] transition-colors" : ""} p-5 flex flex-col justify-between min-h-[112px]`}
       onClick={onClick}
       data-testid={testid}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => e.key === "Enter" && onClick() : undefined}
     >
       <div className="flex items-start justify-between">
         <div className="text-[10px] tracking-overline text-[var(--muted)]">{label}</div>
@@ -28,7 +31,7 @@ function KpiTile({ label, value, sub, icon: Icon, onClick, accent, testid }) {
         {sub && <div className="text-[11px] text-[var(--muted)] mt-1">{sub}</div>}
       </div>
       {onClick && (
-        <div className="text-[var(--gold)] flex items-center gap-1 text-[11px] tracking-overline mt-2 opacity-0 group-hover:opacity-100">
+        <div className="text-[var(--gold)] flex items-center gap-1 text-[11px] tracking-overline mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
           DRILL DOWN <ArrowUpRight size={12} />
         </div>
       )}
@@ -205,6 +208,7 @@ export default function DashboardPage() {
             sub={`${totals.margin_pct.toFixed(1)}% blended margin`}
             icon={Receipt}
             accent
+            onClick={() => navigate("/app/projects")}
             testid="kpi-total-margin"
           />
           <KpiTile
@@ -223,6 +227,7 @@ export default function DashboardPage() {
             label="Revenue"
             value={formatMoney(recognized_unbilled.recognized, unit)}
             sub={`Billed ${formatMoney(recognized_unbilled.billed, unit)}`}
+            onClick={() => navigate("/app/projects")}
             testid="kpi-recognized"
           />
           <KpiTile
@@ -230,6 +235,7 @@ export default function DashboardPage() {
             value={formatMoney(recognized_unbilled.unbilled, unit)}
             sub="Working capital exposure"
             accent
+            onClick={() => navigate("/app/projects")}
             testid="kpi-unbilled"
           />
           <KpiTile
@@ -237,7 +243,7 @@ export default function DashboardPage() {
             value={formatNumber(delayed_milestones.length)}
             sub={`${low_margin_projects.length} low-margin alerts`}
             icon={Warning}
-            onClick={() => { /* scroll to delayed milestones */ }}
+            onClick={() => document.getElementById("delayed-milestones-section")?.scrollIntoView({ behavior: "smooth" })}
             testid="kpi-delayed"
           />
         </div>
@@ -273,7 +279,7 @@ export default function DashboardPage() {
                 <XAxis type="number" stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis type="category" dataKey="name" stroke="var(--muted)" fontSize={11} width={90} tickLine={false} axisLine={false} />
                 <Tooltip contentStyle={{ borderRadius: 4, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12 }} cursor={{ fill: "var(--surface-2)" }} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]} label={{ position: "right", fill: "var(--text)", fontSize: 11, fontWeight: 600 }}>
+                <Bar dataKey="count" radius={[0, 4, 4, 0]} label={{ position: "right", fill: "var(--text)", fontSize: 11, fontWeight: 600 }} cursor="pointer" onClick={(d) => d?.name && navigate(`/app/projects?stage=${encodeURIComponent(d.name)}`)}>
                   {stageChart.map((_, i) => <Cell key={i} fill={STAGE_COLORS[i % STAGE_COLORS.length]} />)}
                 </Bar>
               </BarChart>
@@ -297,8 +303,8 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {top_customers.map((c) => (
-                  <tr key={c.customer_id}>
-                    <td>{c.customer_name}</td>
+                  <tr key={c.customer_id} className="cursor-pointer hover:bg-[var(--row-hover)]" onClick={() => navigate(`/app/customers/${c.customer_id}`)} data-testid={`top-customer-${c.customer_id}`}>
+                    <td className="font-medium text-[var(--text)]">{c.customer_name}</td>
                     <td className="num">{formatMoney(c.po_value, unit)}</td>
                     <td className="num">{c.count}</td>
                   </tr>
@@ -346,7 +352,7 @@ export default function DashboardPage() {
                 {vendor_exposure.map((v, i) => {
                   const pct = ((v.amount || 0) / totalVendor) * 100;
                   return (
-                    <div key={v.supplier_name} className="flex items-center justify-between text-xs gap-2">
+                    <div key={v.supplier_name} className="flex items-center justify-between text-xs gap-2 cursor-pointer hover:bg-[var(--row-hover)] px-1.5 py-0.5 -mx-1.5 transition-colors" onClick={() => navigate("/app/wbs-budget")} title={`${v.supplier_name} — view WBS & Budget`}>
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: CHART_PALETTE[i % CHART_PALETTE.length] }} />
                         <span className="truncate">{v.supplier_name}</span>
@@ -362,7 +368,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Delayed Milestones (replaces Delayed Projects) + Low margin */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" id="delayed-milestones-section">
           <div className="tile p-5" data-testid="delayed-milestones-tile">
             <div className="flex items-center justify-between mb-4">
               <div>

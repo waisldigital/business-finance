@@ -69,10 +69,10 @@ def measure_labels(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     base, plan, draft = cfg["base_fy"], cfg["plan_fy"], cfg["draft_fy"]
     q = lambda fy: "FY'" + fy[2:]
     return [
-        {"key": "a_base", "label": f"{q(base)} A", "fy": base, "kind": "actual", "available": True},
-        {"key": "b_plan", "label": f"{q(plan)} B", "fy": plan, "kind": "budget", "available": True},
-        {"key": "af_plan", "label": f"{q(plan)} A/F", "fy": plan, "kind": "actual", "available": True},
-        {"key": "b_draft", "label": f"{q(draft)} B", "fy": draft, "kind": "budget", "available": True},
+        {"key": "a_base", "label": f"{q(base)} Actual", "fy": base, "kind": "actual", "available": True},
+        {"key": "b_plan", "label": f"{q(plan)} AOP", "fy": plan, "kind": "budget", "available": True},
+        {"key": "af_plan", "label": f"{q(plan)} Actual + Forecast", "fy": plan, "kind": "actual", "available": True},
+        {"key": "b_draft", "label": f"{q(draft)} Budget", "fy": draft, "kind": "budget", "available": True},
         {"key": "af_draft", "label": f"{q(draft)} A/F", "fy": draft, "kind": "actual", "available": False,
          "note": f"Available once {draft} starts (admin rolls the plan cycle forward)"},
     ]

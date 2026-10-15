@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney } from "@/aop/format";
 import StatTile from "@/components/common/StatTile";
+import { useNavigate } from "react-router-dom";
 import {
   Plus, MagnifyingGlass, ArrowsClockwise, CheckCircle, Funnel,
   GitPullRequest, CurrencyInr, ChartPie, ListChecks, X,
@@ -44,6 +45,7 @@ function fmt(n) {
 export default function ChangeRequestsPage({ openId = null }) {
   const { user } = useAuth();
   const { unit } = useCurrency();
+  const navigate = useNavigate();
   const isFinance = user?.role === "finance" || user?.role === "admin";
   const [rows, setRows] = useState([]);
   const [metrics, setMetrics] = useState({ total_count: 0, total_po_value: 0, total_cost: 0, total_margin_pct: 0 });
@@ -236,7 +238,7 @@ export default function ChangeRequestsPage({ openId = null }) {
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.id} data-testid={`cr-row-${r.id}`}>
+                <tr key={r.id} className="cursor-pointer hover:bg-[var(--row-hover)]" onClick={() => navigate(`/app/change-requests/${r.id}`)} data-testid={`cr-row-${r.id}`}>
                   <td className="font-mono text-xs">{r.cr_number}</td>
                   <td>
                     <div className="font-medium">{r.cr_name}</div>
@@ -254,7 +256,7 @@ export default function ChangeRequestsPage({ openId = null }) {
                   </td>
                   <td><CRStatusBadge status={r.status} /></td>
                   <td className="text-[11px] text-[var(--muted)]">{(r.created_at || "").slice(0, 10)}</td>
-                  <td className="text-right">
+                  <td className="text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-1 justify-end">
                       {!r.wbs_approved && r.status === "wbs_pending" && isFinance && (
                         <button

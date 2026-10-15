@@ -208,7 +208,7 @@ export default function PipelinePage() {
             </thead>
             <tbody>
               {filteredRows.map((r) => (
-                <tr key={r.id} data-testid={`pipeline-row-${r.id}`}>
+                <tr key={r.id} className="cursor-pointer hover:bg-[var(--row-hover)]" onClick={() => setEditing(r)} data-testid={`pipeline-row-${r.id}`}>
                   <td>
                     <div className="font-medium text-[var(--text)]">{r.opportunity_title}</div>
                     <div className="text-[11px] text-[var(--muted)]">
@@ -246,7 +246,7 @@ export default function PipelinePage() {
                       )}
                       {r.handoff_status === "Approved" && r.handoff_project_id && (
                         <a
-                          href={r.opportunity_category === "Change Request" ? `/change-requests` : `/projects/${r.handoff_project_id}`}
+                          href={r.opportunity_category === "Change Request" ? `/app/change-requests` : `/app/projects/${r.handoff_project_id}`}
                           className="text-[10px] text-[var(--gold)] underline"
                           data-testid={`handoff-project-${r.id}`}
                         >
@@ -255,7 +255,7 @@ export default function PipelinePage() {
                       )}
                     </div>
                   </td>
-                  <td className="text-right whitespace-nowrap">
+                  <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <button className="btn-ghost" title="Edit" onClick={() => setEditing(r)} data-testid={`pipeline-edit-${r.id}`}>
                       <PencilSimple size={16} weight="duotone" className="text-[var(--gold)]" />
                     </button>
