@@ -37,6 +37,7 @@ export function ExpandButtons({ tree }) {
 }
 
 export function PeriodPicker({ period, month, months, onChange, testid = "period" }) {
+  const ac = months?.actual_count ?? 0;
   return (
     <>
       <div className="seg" title="Period" data-testid={testid}>
@@ -48,8 +49,13 @@ export function PeriodPicker({ period, month, months, onChange, testid = "period
         <span className="inline-flex items-center gap-1">
           <CalendarBlank size={12} className="text-[var(--muted)]" />
           <select className="input-sm" value={month} onChange={(e) => onChange({ month: Number(e.target.value) })} data-testid={`${testid}-month`}>
-            {months.labels.map((l, i) => <option key={l} value={i}>{period === "ytd" ? `Apr – ${l}` : l}</option>)}
+            {months.labels.map((l, i) => (
+              <option key={l} value={i}>
+                {period === "ytd" ? `Apr – ${l}` : l}{i < ac ? " ●" : ""}
+              </option>
+            ))}
           </select>
+          {ac > 0 && <span className="text-[9px] text-[var(--muted)]">● Actual</span>}
         </span>
       )}
     </>
