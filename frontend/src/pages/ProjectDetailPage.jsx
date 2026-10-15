@@ -7,14 +7,14 @@ import { STAGES } from "@/config/stages";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney, formatDate, formatDateTime } from "@/aop/format";
-import { ArrowLeft, Plus, Trash, PencilSimple, X, FileXls, ArrowCounterClockwise } from "@phosphor-icons/react";
+import { ArrowLeft, Plus, Trash, PencilSimple, X, FileXls, ArrowCounterClockwise, Package, LinkSimple, ArrowSquareOut } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
 import AirplaneButton from "@/components/AirplaneButton";
 import { useAuth } from "@/lib/auth";
 import Modal from "@/components/common/Modal";
 import StatTile, { InfoRow } from "@/components/common/StatTile";
 
-const TABS = ["Overview", "Revenue", "Cost", "Milestones", "Documents", "Queries", "Audit"];
+const TABS = ["Overview", "PO Tracker", "Revenue", "Cost", "Milestones", "Documents", "Queries", "Audit"];
 
 export default function ProjectDetailPage() {
   const { id } = useParams();
@@ -146,7 +146,8 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="px-8 py-6">
-        {tab === "Overview" && <Overview project={project} />}
+        {tab === "Overview" && <Overview project={project} onShowPOs={() => setTab("PO Tracker")} />}
+        {tab === "PO Tracker" && <POTrackerTab projectId={id} wbs={project.wbs_element} unit={unit} />}
         {tab === "Revenue" && <RevenueTab projectId={id} rows={revenue} reload={load} mode={mode} inrPerUsd={inrPerUsd} project={project} />}
         {tab === "Cost" && <CostTab projectId={id} rows={cost} reload={load} mode={mode} inrPerUsd={inrPerUsd} project={project} />}
         {tab === "Milestones" && <Milestones project={project} mode={mode} inrPerUsd={inrPerUsd} />}
@@ -168,7 +169,7 @@ export default function ProjectDetailPage() {
 }
 
 
-function Overview({ project }) {
+function Overview({ project, onShowPOs }) {
   const [pipeline, setPipeline] = React.useState(null);
   React.useEffect(() => {
     if (!project.pipeline_id) return;
@@ -235,6 +236,21 @@ function Overview({ project }) {
               <span key={k} className="badge flag-low-margin">{k}</span>
             ))}
           </div>
+        </div>
+      )}
+
+      {project.wbs_element && (
+        <div className="tile p-4 flex items-center justify-between" data-testid="overview-wbs-link">
+          <div className="flex items-center gap-3">
+            <LinkSimple size={18} weight="duotone" className="text-[var(--gold)]" />
+            <div>
+              <div className="text-[10px] tracking-overline text-[var(--muted)]">WBS Element</div>
+              <div className="font-mono text-sm font-semibold">{project.wbs_element}</div>
+            </div>
+          </div>
+          <button className="btn-secondary text-xs flex items-center gap-1" onClick={onShowPOs} data-testid="overview-view-pos-btn">
+            <Package size={12} weight="bold" /> View Linked POs
+          </button>
         </div>
       )}
 
@@ -856,5 +872,137 @@ function NewQueryModal({ projectId, onClose, onSaved }) {
         <button type="submit" className="btn-primary" disabled={busy} data-testid="query-submit">{busy ? "Saving…" : "Raise Query"}</button>
       </div>
     </Modal>
+  );
+}
+
+
+function POTrackerTab({ projectId, wbs, unit }) {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [search, setSearch] = React.useState("");
+
+  React.useEffect(() => {
+    setLoading(true);
+    api.get(`/projects/${projectId}/matched-pos`)
+      .then((r) => setData(r.data))
+      .catch(() => setData({ wbs: null, pos: [], summary: { count: 0, total_value_inr: 0 } }))
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  if (loading) return <div className="text-sm text-[var(--muted)] py-8 text-center">Loading matched POs...</div>;
+
+  if (!data?.wbs) {
+    return (
+      <div className="tile p-8 text-center" data-testid="po-tracker-no-wbs">
+        <LinkSimple size={24} weight="duotone" className="text-[var(--muted)] mx-auto mb-2" />
+        <div className="text-sm text-[var(--muted)]">No WBS element assigned to this project.</div>
+        <div className="text-xs text-[var(--muted)] mt-1">Assign a WBS element to see matching POs from the ZMM PO Report.</div>
+      </div>
+    );
+  }
+
+  const pos = (data.pos || []).filter((po) => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return (po.purchase_order || "").toLowerCase().includes(s)
+      || (po.supplier_name || "").toLowerCase().includes(s)
+      || (po.material_description || "").toLowerCase().includes(s)
+      || (po.wbs || "").toLowerCase().includes(s);
+  });
+
+  const uniquePOs = new Set(pos.map((p) => p.purchase_order)).size;
+
+  return (
+    <div data-testid="po-tracker-tab">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="font-display text-lg font-bold flex items-center gap-2">
+            <Package size={18} weight="duotone" className="text-[var(--gold)]" />
+            PO Tracker
+          </h3>
+          <div className="text-xs text-[var(--muted)] mt-0.5">
+            ZMM PO Register rows matching WBS <span className="font-mono font-semibold text-[var(--text)]">{data.wbs}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <StatTile label="Matched PO Lines" value={data.summary.count} size="md" testid="po-tracker-count" />
+        <StatTile label="Unique POs" value={uniquePOs} size="md" testid="po-tracker-unique" />
+        <StatTile label="Total Value (INR)" value={formatMoney(data.summary.total_value_inr, unit)} size="md" accent testid="po-tracker-value" />
+      </div>
+
+      {data.summary.count > 0 && (
+        <div className="mb-3">
+          <div className="relative max-w-xs">
+            <input
+              className="input pl-8 h-8 text-xs"
+              placeholder="Search PO, supplier, material..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              data-testid="po-tracker-search"
+            />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]">
+              <Package size={12} />
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="tile overflow-hidden">
+        <table className="tbl" data-testid="po-tracker-table">
+          <thead>
+            <tr>
+              <th>Purchase Order</th>
+              <th>Item</th>
+              <th>Supplier</th>
+              <th>Material</th>
+              <th>WBS</th>
+              <th className="num">Value (INR)</th>
+              <th>Period</th>
+              <th>Created</th>
+              <th>Link Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pos.map((po, i) => (
+              <tr key={`${po.purchase_order}-${po.purchase_order_item}-${i}`} data-testid={`po-row-${i}`}>
+                <td className="font-mono text-xs font-semibold">{po.purchase_order || "—"}</td>
+                <td className="font-mono text-xs">{po.purchase_order_item || "—"}</td>
+                <td>
+                  <div className="text-xs">{po.supplier_name || "—"}</div>
+                  {po.supplier_code && <div className="text-[10px] text-[var(--muted)] font-mono">{po.supplier_code}</div>}
+                </td>
+                <td>
+                  <div className="text-xs max-w-[200px] truncate" title={po.material_description}>{po.material_description || po.material || "—"}</div>
+                </td>
+                <td className="font-mono text-xs">{po.wbs || "—"}</td>
+                <td className="num font-mono text-xs">{formatMoney(po.value_inr || po.net_order_value, unit)}</td>
+                <td className="text-xs text-[var(--muted)]">
+                  {po.period_start && po.period_end
+                    ? `${formatDate(po.period_start)} — ${formatDate(po.period_end)}`
+                    : po.period_start ? formatDate(po.period_start) : "—"}
+                </td>
+                <td className="text-xs">{formatDate(po.created_on)}</td>
+                <td>
+                  {po.link_status ? (
+                    <span className={`px-2 py-0.5 text-[10px] tracking-overline font-semibold ${po.link_status === "Linked" ? "bg-[rgba(34,197,94,0.18)] text-[#22c55e]" : "bg-[rgba(234,179,8,0.18)] text-[#eab308]"}`}>
+                      {po.link_status}
+                    </span>
+                  ) : <span className="text-[var(--muted)] text-xs">—</span>}
+                </td>
+              </tr>
+            ))}
+            {pos.length === 0 && (
+              <tr>
+                <td colSpan={9} className="text-center py-8 text-[var(--muted)]">
+                  {search ? "No POs match your search." : "No PO register rows found for this WBS element."}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

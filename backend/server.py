@@ -1566,6 +1566,86 @@ async def delete_cost(cid: str, user: dict = Depends(require_section("projects",
     return {"ok": True}
 
 
+@api.get("/projects/{pid}/matched-pos")
+async def project_matched_pos(pid: str, _: dict = Depends(require_section("projects"))):
+    """PO register rows whose WBS matches this project's wbs_element."""
+    proj = await db.projects.find_one({"id": pid}, {"_id": 0, "wbs_element": 1})
+    if not proj:
+        raise HTTPException(404, "Not found")
+    wbs = (proj.get("wbs_element") or "").strip()
+    if not wbs:
+        return {"wbs": None, "pos": [], "summary": {"count": 0, "total_value_inr": 0}}
+    docs = await db.aop_rows.find(
+        {"dataset": "po_register", "fields.wbs": {"$regex": f"^{re.escape(wbs)}", "$options": "i"}},
+        {"_id": 0, "fields": 1},
+    ).to_list(5000)
+    rows = []
+    total = 0.0
+    for d in docs:
+        f = d.get("fields", {})
+        val = float(f.get("value_inr") or f.get("net_order_value") or 0)
+        total += val
+        rows.append({
+            "purchase_order": f.get("purchase_order"),
+            "purchase_order_item": f.get("purchase_order_item"),
+            "supplier_name": f.get("supplier_name"),
+            "supplier_code": f.get("supplier_code"),
+            "wbs": f.get("wbs"),
+            "material": f.get("material"),
+            "material_description": f.get("material_description"),
+            "net_order_value": f.get("net_order_value"),
+            "value_inr": f.get("value_inr"),
+            "currency": f.get("currency"),
+            "period_start": f.get("period_start"),
+            "period_end": f.get("period_end"),
+            "created_on": f.get("created_on"),
+            "grn_value": f.get("grn_value"),
+            "deletion_indicator": f.get("deletion_indicator"),
+            "link_status": f.get("link_status"),
+        })
+    return {"wbs": wbs, "pos": rows, "summary": {"count": len(rows), "total_value_inr": total}}
+
+
+@api.get("/change-requests/{cid}/matched-pos")
+async def cr_matched_pos(cid: str, _: dict = Depends(require_section("change_requests"))):
+    """PO register rows whose WBS matches this CR's wbs_element."""
+    cr = await db.change_requests.find_one({"id": cid}, {"_id": 0, "wbs_element": 1})
+    if not cr:
+        raise HTTPException(404, "Not found")
+    wbs = (cr.get("wbs_element") or "").strip()
+    if not wbs:
+        return {"wbs": None, "pos": [], "summary": {"count": 0, "total_value_inr": 0}}
+    docs = await db.aop_rows.find(
+        {"dataset": "po_register", "fields.wbs": {"$regex": f"^{re.escape(wbs)}", "$options": "i"}},
+        {"_id": 0, "fields": 1},
+    ).to_list(5000)
+    rows = []
+    total = 0.0
+    for d in docs:
+        f = d.get("fields", {})
+        val = float(f.get("value_inr") or f.get("net_order_value") or 0)
+        total += val
+        rows.append({
+            "purchase_order": f.get("purchase_order"),
+            "purchase_order_item": f.get("purchase_order_item"),
+            "supplier_name": f.get("supplier_name"),
+            "supplier_code": f.get("supplier_code"),
+            "wbs": f.get("wbs"),
+            "material": f.get("material"),
+            "material_description": f.get("material_description"),
+            "net_order_value": f.get("net_order_value"),
+            "value_inr": f.get("value_inr"),
+            "currency": f.get("currency"),
+            "period_start": f.get("period_start"),
+            "period_end": f.get("period_end"),
+            "created_on": f.get("created_on"),
+            "grn_value": f.get("grn_value"),
+            "deletion_indicator": f.get("deletion_indicator"),
+            "link_status": f.get("link_status"),
+        })
+    return {"wbs": wbs, "pos": rows, "summary": {"count": len(rows), "total_value_inr": total}}
+
+
 # ============================================================
 # APPROVAL MATRIX & QUEUE
 # ============================================================
