@@ -45,6 +45,7 @@ from .mapping import Mapping, MAPPING_FIELD, REGISTER_FIELDS, REGISTER_LINES_FIE
 from .plan import build_draft, default_drivers
 from . import reports as rep
 from .pnl import Filters, PnLEngine
+from .aop_workbook import generate_workbook as gen_aop_wb, parse_workbook as parse_aop_wb
 from . import mis
 from . import mis_reports as mr
 from . import departments as dept_scope
@@ -1305,6 +1306,86 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         out.seek(0)
         return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                  headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
+
+    # ------------------------------------------------------------------ full AOP model workbook (admin)
+    @r.get("/workbook/download")
+    async def download_aop_workbook(user: dict = Depends(get_current_user)):
+        """Download the full AOP model as an Excel workbook with raw-data tabs and a
+        formula-based P&L. Admin only."""
+        require_admin(user)
+        data, actuals, cfg = await load_all()
+        p = await perms_for(user)
+        out = gen_aop_wb(data, cfg, payroll_ok=payroll_visible(p))
+        base, plan, draft = cfg["base_fy"], cfg["plan_fy"], cfg.get("draft_fy") or shift_fy(cfg["plan_fy"], 1)
+        fname = f"AOP_Model_{_ql(base)}_{_ql(plan)}_{_ql(draft)}.xlsx".replace("'", "")
+        return StreamingResponse(out, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+    @r.post("/workbook/upload")
+    async def upload_aop_workbook(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+        """Upload a modified AOP model workbook. Reads each raw-data sheet and upserts
+        rows by key — new lines are added, removed lines are flagged, changed values updated."""
+        require_admin(user)
+        content = await file.read()
+        if not content:
+            raise HTTPException(400, "Empty file")
+        try:
+            parsed = parse_aop_wb(content)
+        except Exception as e:
+            raise HTTPException(400, f"Could not read the AOP workbook: {e}")
+        cfg = await get_config()
+        counts: Dict[str, Any] = {}
+        for ds_key, rows in parsed["datasets"].items():
+            spec = SPECS.get(ds_key)
+            if not spec:
+                continue
+            if spec.sensitive and not payroll_visible(await perms_for(user)):
+                continue
+            # Build keyed updates
+            upd: Dict[str, Dict[str, Any]] = {}
+            for row_fields in rows:
+                key = build_key(spec, row_fields)
+                if not key:
+                    lid = row_fields.get("line_id")
+                    if lid:
+                        key = str(lid).strip()
+                if not key:
+                    continue
+                clean = {k: v for k, v in row_fields.items() if k != "_key"}
+                upd[key] = clean
+            if upd:
+                # Upsert: existing keys updated, new keys inserted, missing keys flagged
+                existing_keys = set()
+                async for d in db.aop_rows.find({"dataset": ds_key}, {"_id": 0, "key": 1}):
+                    existing_keys.add(d["key"])
+                added = 0
+                updated = 0
+                for k, fields in upd.items():
+                    if k in existing_keys:
+                        await db.aop_rows.update_one(
+                            {"dataset": ds_key, "key": k},
+                            {"$set": {f"fields.{fk}": fv for fk, fv in fields.items()} |
+                             {"updated_at": now_iso(), "updated_by": user.get("email")}})
+                        updated += 1
+                    else:
+                        seq = await db.aop_rows.count_documents({"dataset": ds_key}) + 1
+                        await db.aop_rows.insert_one({
+                            "dataset": ds_key, "key": k, "seq": seq,
+                            "fields": fields, "updated_at": now_iso(), "updated_by": user.get("email")})
+                        added += 1
+                # Flag removed lines
+                upload_keys = set(upd.keys())
+                removed_keys = existing_keys - upload_keys
+                if removed_keys:
+                    await db.aop_rows.update_many(
+                        {"dataset": ds_key, "key": {"$in": list(removed_keys)}},
+                        {"$set": {"fields.removed_in_upload": True, "updated_at": now_iso(),
+                                  "updated_by": user.get("email")}})
+                counts[ds_key] = {"added": added, "updated": updated, "removed": len(removed_keys)}
+        await bump_version()
+        await write_audit(db, entity_type="aop_upload", entity_id="workbook", action="upload", user=user,
+                          field_changes={"file": file.filename, "counts": counts})
+        return {"counts": counts, "meta": parsed.get("meta", {})}
 
     # ------------------------------------------------------------------ workbook import (admin)
     async def write_result(res: Result, user: dict, replace_actual_domains: Optional[List[str]] = None):
