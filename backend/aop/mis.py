@@ -69,10 +69,10 @@ def measure_labels(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     base, plan, draft = cfg["base_fy"], cfg["plan_fy"], cfg["draft_fy"]
     q = lambda fy: "FY'" + fy[2:]
     return [
-        {"key": "a_base", "label": f"{q(base)} A", "fy": base, "kind": "actual", "available": True},
-        {"key": "b_plan", "label": f"{q(plan)} B", "fy": plan, "kind": "budget", "available": True},
-        {"key": "af_plan", "label": f"{q(plan)} A/F", "fy": plan, "kind": "actual", "available": True},
-        {"key": "b_draft", "label": f"{q(draft)} B", "fy": draft, "kind": "budget", "available": True},
+        {"key": "a_base", "label": f"{q(base)} Actual", "fy": base, "kind": "actual", "available": True},
+        {"key": "b_plan", "label": f"{q(plan)} AOP", "fy": plan, "kind": "budget", "available": True},
+        {"key": "af_plan", "label": f"{q(plan)} Actual + Forecast", "fy": plan, "kind": "actual", "available": True},
+        {"key": "b_draft", "label": f"{q(draft)} Budget", "fy": draft, "kind": "budget", "available": True},
         {"key": "af_draft", "label": f"{q(draft)} A/F", "fy": draft, "kind": "actual", "available": False,
          "note": f"Available once {draft} starts (admin rolls the plan cycle forward)"},
     ]
@@ -82,10 +82,10 @@ def months_meta(cfg: Dict[str, Any]) -> Dict[str, Any]:
     plan = cfg["plan_fy"]
     cut = (cfg.get("cutoffs") or {}).get("default") or ""
     pm = fy_months(plan)
-    # default YTD / MTD month: the latest actual month of the current year, else the first month
-    idx = max([i for i, p in enumerate(pm) if p <= cut], default=0)
+    actual_indices = [i for i, p in enumerate(pm) if p <= cut]
+    idx = max(actual_indices, default=0)
     return {"labels": [period_label(p).split("-")[0] for p in pm], "plan_months": pm, "default_month": idx,
-            "cutoff": cut}
+            "cutoff": cut, "actual_count": len(actual_indices)}
 
 
 # ---------------------------------------------------------------------------------------------- full P&L

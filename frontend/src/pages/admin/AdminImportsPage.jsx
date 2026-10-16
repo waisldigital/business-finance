@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
-import { FileArrowUp, FileXls, CheckCircle, Warning, ClockCounterClockwise } from "@phosphor-icons/react";
+import { FileArrowUp, FileXls, CheckCircle, Warning, ClockCounterClockwise, DownloadSimple, UploadSimple } from "@phosphor-icons/react";
 
 const KINDS = [
   { key: "aop", url: "/aop/import/aop-workbook", title: "Consolidated AOP workbook",
@@ -27,6 +27,9 @@ export default function AdminImportsPage() {
   return (
     <div data-testid="admin-imports-page">
       <PageHeader compact icon={FileArrowUp} title="Imports" subtitle="Load the AOP from Excel — tabs and columns are located by name, so re-arranged workbooks still import" />
+      <div className="p-3">
+        <AopModelCard onDone={load} />
+      </div>
       <div className="p-3 grid md:grid-cols-2 gap-3">
         {KINDS.map((k) => <ImportCard key={k.key} kind={k} onDone={load} />)}
       </div>
@@ -51,6 +54,72 @@ export default function AdminImportsPage() {
           {!history.length && <div className="px-3 py-6 text-center text-[var(--muted)]">No imports yet</div>}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AopModelCard({ onDone }) {
+  const [downloading, setDownloading] = useState(false);
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [res, setRes] = useState(null);
+  const [err, setErr] = useState("");
+  const download = async () => {
+    setDownloading(true);
+    try {
+      const { data, headers } = await api.get("/aop/workbook/download", { responseType: "blob", timeout: 300000 });
+      const cd = headers["content-disposition"] || "";
+      const match = cd.match(/filename="?([^"]+)"?/);
+      const name = match ? match[1] : "AOP_Model.xlsx";
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setErr(e.response?.data?.detail || e.message); }
+    finally { setDownloading(false); }
+  };
+  const upload = async () => {
+    if (!file || !window.confirm(`Upload "${file.name}"? Modified line items will be upserted, new lines added, and removed lines flagged.`)) return;
+    setUploading(true); setErr(""); setRes(null);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const { data } = await api.post("/aop/workbook/upload", fd, { timeout: 600000 });
+      setRes(data); onDone();
+    } catch (e) { setErr(e.response?.data?.detail || e.message); }
+    finally { setUploading(false); }
+  };
+  return (
+    <div className="border border-[var(--gold)]/30 bg-[var(--surface)] p-4 text-xs space-y-3" data-testid="aop-model-card">
+      <div className="font-semibold text-sm flex items-center gap-2">
+        <FileXls size={18} className="text-[var(--gold)]" />
+        Full AOP Model Workbook
+        <span className="chip !bg-[var(--gold)]/15 !text-[var(--gold)]">Formula-based</span>
+      </div>
+      <div className="text-[var(--muted)]">
+        Download the entire AOP as a multi-sheet Excel workbook. The P&L tab uses SUMIFS formulas referencing the raw data tabs
+        (revenue, opex, payroll, overheads, etc.) — edit line items in the data tabs and re-upload to apply changes.
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button className="icon-btn primary !h-8 gap-1.5" onClick={download} disabled={downloading} data-testid="aop-model-download">
+          <DownloadSimple size={14} />{downloading ? "Preparing…" : "Download Model"}
+        </button>
+        <div className="flex items-center gap-1.5">
+          <label className="flex items-center gap-2 border border-dashed border-[var(--border)] px-2 h-8 cursor-pointer hover:border-[var(--gold)] truncate max-w-[260px]">
+            <UploadSimple size={14} className="text-[var(--muted)]" />
+            <span className="truncate">{file ? file.name : "Choose modified .xlsx"}</span>
+            <input type="file" accept=".xlsx,.xlsm" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          </label>
+          <button className="icon-btn !h-8 gap-1.5" disabled={!file || uploading} onClick={upload} data-testid="aop-model-upload">
+            <UploadSimple size={14} />{uploading ? "Uploading…" : "Upload Changes"}
+          </button>
+        </div>
+      </div>
+      {err && <div className="text-[var(--danger)]">{String(err)}</div>}
+      {res && (
+        <div className="text-[var(--success)] flex items-start gap-1"><CheckCircle size={13} className="mt-0.5" />
+          <span>{Object.entries(res.counts || {}).map(([ds, c]) =>
+            `${ds}: +${c.added} updated ${c.updated} removed ${c.removed}`).join(" · ")}</span>
+        </div>
+      )}
     </div>
   );
 }

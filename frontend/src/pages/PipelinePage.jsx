@@ -3,7 +3,10 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney } from "@/aop/format";
-import { Plus, MagnifyingGlass, PencilSimple, CheckCircle, XCircle, Trophy, HourglassMedium, Warning } from "@phosphor-icons/react";
+import {
+  Plus, MagnifyingGlass, PencilSimple, CheckCircle, XCircle, Trophy,
+  HourglassMedium, Warning, ArrowUpRight, CurrencyInr,
+} from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
 import PipelineWizardModal, { PIPELINE_STAGES } from "@/components/PipelineWizardModal";
 import Modal from "@/components/common/Modal";
@@ -92,100 +95,104 @@ export default function PipelinePage() {
     load(); // eslint-disable-next-line
   }, [stage]);
 
+  const wonCount = rows.filter((r) => r.outcome === "Won").length;
+  const closedCount = rows.filter((r) => r.outcome && r.outcome !== "Open").length;
+  const winRate = closedCount > 0 ? Math.round((wonCount / closedCount) * 100) : 0;
+
   return (
     <div data-testid="pipeline-page">
       <PageHeader
+        compact
         title="Pipeline"
         subtitle="Opportunity funnel — 5 stage progression with finance-approved handoff"
         breadcrumb="HOME · PIPELINE"
         actions={
-          <button className="btn-primary flex items-center gap-2" onClick={() => setShowCreate(true)} data-testid="new-pipeline-btn">
-            <Plus size={14} weight="bold" /> New Opportunity
+          <button className="btn-primary text-xs flex items-center gap-1.5" onClick={() => setShowCreate(true)} data-testid="new-pipeline-btn">
+            <Plus size={12} weight="bold" /> New Opportunity
           </button>
         }
       />
 
-      <div className="px-8 py-6 space-y-5">
-        {/* Summary KPI */}
+      <div className="px-6 py-4 space-y-3">
+        {/* KPI strip */}
         {summary && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard label="Open Opportunities" value={summary.total_opportunities} icon={<Trophy size={16} weight="duotone" className="text-[var(--gold)]" />} />
-            <KpiCard label="Total Pipeline Value" value={formatMoney(summary.total_value, unit)} />
-            <KpiCard label="Won Value" value={formatMoney(summary.won_value, unit)} accent />
-            <KpiCard label="Awaiting Finance Handoff" value={summary.pending_handoff} icon={<HourglassMedium size={16} weight="duotone" className="text-[var(--warning)]" />} danger={summary.pending_handoff > 0} />
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2" data-testid="pipeline-kpis">
+            <Kpi label="Open Opps" value={summary.total_opportunities} icon={Trophy} testid="kpi-open" />
+            <Kpi label="Pipeline Value" value={formatMoney(summary.total_value, unit)} icon={CurrencyInr} testid="kpi-value" />
+            <Kpi label="Won Value" value={formatMoney(summary.won_value, unit)} accent icon={Trophy} testid="kpi-won" />
+            <Kpi label="Win Rate" value={`${winRate}%`} sub={`${wonCount}/${closedCount} closed`} icon={ArrowUpRight} testid="kpi-winrate" />
+            <Kpi label="Pending Handoff" value={summary.pending_handoff} icon={HourglassMedium}
+                 danger={summary.pending_handoff > 0} sub="Awaiting finance" testid="kpi-handoff" />
           </div>
         )}
 
-        {/* Funnel chart */}
-        {summary?.funnel && (
-          <div className="tile p-5" data-testid="pipeline-funnel">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-[10px] tracking-overline text-[var(--muted)]">Pipeline Funnel</div>
-                <div className="font-display text-lg font-bold">Count and Value by Stage</div>
-              </div>
+        {/* Funnel + Filters side-by-side */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          {summary?.funnel && (
+            <div className="tile p-3 lg:col-span-2" data-testid="pipeline-funnel">
+              <div className="text-[10px] tracking-overline text-[var(--muted)] mb-0.5">Pipeline Funnel</div>
+              <div className="font-display text-sm font-bold mb-2">Count by Stage</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={summary.funnel} layout="vertical" margin={{ top: 0, left: 0, right: 20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="2 4" stroke="var(--border-soft)" horizontal={false} />
+                  <XAxis type="number" stroke="var(--muted)" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis type="category" dataKey="stage" width={120} stroke="var(--muted)" fontSize={10} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    formatter={(v, n) => n === "count" ? [v, "Count"] : [formatMoney(v, unit), "Value"]}
+                    contentStyle={{ borderRadius: 2, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 11, padding: "4px 8px" }}
+                    cursor={{ fill: "var(--surface-2)" }}
+                  />
+                  <Bar dataKey="count" radius={[0, 3, 3, 0]} label={{ position: "right", fill: "var(--text)", fontSize: 10, fontWeight: 600 }}>
+                    {summary.funnel.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={summary.funnel} layout="vertical" margin={{ top: 4, left: 8, right: 24 }}>
-                <CartesianGrid strokeDasharray="2 4" stroke="var(--border-soft)" horizontal={false} />
-                <XAxis type="number" stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="stage" width={160} stroke="var(--muted)" fontSize={11} tickLine={false} axisLine={false} />
-                <Tooltip
-                  formatter={(v, n) => n === "count" ? [v, "Count"] : [formatMoney(v, unit), "Value"]}
-                  contentStyle={{ borderRadius: 4, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 12 }}
-                  cursor={{ fill: "var(--surface-2)" }}
-                />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]} label={{ position: "right", fill: "var(--text)", fontSize: 11, fontWeight: 600 }}>
-                  {summary.funnel.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div className="tile p-4 flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[240px]">
-            <MagnifyingGlass size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
-            <input
-              className="input pl-9"
-              placeholder="Search opportunity, customer, BD owner…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && load()}
-              data-testid="pipeline-search"
-            />
-          </div>
-          <button
-            className={`btn-ghost border ${!stage ? "text-[var(--gold)] border-[var(--gold)]" : ""}`}
-            onClick={() => setStage("")}
-            data-testid="pipeline-filter-all"
-          >
-            All
-          </button>
-          {PIPELINE_STAGES.map((s) => (
-            <button
-              key={s.key}
-              className={`btn-ghost border ${stage === s.key ? "text-[var(--gold)] border-[var(--gold)]" : ""}`}
-              onClick={() => setStage(s.key)}
-              data-testid={`pipeline-filter-${s.key.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}
-            >
-              {s.key}
-            </button>
-          ))}
-          <button className="btn-secondary" onClick={load} data-testid="pipeline-search-btn">Search</button>
-        </div>
-
-        {/* Date range filter */}
-        <div className="tile p-3 flex flex-wrap items-center gap-3" data-testid="pipeline-date-filter">
-          <div className="text-[10px] tracking-overline text-[var(--muted)]">Date Range</div>
-          <input type="date" className="input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} data-testid="pipeline-date-from" />
-          <span className="text-xs text-[var(--muted)]">to</span>
-          <input type="date" className="input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} data-testid="pipeline-date-to" />
-          {(dateFrom || dateTo) && (
-            <button className="btn-ghost text-xs" onClick={() => { setDateFrom(""); setDateTo(""); }} data-testid="pipeline-date-clear">Clear</button>
           )}
-          <span className="ml-auto text-[11px] text-[var(--muted)]">{filteredRows.length} of {rows.length} shown</span>
+
+          <div className="lg:col-span-3 space-y-2">
+            {/* Search + stage filters */}
+            <div className="tile p-2.5 flex flex-wrap items-center gap-1.5" data-testid="pipeline-filters">
+              <div className="relative flex-1 min-w-[200px]">
+                <MagnifyingGlass size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+                <input
+                  className="input pl-7 h-8 text-xs"
+                  placeholder="Search opportunity, customer, BD owner…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && load()}
+                  data-testid="pipeline-search"
+                />
+              </div>
+              <button className="btn-secondary text-xs h-8 px-2.5" onClick={load} data-testid="pipeline-search-btn">Go</button>
+            </div>
+            <div className="tile p-2 flex flex-wrap items-center gap-1">
+              <button
+                className={`text-[10px] px-2 py-1 border transition-colors ${!stage ? "text-[var(--gold)] border-[var(--gold)] bg-[rgba(201,162,39,0.08)]" : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]"}`}
+                onClick={() => setStage("")}
+                data-testid="pipeline-filter-all"
+              >All</button>
+              {PIPELINE_STAGES.map((s) => (
+                <button
+                  key={s.key}
+                  className={`text-[10px] px-2 py-1 border transition-colors ${stage === s.key ? "text-[var(--gold)] border-[var(--gold)] bg-[rgba(201,162,39,0.08)]" : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]"}`}
+                  onClick={() => setStage(s.key)}
+                  data-testid={`pipeline-filter-${s.key.toLowerCase().replace(/[^a-z0-9]/g, "-")}`}
+                >{s.key}</button>
+              ))}
+            </div>
+            {/* Date range */}
+            <div className="tile p-2 flex flex-wrap items-center gap-2" data-testid="pipeline-date-filter">
+              <span className="text-[9px] tracking-overline text-[var(--muted)]">Date</span>
+              <input type="date" className="input h-7 text-xs" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} data-testid="pipeline-date-from" />
+              <span className="text-[9px] text-[var(--muted)]">→</span>
+              <input type="date" className="input h-7 text-xs" value={dateTo} onChange={(e) => setDateTo(e.target.value)} data-testid="pipeline-date-to" />
+              {(dateFrom || dateTo) && (
+                <button className="text-[10px] text-[var(--muted)] hover:text-[var(--text)]" onClick={() => { setDateFrom(""); setDateTo(""); }} data-testid="pipeline-date-clear">Clear</button>
+              )}
+              <span className="ml-auto text-[10px] text-[var(--muted)] font-mono">{filteredRows.length}/{rows.length}</span>
+            </div>
+          </div>
         </div>
 
         {err && <div className="text-xs text-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] p-2 border border-[var(--danger)]">{err}</div>}
@@ -208,10 +215,10 @@ export default function PipelinePage() {
             </thead>
             <tbody>
               {filteredRows.map((r) => (
-                <tr key={r.id} data-testid={`pipeline-row-${r.id}`}>
+                <tr key={r.id} className="cursor-pointer hover:bg-[var(--row-hover)]" onClick={() => setEditing(r)} data-testid={`pipeline-row-${r.id}`}>
                   <td>
                     <div className="font-medium text-[var(--text)]">{r.opportunity_title}</div>
-                    <div className="text-[11px] text-[var(--muted)]">
+                    <div className="text-[10px] text-[var(--muted)]">
                       {r.opportunity_id && <span className="font-mono mr-2">{r.opportunity_id}</span>}
                       {r.bd_owner || ""}
                     </div>
@@ -238,7 +245,7 @@ export default function PipelinePage() {
                       {canApprove && r.handoff_status === "Pending Finance" && (
                         <button
                           className="btn-primary text-[10px] flex items-center gap-1 px-2 py-1"
-                          onClick={() => setApproving(r)}
+                          onClick={(e) => { e.stopPropagation(); setApproving(r); }}
                           data-testid={`approve-handoff-${r.id}`}
                         >
                           <CheckCircle size={10} weight="bold" /> Review
@@ -246,8 +253,9 @@ export default function PipelinePage() {
                       )}
                       {r.handoff_status === "Approved" && r.handoff_project_id && (
                         <a
-                          href={r.opportunity_category === "Change Request" ? `/change-requests` : `/projects/${r.handoff_project_id}`}
+                          href={r.opportunity_category === "Change Request" ? `/app/change-requests` : `/app/projects/${r.handoff_project_id}`}
                           className="text-[10px] text-[var(--gold)] underline"
+                          onClick={(e) => e.stopPropagation()}
                           data-testid={`handoff-project-${r.id}`}
                         >
                           {r.opportunity_category === "Change Request" ? "view CR →" : "view project →"}
@@ -255,9 +263,9 @@ export default function PipelinePage() {
                       )}
                     </div>
                   </td>
-                  <td className="text-right whitespace-nowrap">
+                  <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <button className="btn-ghost" title="Edit" onClick={() => setEditing(r)} data-testid={`pipeline-edit-${r.id}`}>
-                      <PencilSimple size={16} weight="duotone" className="text-[var(--gold)]" />
+                      <PencilSimple size={14} weight="duotone" className="text-[var(--gold)]" />
                     </button>
                     {r.outcome === "Open" && r.current_stage !== "Closed" && (
                       <button
@@ -265,14 +273,14 @@ export default function PipelinePage() {
                         onClick={() => setClosing(r)}
                         data-testid={`pipeline-close-${r.id}`}
                       >
-                        Close Deal
+                        Close
                       </button>
                     )}
                   </td>
                 </tr>
               ))}
               {filteredRows.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-12 text-[var(--muted)]">No opportunities yet — click <span className="text-[var(--gold)] font-semibold">New Opportunity</span></td></tr>
+                <tr><td colSpan={9} className="text-center py-8 text-[var(--muted)]">No opportunities yet — click <span className="text-[var(--gold)] font-semibold">New Opportunity</span></td></tr>
               )}
             </tbody>
           </table>
@@ -305,15 +313,17 @@ export default function PipelinePage() {
   );
 }
 
-function KpiCard({ label, value, sub, icon, accent, danger }) {
+/* ─── Compact KPI tile (matches Dashboard density) ─── */
+function Kpi({ label, value, sub, icon: Icon, accent, danger, testid }) {
+  const color = accent ? "var(--gold)" : danger ? "var(--danger)" : undefined;
   return (
-    <div className="tile p-4">
-      <div className="flex items-start justify-between">
-        <div className="text-[10px] tracking-overline text-[var(--muted)]">{label}</div>
-        {icon}
+    <div className="tile px-3 py-2.5" data-testid={testid}>
+      <div className="flex items-center justify-between mb-0.5">
+        <span className="text-[9px] tracking-overline text-[var(--muted)] leading-none">{label}</span>
+        {Icon && <Icon size={12} weight="duotone" className="text-[var(--gold)] opacity-60" />}
       </div>
-      <div className={`font-mono font-semibold text-2xl mt-1 ${accent ? "text-[var(--gold)]" : danger ? "text-[var(--danger)]" : ""}`}>{value}</div>
-      {sub && <div className="text-[11px] text-[var(--muted)] mt-1">{sub}</div>}
+      <div className="font-mono font-semibold text-lg leading-tight" style={{ color }}>{value}</div>
+      {sub && <div className="text-[10px] text-[var(--muted)] leading-tight mt-0.5 truncate">{sub}</div>}
     </div>
   );
 }
@@ -422,4 +432,3 @@ function ApproveHandoffModal({ opportunity, onClose, onActioned, onError }) {
     </Modal>
   );
 }
-

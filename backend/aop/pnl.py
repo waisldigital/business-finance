@@ -458,14 +458,15 @@ class PnLEngine:
 
     # ------------------------------------------------------------------ output
     def columns(self) -> List[Dict[str, Any]]:
-        cols = [{"key": "b_base", "label": f"B {self.base_fy}", "kind": "budget"}]
+        q = lambda fy: "FY'" + fy[2:]
+        cols = [{"key": "b_base", "label": f"{q(self.base_fy)} AOP", "kind": "budget"}]
         for p in self.base_m:
             kind = "actual" if p <= self.cutoff("default") else "forecast"
             cols.append({"key": p, "label": period_label(p), "kind": kind, "fy": self.base_fy})
-        cols.append({"key": "af_base", "label": f"A {self.base_fy}", "kind": "total"})
+        cols.append({"key": "af_base", "label": f"{q(self.base_fy)} Actual", "kind": "total"})
         for p in self.plan_m:
             cols.append({"key": p, "label": period_label(p), "kind": "budget", "fy": self.plan_fy})
-        cols.append({"key": "b_plan", "label": f"B {self.plan_fy}", "kind": "total"})
+        cols.append({"key": "b_plan", "label": f"{q(self.plan_fy)} AOP", "kind": "total"})
         cols.append({"key": "growth", "label": "Growth %", "kind": "pct"})
         return cols
 
