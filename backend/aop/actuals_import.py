@@ -4,8 +4,10 @@
   overheads, below-EBITDA and capex actuals of the current plan year, line by line (the raw-data drill-downs
   show these bookings)
 * Resource cost file (Final Resource Cost: employee × WBS × month)                  → payroll actuals with FTE
-* Reporting package (PAX sheet, CAPEX Tracker)                                      → actual billable PAX and the
-  capex tracker (initial budget, capex till last year, monthly actuals, open PO / PR)
+* Reporting package (the MIS workbook)                                               → the P&L actuals of every block
+  (revenue, opex, employee cost, overheads, below EBITDA) for its closed months, actual billable PAX and the
+  capex tracker (initial budget, capex till last year, monthly actuals, open PO / PR). For the months it covers
+  the package is the actual source of the reports (it is the reconciled MIS); SAP-dump actuals stay for drill-downs
 * Project health tracker (project revenue master)                                    → TCV and owners on the project master
 
 Each import replaces only its own source for the months it contains, so re-uploading a month-end file is safe.
@@ -19,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .datasets import column, norm
 from .importer import Book, Result, find_header_row, num, txt
 from .periods import fy_of_period, to_period
+from .package_import import package_actuals
 
 # SAP_Expense "Nature of services" / AOP nature → the opex categories of the MIS pack
 OPEX_CATEGORIES = ["AMC/CMC", "Software/Licenses", "Third Party Manpower", "Service Contract", "Consumables & Spares", "Overheads"]
@@ -293,9 +296,16 @@ def import_resource_cost(path, plan_fy: str) -> Result:
 
 # ---------------------------------------------------------------------------------------------- reporting package
 def import_reporting_package(path, plan_fy: str) -> Result:
-    """PAX sheet → actual billable PAX rows for the CUTE drivers; CAPEX Tracker → capex_tracker dataset."""
+    """The Financial Reporting Package → the plan year's P&L actuals for its closed months (every block, see
+    package_import), actual billable PAX rows for the CUTE drivers, and the capex tracker."""
     book = Book(path)
     res = Result()
+    acts, pkg_meta = package_actuals(book, plan_fy)
+    for i, a in enumerate(acts):
+        extra = {"qty": a["qty"]} if a.get("qty") else {}
+        res.actual(a["domain"], f"pkg-{a['block']}", a["period"], a["amount"], a["dims"], block=a["block"],
+                   uid=f"pkg|{a['domain']}|{a['period']}|{i}", **extra)
+    res.meta.update(pkg_meta)
     pax_rows: List[Dict[str, Any]] = []
     # Revenue Analysis "SECTION B — BILLABLE PAX COUNT": Act/Fct flag row, date row, then location × PAX type rows
     sheet = book.find("Revenue Analysis", required=False)

@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { Info, CalendarBlank, WarningCircle } from "@phosphor-icons/react";
 import { ResponsiveContainer, ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 import { fmtAmount, fmtPct, unitDiv } from "./format";
-import { agg, periodPrefix } from "./mis";
+import { agg, periodPrefix, PeriodContext } from "./mis";
 import { PeriodPicker } from "./MisCommon";
 import ReportTable from "./ReportTable";
 import { useGridView } from "./gridView";
@@ -15,8 +15,21 @@ import { CHART } from "@/lib/chartColors";
 
 function usePeriod(storageKey, data) {
   const [view, update, reset, shared] = useGridView(storageKey, { period: "ytd", month: null });
-  const month = view.month ?? data?.months?.default_month ?? 0;
-  return { view, update, reset, shared, period: view.period || "ytd", month };
+  const page = useContext(PeriodContext); // on the AOP reports page every format follows the page's period
+  if (!page) {
+    const month = view.month ?? data?.months?.default_month ?? 0;
+    return { view, update, reset, shared, period: view.period || "ytd", month };
+  }
+  const month = page.month ?? data?.months?.default_month ?? 0;
+  const set = (c) => {
+    const { period, month: mo, ...rest } = c || {};
+    const pp = {};
+    if (period !== undefined) pp.period = period;
+    if (mo !== undefined) pp.month = mo;
+    if (Object.keys(pp).length) page.set(pp);
+    if (Object.keys(rest).length) update(rest);
+  };
+  return { view, update: set, reset, shared, period: page.period || "ytd", month };
 }
 
 const Err = ({ err }) => (err ? <div className="text-xs text-[var(--danger)] flex items-center gap-1"><WarningCircle size={12} />{String(err)}</div> : null);

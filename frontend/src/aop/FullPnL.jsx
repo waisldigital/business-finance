@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { GearSix, DownloadSimple, ArrowClockwise, LockSimple } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
-import { agg, periodPrefix, useTree, csvDownload, usePref } from "./mis";
+import { agg, periodPrefix, useTree, csvDownload, usePref, usePagePeriod } from "./mis";
 import { TreeLabel, ExpandButtons, PeriodPicker, Popover, Check, useFilters, FilterBar, MisModal } from "./MisCommon";
+import DrillList, { canDrill } from "./DrillList";
 import RevenuePerformance from "./RevenuePerformance";
 import { SharedDefault } from "./GridSettings";
 import { useAuth } from "@/lib/auth";
@@ -33,7 +34,7 @@ export default function FullPnL({ unit, onDrill }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
-  const [drill, setDrill] = useState(false);
+  const [drill, setDrill] = useState(null);
 
   const load = async () => {
     setLoading(true); setErr("");
@@ -46,11 +47,13 @@ export default function FullPnL({ unit, onDrill }) {
 
   const rows = useMemo(() => data?.rows || [], [data]);
   const tree = useTree(rows, { defaultOpen: false });
-  const month = pref.month ?? data?.months?.default_month ?? 0;
+  const per = usePagePeriod({ period: pref.period, month: pref.month ?? data?.months?.default_month ?? 0, set: (p) => setPref(p) });
+  const month = per.month ?? data?.months?.default_month ?? 0;
+  const period = per.period;
   const measures = (data?.measures || []).filter((m) => m.available && pref.measures.includes(m.key));
   const segments = (data?.segments || []).filter((s) => pref.segments.includes(s.key));
   const withVar = pref.variance && measures.length >= 2;
-  const prefix = periodPrefix(pref.period, data?.months, month);
+  const prefix = periodPrefix(period, data?.months, month);
   const byId = useMemo(() => Object.fromEntries(rows.map((r) => [r.id, r])), [rows]);
 
   const val = (r, m, s) => {
@@ -60,7 +63,7 @@ export default function FullPnL({ unit, onDrill }) {
       return num === null || den === null || !den ? null : num / den;
     }
     if (!r.values) return null;
-    return agg(r.values[m]?.[s], pref.period, month);
+    return agg(r.values[m]?.[s], period, month);
   };
   const variance = (r, s) => {
     const a = val(r, measures[0].key, s); const b = val(r, measures[measures.length - 1].key, s);
@@ -83,7 +86,7 @@ export default function FullPnL({ unit, onDrill }) {
       if (withVar) { const v = variance(r, s.key); cells.push(r.masked ? "restricted" : r.kind === "pct" ? v : (v ?? 0) / div); }
       return cells;
     })]);
-    csvDownload([head, ...out], `Full_PnL_${pref.period}.csv`);
+    csvDownload([head, ...out], `Full_PnL_${period}.csv`);
   };
 
   const cols = segments.length * (measures.length + (withVar ? 1 : 0));
@@ -92,7 +95,7 @@ export default function FullPnL({ unit, onDrill }) {
       <div className="flex items-center gap-1.5 flex-wrap">
         <FilterBar f={f} />
         <span className="w-2" />
-        <PeriodPicker period={pref.period} month={month} months={data?.months} onChange={(p) => setPref(p)} testid="full-period" />
+        <PeriodPicker period={period} month={month} months={data?.months} onChange={per.set} testid="full-period" />
         <div className="flex-1" />
         <ExpandButtons tree={tree} />
         <Popover icon={<GearSix size={14} />} label={<span className="text-[10.5px] tabular-nums">{measures.length}</span>} testid="full-columns">
@@ -145,13 +148,14 @@ export default function FullPnL({ unit, onDrill }) {
             </thead>
             <tbody>
               {rows.filter(tree.visible).map((r) => {
-                const dr = onDrill ? drillOf(r) : (r.id === "rev" || r.parent === "rev" ? ["modal"] : null);
-                const isRev = !!dr;
+                const dr = onDrill ? drillOf(r) : null;
+                const isRev = !r.masked && (canDrill(r.id) || !!dr);
                 const d = tree.depth(r.id);
                 return (
                   <tr key={r.id} className={`${r.key ? "key" : r.kind === "subtotal" ? "sub" : ""} ${d ? "child" : ""} ${r.kind === "pct" ? "pct" : ""} ${isRev ? "dbl" : ""}`}
-                      onDoubleClick={isRev ? () => (onDrill ? onDrill(dr[0], dr[1] || {}, r.label) : setDrill(true)) : undefined} data-testid={`full-row-${r.id}`}>
-                    <td className="lbl"><TreeLabel row={r} tree={tree} depth={d} title={isRev ? "Double-click to drill down" : undefined} /></td>
+                      onDoubleClick={isRev ? () => (canDrill(r.id) ? setDrill({ row: r, format: dr }) : onDrill(dr[0], dr[1] || {}, r.label)) : undefined}
+                      data-testid={`full-row-${r.id}`}>
+                    <td className="lbl"><TreeLabel row={r} tree={tree} depth={d} title={isRev ? "Double-click for the list of projects / airports / departments" : undefined} /></td>
                     {cols === 0 && <td />}
                     {segments.map((s) => (
                       <React.Fragment key={s.key}>
@@ -173,8 +177,11 @@ export default function FullPnL({ unit, onDrill }) {
         </div>
       )}
       {drill && (
-        <MisModal title="Revenue performance — Actuals vs AOP" onClose={() => setDrill(false)} testid="revenue-drill">
-          <RevenuePerformance unit={unit} geo={f.geo} tag={f.tag} initialMonth={month} embedded />
+        <MisModal title={`${drill.row.label} — what is behind it`} onClose={() => setDrill(null)} testid="pnl-drill">
+          <DrillList row={drill.row} geo={f.geo} tag={f.tag} unit={unit} period={period} month={month} months={data?.months}
+                     onOpenFormat={drill.format && onDrill ? () => { const fm = drill.format; setDrill(null); onDrill(fm[0], fm[1] || {}, drill.row.label); } : null}
+                     revenueModal={!onDrill && (drill.row.id === "rev" || drill.row.parent === "rev")
+                       ? <RevenuePerformance unit={unit} geo={f.geo} tag={f.tag} initialMonth={month} embedded /> : null} />
         </MisModal>
       )}
     </div>
