@@ -14,8 +14,8 @@ const KINDS = [
     help: "SAP_Revenue + SAP_Expense classified with the Mapping sheet → revenue, revenue share, opex, overheads and finance-cost actuals of the plan year, line by line. Replaces only the months in the file and moves the actual cut-off." },
   { key: "resource", url: "/aop/import/resource-cost", title: "Monthly actuals — resource cost file", monthly: true,
     help: "Final Resource Cost (employee × WBS × month) → payroll actuals by airport, project and department with FTE / headcount." },
-  { key: "package", url: "/aop/import/reporting-package", title: "Reporting package — PAX & capex tracker", monthly: true,
-    help: "Revenue Analysis billable PAX (actual months) → CUTE drivers “PAX Actual”; CAPEX Tracker → capex tracker (initial budget, capex till last year, monthly actuals, open PO / PR)." },
+  { key: "package", url: "/aop/import/reporting-package", title: "Monthly actuals — Financial Reporting Package (MIS)", monthly: true,
+    help: "The month-end MIS workbook → the plan year's actuals for every P&L line of its closed months: CUTE (airport × PAX type), Non-CUTE, CR and Revenue share by location; project revenue, TP opex and resource cost per project (Project Summary); CA / CR opex and direct resources by airport; indirect resources (with FTE) and SG&A by department and CA+CR / Solutions; depreciation, finance cost, other income and tax. For those months it is the reports' actual source (SAP-dump actuals stay for raw drill-downs); the cut-off moves to its last closed month. Also loads actual billable PAX and the capex tracker. The result shows the reconciliation against the package's own P&L sheet." },
   { key: "projects", url: "/aop/import/project-health", title: "Project health tracker", monthly: true,
     help: "Project revenue master → TCV (PO value), customer, sales owner and status on the CR & project master." },
 ];
@@ -168,6 +168,19 @@ function ImportCard({ kind, onDone }) {
         <div className="text-[var(--success)] flex items-start gap-1"><CheckCircle size={13} className="mt-0.5" />
           <span>{Object.entries(res.counts || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}{res.actuals ? ` · ${res.actuals} actuals` : ""}
             {res.periods ? ` · months ${res.periods.join(", ")}` : ""}{res.pax_rows ? ` · ${res.pax_rows} PAX rows` : ""}{res.matched !== undefined ? ` · ${res.matched}/${res.projects} projects matched` : ""}</span>
+        </div>
+      )}
+      {res?.meta?.by_block && (
+        <div className="border border-[var(--border-soft)] p-2 space-y-1" data-testid="package-reconciliation">
+          <div className="font-semibold">Actuals read (₹ Cr, {res.meta.actual_months?.[0]} → {res.meta.cutoff})</div>
+          <div className="grid grid-cols-2 gap-x-4">
+            {Object.entries(res.meta.by_block).map(([k, v]) => (
+              <div key={k} className="flex justify-between"><span>{k}</span><span className="tabular-nums">{Number(v).toFixed(2)}</span></div>
+            ))}
+          </div>
+          {res.meta.mismatches?.length
+            ? <div className="text-[var(--warning)]">Differs from the package's P&L sheet: {res.meta.mismatches.map((m) => `${m.line} ${m.period} (${m.diff > 0 ? "+" : ""}${m.diff.toFixed(2)})`).join(" · ")}</div>
+            : <div className="text-[var(--success)] flex items-center gap-1"><CheckCircle size={12} />Ties to the package's P&L sheet for every month</div>}
         </div>
       )}
     </div>

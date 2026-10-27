@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useContext } from "react";
 import api from "@/lib/api";
 import { DownloadSimple, ArrowClockwise, CalendarBlank, Info } from "@phosphor-icons/react";
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from "recharts";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
-import { agg, useTree, csvDownload } from "./mis";
+import { agg, useTree, csvDownload, PeriodContext } from "./mis";
 import { TreeLabel, ExpandButtons, useFilters, FilterBar } from "./MisCommon";
 import { CHART } from "@/lib/chartColors";
 
@@ -18,7 +18,10 @@ export default function RevenuePerformance({ unit, geo, tag, initialMonth, embed
   const t = embedded ? tag : own.tag;
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
-  const [month, setMonth] = useState(initialMonth ?? null);
+  const [ownMonth, setOwnMonth] = useState(initialMonth ?? null);
+  const page = useContext(PeriodContext); // the AOP reports page's month (not inside a drill-down)
+  const month = page && !embedded ? page.month : ownMonth;
+  const setMonth = (v) => (page && !embedded ? page.set({ month: v }) : setOwnMonth(v));
 
   const load = () => {
     setErr("");

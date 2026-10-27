@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .datasets import norm, vkey
 from .periods import fy_months, shift_fy
@@ -11,6 +11,21 @@ from .pnl import Filters, PnLEngine
 MARGIN_ROWS = ["revenue", "cute", "non_cute", "change_request", "projects", "direct_cost", "revenue_share",
                "resource_cost_ca", "tp_opex_ca", "total_cost_cr", "total_cost_projects", "gross_margin"]
 AIRPORTS = ["DIAL", "GHIAL", "GGIAL", "GVIAL"]
+
+
+def period_slice(months: List[str], period: str = "fy", month: Optional[int] = None) -> List[str]:
+    """The fiscal months a report covers: FY = all, YTD = April to the month, MTD = the month (index 0 = April)."""
+    if period not in ("ytd", "mtd") or month is None:
+        return list(months)
+    m = max(0, min(len(months) - 1, int(month)))
+    return months[m:m + 1] if period == "mtd" else months[:m + 1]
+
+
+def _month_sum(row: Dict[str, Any], ver: str, months: List[str], all_months: List[str], annual: float = 0.0) -> float:
+    """Sum of a version's months; a row with only an annual figure contributes pro rata."""
+    if any(vkey(ver, p) in row for p in all_months):
+        return sum(float(row.get(vkey(ver, p)) or 0) for p in months)
+    return annual * len(months) / 12 if all_months else 0.0
 
 
 def _block_engine(block: str, data, actuals, cfg):
@@ -27,31 +42,39 @@ def _block_engine(block: str, data, actuals, cfg):
     return eng, key, label
 
 
-def margin_profile(data, actuals, cfg, block: str, tags: List[str], payroll_visible: bool) -> Dict[str, Any]:
-    """Revenue, direct cost and gross margin per airport / reporting tag (overheads are not allocated)."""
+def margin_profile(data, actuals, cfg, block: str, tags: List[str], payroll_visible: bool,
+                   period: str = "fy", month: Optional[int] = None) -> Dict[str, Any]:
+    """Revenue, direct cost and gross margin per airport / reporting tag (overheads are not allocated); FY, YTD or
+    MTD of the block's year."""
     eng, key, label = _block_engine(block, data, actuals, cfg)
+    months = period_slice(eng.base_m if key == "af_base" else eng.plan_m, period, month)
+    whole = period not in ("ytd", "mtd") or month is None
     out = []
     for t in tags + ["All"]:
         res = eng.compute(Filters(tag=t))
-        vals = {r["id"]: (r["values"] or {}).get(key) for r in res["rows"] if r["id"] in MARGIN_ROWS}
+        vals = {r["id"]: ((r["values"] or {}).get(key) if whole else sum((r["values"] or {}).get(p) or 0.0 for p in months))
+                for r in res["rows"] if r["id"] in MARGIN_ROWS}
         rev = vals.get("revenue") or 0.0
         vals["gm_pct"] = (vals.get("gross_margin") or 0.0) / rev if rev else None
         if not payroll_visible:
             vals["resource_cost_ca"] = None
         out.append({"tag": "Total" if t == "All" else t, **vals})
-    return {"block": block, "label": label, "rows": out}
+    return {"block": block, "label": label, "rows": out, "months": months}
 
 
-def opex_forecast(tracker: List[Dict[str, Any]], plan_fy: str, group_by: str) -> Dict[str, Any]:
+def opex_forecast(tracker: List[Dict[str, Any]], plan_fy: str, group_by: str, period: str = "fy",
+                  month: Optional[int] = None) -> Dict[str, Any]:
     """Tracker lines grouped: budget (Budgeted FY'<plan>), forecast, and how many lines have a new PO linked or are
-    not migrated (mapping status)."""
+    not migrated (mapping status); FY, YTD or MTD."""
     F = "F" + plan_fy[2:]
-    months = fy_months(plan_fy)
+    all_m = fy_months(plan_fy)
+    months = period_slice(all_m, period, month)
     groups: Dict[str, Dict[str, Any]] = {}
     for r in tracker:
         g = str(r.get(group_by) or "(blank)")
         fc = sum(float(r.get(vkey(F, p)) or 0) for p in months)
-        bud = float(r.get(vkey("B" + plan_fy[2:], "annual"), r.get("budget_plan")) or 0)
+        bud = _month_sum(r, "B" + plan_fy[2:], months, all_m,
+                         float(r.get(vkey("B" + plan_fy[2:], "annual"), r.get("budget_plan")) or 0))
         e = groups.setdefault(g, {"group": g, "lines": 0, "budget": 0.0, "forecast": 0.0, "new_po_mapped": 0,
                                   "not_migrated": 0, "recurring": 0, "one_time": 0, "items": []})
         e["lines"] += 1
@@ -76,15 +99,17 @@ def opex_forecast(tracker: List[Dict[str, Any]], plan_fy: str, group_by: str) ->
     for e in rows:
         e["variance"] = e["budget"] - e["forecast"]
         e["items"].sort(key=lambda x: -x["budget"])
-    return {"rows": rows, "group_by": group_by}
+    return {"rows": rows, "group_by": group_by, "months": months}
 
 
-def overheads_by_department(data, actuals, cfg) -> Dict[str, Any]:
+def overheads_by_department(data, actuals, cfg, period: str = "fy", month: Optional[int] = None) -> Dict[str, Any]:
     base, plan = cfg["base_fy"], cfg["plan_fy"]
     draft = cfg.get("draft_fy") or shift_fy(plan, 1)
     B, T = "B" + plan[2:], "B" + draft[2:]
     heads = {r.get("aop_head"): r for r in data.get("overhead_lines", [])}
-    base_m = set(fy_months(base))
+    base_m = set(period_slice(fy_months(base), period, month))
+    plan_all, draft_all = fy_months(plan), fy_months(draft)
+    plan_m, draft_m = period_slice(plan_all, period, month), period_slice(draft_all, period, month)
     dept: Dict[str, Dict[str, Any]] = {}
 
     def e(name):
@@ -100,9 +125,9 @@ def overheads_by_department(data, actuals, cfg) -> Dict[str, Any]:
     for r in data.get("overhead_lines", []):
         x = e(r.get("pl_tag"))
         x["a_base"] += sum(float(r.get(vkey("F" + base[2:], p)) or 0) for p in base_m if p > cut)
-        x["b_plan"] += float(r.get(vkey(B, "annual")) or 0)
+        x["b_plan"] += _month_sum(r, B, plan_m, plan_all, float(r.get(vkey(B, "annual")) or 0))
     for r in data.get("overhead_plan", []):
-        amt = sum(float(r.get(vkey(T, p)) or 0) for p in fy_months(draft)) or float(r.get(f"annual_{T.lower()}") or 0)
+        amt = _month_sum(r, T, draft_m, draft_all, float(r.get(f"annual_{T.lower()}") or 0))
         x = e(r.get("department"))
         x["b_draft"] += amt
         x["plan_lines"].append({"line_id": r.get("line_id"), "cost_centre": r.get("cost_centre"), "gl": r.get("gl"),
@@ -114,10 +139,13 @@ def overheads_by_department(data, actuals, cfg) -> Dict[str, Any]:
     return {"rows": rows}
 
 
-def wbs_report(data, actuals, cfg, master: List[Dict[str, Any]]) -> Dict[str, Any]:
+def wbs_report(data, actuals, cfg, master: List[Dict[str, Any]], period: str = "fy", month: Optional[int] = None) -> Dict[str, Any]:
     plan = cfg["plan_fy"]
     draft = cfg.get("draft_fy") or shift_fy(plan, 1)
     B, T = "B" + plan[2:], "B" + draft[2:]
+    whole = period not in ("ytd", "mtd") or month is None
+    plan_all, draft_all = fy_months(plan), fy_months(draft)
+    plan_m, draft_m = period_slice(plan_all, period, month), period_slice(draft_all, period, month)
     m = {str(w.get("wbs_element") or "").strip(): w for w in master if w.get("wbs_element")}
     agg: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"opex_budget": 0.0, "opex_draft": 0.0, "actual_opex": 0.0,
                                                           "actual_overhead": 0.0, "actual_capex": 0.0, "lines": 0})
@@ -126,11 +154,14 @@ def wbs_report(data, actuals, cfg, master: List[Dict[str, Any]]) -> Dict[str, An
         if not w:
             continue
         a = agg[w]
-        a["opex_budget"] += float(r.get(vkey(B, "annual")) or 0)
-        a["opex_draft"] += sum(float(r.get(vkey(T, p)) or 0) for p in fy_months(draft))
+        a["opex_budget"] += _month_sum(r, B, plan_m, plan_all, float(r.get(vkey(B, "annual")) or 0))
+        a["opex_draft"] += sum(float(r.get(vkey(T, p)) or 0) for p in draft_m)
         a["lines"] += 1
         a.setdefault("name", r.get("wbs_name") or r.get("wbs_desc"))
+    in_range = set(plan_m)
     for x in actuals:
+        if not whole and x.get("period") not in in_range:
+            continue
         w = str((x.get("dims") or {}).get("wbs") or "").strip()
         if not w or w.lower() == "unbudgeted":
             continue

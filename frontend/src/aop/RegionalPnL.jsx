@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import { DownloadSimple, ArrowClockwise, Info, LockSimple, GearSix, ArrowCounterClockwise } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
-import { agg, useTree, csvDownload, usePref, periodPrefix } from "./mis";
+import { agg, useTree, csvDownload, usePref, periodPrefix, usePagePeriod } from "./mis";
 import { TreeLabel, ExpandButtons, PeriodPicker, Popover } from "./MisCommon";
 import { SharedDefault } from "./GridSettings";
 import { useAuth } from "@/lib/auth";
@@ -24,7 +24,8 @@ export default function RegionalPnL({ unit, onDrill }) {
   const rows = useMemo(() => data?.rows || [], [data]);
   const tree = useTree(rows, { defaultOpen: false });
   const byId = useMemo(() => Object.fromEntries(rows.map((r) => [r.id, r])), [rows]);
-  const month = pref.month ?? data?.months?.default_month ?? 0;
+  const per = usePagePeriod({ period: pref.period, month: pref.month ?? data?.months?.default_month ?? 0, set: (p) => setPref(p) });
+  const month = per.month ?? data?.months?.default_month ?? 0;
   const cols = (data?.columns || []).filter((c) => pref.subs || !c.sub);
   const measure = (data?.measures || []).find((x) => x.key === pref.measure) || data?.measures?.[2];
 
@@ -34,7 +35,7 @@ export default function RegionalPnL({ unit, onDrill }) {
       return n === null || d === null || !d ? null : n / d;
     }
     if (!r.values) return null;
-    return agg(r.values[measure.key]?.[c], pref.period, month);
+    return agg(r.values[measure.key]?.[c], per.period, month);
   };
   const show = (r, v) => {
     if (r.masked) return "•••";
@@ -46,7 +47,7 @@ export default function RegionalPnL({ unit, onDrill }) {
     const div = unitDiv(unit);
     csvDownload([["Particulars", ...cols.map((c) => c.label)],
                  ...rows.map((r) => [r.label, ...cols.map((c) => { const v = val(r, c.key); return r.masked ? "restricted" : r.kind === "pct" ? v : (v ?? 0) / div; })])],
-                `Regional_PnL_${measure?.key}_${pref.period}.csv`);
+                `Regional_PnL_${measure?.key}_${per.period}.csv`);
   };
 
   return (
@@ -57,7 +58,7 @@ export default function RegionalPnL({ unit, onDrill }) {
             <button key={x.key} className={measure?.key === x.key ? "on" : ""} onClick={() => setPref({ measure: x.key })} data-testid={`reg-m-${x.key}`}>{x.label}</button>
           ))}
         </div>
-        <PeriodPicker period={pref.period} month={month} months={data?.months} onChange={(p) => setPref(p)} testid="reg-period" />
+        <PeriodPicker period={per.period} month={month} months={data?.months} onChange={per.set} testid="reg-period" />
         <label className="flex items-center gap-1 text-[11px] ml-1">
           <input type="checkbox" className="accent-[var(--gold)]" checked={pref.subs} onChange={(e) => setPref({ subs: e.target.checked })} />Regions
         </label>
@@ -77,7 +78,7 @@ export default function RegionalPnL({ unit, onDrill }) {
             <table className="mis-table w-max min-w-full" data-testid="regional-table">
               <thead>
                 <tr>
-                  <th className="lbl h-head">Particulars · {periodPrefix(pref.period, data.months, month)} {measure?.label} ({unitLabel(unit)})</th>
+                  <th className="lbl h-head">Particulars · {periodPrefix(per.period, data.months, month)} {measure?.label} ({unitLabel(unit)})</th>
                   {cols.map((c) => <th key={c.key} className={`${cls(c)} !text-right`}>{c.label}</th>)}
                 </tr>
               </thead>

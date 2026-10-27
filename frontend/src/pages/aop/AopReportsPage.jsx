@@ -4,7 +4,7 @@ import { useCurrency } from "@/lib/currency";
 import { Stack, CaretUp, CaretDown, X, EyeSlash, ArrowLeft } from "@phosphor-icons/react";
 import { Popover, ToolbarExtra } from "@/aop/MisCommon";
 import { AirportGM, CuteAnalysis, OpexAnalysis, Resources, OverheadsSummary, OverheadsNature, OverheadsLines, ProjectHealth, CapexTracker } from "@/aop/MisDrillReports";
-import { usePref } from "@/aop/mis";
+import { usePref, PeriodContext } from "@/aop/mis";
 import { saveSharedView, clearSharedView, useSharedView } from "@/aop/gridView";
 import FullPnL from "@/aop/FullPnL";
 import PnLView from "@/aop/PnLView";
@@ -35,9 +35,14 @@ export default function AopReportsPage({ admin = false }) {
   const [pref, setPref] = usePref(admin ? "aop_reports_admin_v1" : "aop_reports_v1", { selected: ["full_pnl"] });
   const usersDefault = useSharedView("aop_reports_v1");
   const [defMsg, setDefMsg] = useState("");
+  // one FY / YTD / MTD + month for every format on the page (picked in any of them)
+  const [per, setPer] = usePref("aop_reports_period_v1", { period: "ytd", month: null });
+  const [months, setMonths] = useState(null);
   useEffect(() => {
-    api.get("/aop/mis/formats").then((r) => setCatalog(r.data.formats)).catch((e) => setErr(e.response?.data?.detail || e.message));
+    api.get("/aop/mis/formats").then((r) => { setCatalog(r.data.formats); setMonths(r.data.months || null); })
+      .catch((e) => setErr(e.response?.data?.detail || e.message));
   }, []);
+  const periodCtx = { period: per.period || "ytd", month: per.month ?? null, months, set: (c) => setPer((p) => ({ ...p, ...c })) };
 
   const byKey = Object.fromEntries((catalog || []).map((f) => [f.key, f]));
   const selected = pref.selected.filter((k) => byKey[k]);
@@ -90,6 +95,7 @@ export default function AopReportsPage({ admin = false }) {
   );
 
   return (
+    <PeriodContext.Provider value={periodCtx}>
     <div data-testid="aop-reports-page">
       <div className="p-3 space-y-3">
         {err && <div className="text-xs text-[var(--danger)]">{String(err)}</div>}
@@ -105,6 +111,7 @@ export default function AopReportsPage({ admin = false }) {
         ))}
       </div>
     </div>
+    </PeriodContext.Provider>
   );
 }
 

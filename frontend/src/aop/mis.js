@@ -1,5 +1,5 @@
 // Helpers shared by the MIS report formats (Full P&L, revenue performance, regional P&L).
-import { useCallback, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { download } from "./format";
 import { useGridView } from "./gridView";
 
@@ -69,4 +69,20 @@ export function csvDownload(lines, name) {
 export function usePref(key, initial) {
   const [v, set, reset, admin] = useGridView(key, initial);
   return [v, set, reset, admin];
+}
+
+// The AOP reports page's one period (FY / YTD / MTD + month): every format on the page follows it, so picking a
+// month in one report filters all of them. Outside the page (a drill-down opened alone) a format keeps its own.
+export const PeriodContext = createContext(null);
+
+export function usePagePeriod(local) {
+  const page = useContext(PeriodContext);
+  if (!page) return local;
+  return { period: page.period || "ytd", month: page.month ?? local.month, set: page.set, months: page.months, shared: true };
+}
+
+// Fiscal-month indexes a period covers (index 0 = April)
+export function periodIndexes(period, month) {
+  if (period === "fy" || month === null || month === undefined) return [...Array(12).keys()];
+  return period === "mtd" ? [month] : [...Array(month + 1).keys()];
 }

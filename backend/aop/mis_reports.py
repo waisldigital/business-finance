@@ -496,3 +496,196 @@ def overheads_lines(data, bookings: Iterable[Dict[str, Any]], cfg, dept: str, na
                      "amount": a["amount"]})
     acts.sort(key=lambda x: (x["period"], -abs(x["amount"])))
     return {**_meta(cfg), "department": dept, "nature": nature, "aop_lines": aop, "bookings": acts}
+
+
+# ---------------------------------------------------------------------------------------------- drill-down lists
+# Full P&L row → what its double-click lists. Each part: (group label, kind)
+DRILL_PARTS = {
+    "rev": [("CUTE", "cute"), ("Non-CUTE", "noncute"), ("Change request", "cr_rev"), ("Projects", "proj_rev")],
+    "rev_cute": [("CUTE", "cute")], "rev_noncute": [("Non-CUTE", "noncute")], "rev_cr": [("Change request", "cr_rev")],
+    "rev_projects": [("Projects", "proj_rev")], "rev_noncute_sol": [("Non-CUTE", "noncute")],
+    "rev_share": [("Revenue share", "rev_share")],
+    "opex_tp": [("Opex — CA", "opex_ca"), ("Shared services", "opex_shared"), ("Change request", "cr_opex"), ("Projects", "proj_opex")],
+    "opex_ca": [("Opex — CA", "opex_ca")], "opex_shared": [("Shared services", "opex_shared")],
+    "opex_cr": [("Change request", "cr_opex")], "opex_pj": [("Projects", "proj_opex")],
+    "emp_direct": [("Direct — CA", "res_ca"), ("Shared services", "res_shared"), ("Change request", "res_cr"), ("Projects", "proj_res")],
+    "emp_active": [("Direct — CA", "res_ca")], "emp_shared": [("Shared services", "res_shared")],
+    "emp_cr": [("Change request", "res_cr")], "emp_pj": [("Projects", "proj_res")],
+    "emp_indirect": [("Indirect", "res_oh")], "sga": [("SG&A", "tp_oh")],
+}
+DRILL_LABEL = {"cute": "Airport", "noncute": "Location", "cr_rev": "Location", "rev_share": "Location", "opex_ca": "Airport",
+               "opex_shared": "Shared services", "cr_opex": "Location", "res_ca": "Airport", "res_shared": "Shared services",
+               "res_cr": "Location", "res_oh": "Department", "tp_oh": "Department",
+               "proj_rev": "Project", "proj_opex": "Project", "proj_res": "Project"}
+
+
+def drill_parts(row: str) -> List[tuple]:
+    if row in DRILL_PARTS:
+        return DRILL_PARTS[row]
+    if row.startswith("ei_"):
+        return [("Indirect", "res_oh:" + row[3:])]
+    if row.startswith("sga_"):
+        return [("SG&A", "tp_oh:" + row[4:])]
+    return []
+
+
+def _project_items(data, actuals, cfg, kind: str, flt: Filters) -> List[Dict[str, Any]]:
+    """Per project AOP and actual + forecast (bookings to the cut-off, the plan after it) for revenue, TP opex or
+    resource cost, in the P&L's own sources (AOP: rev_projects / project master TP cost / payroll lines)."""
+    from .pnl import region_of
+    plan = cfg["plan_fy"]
+    pm_ = fy_months(plan)
+    B, F = "B" + plan[2:], "F" + plan[2:]
+    key = lambda v: re.sub(r"[^0-9a-z]+", "", str(v or "").lower())
+    master = {r.get("project_id"): r for r in data.get("project_master", []) if r.get("project_id")}
+    by_name = {key(r.get("project_name")): pid for pid, r in master.items() if r.get("project_name")}
+    info: Dict[str, Dict[str, Any]] = {}
+    aop: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    fc: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    def ok(geo, tag, region):
+        return flt.geo_ok(geo) and flt.tag_ok(tag) and flt.region_ok(region or geo)
+
+    def note(pid, **kw):
+        e = info.setdefault(pid, {})
+        for k, v in kw.items():
+            if v and not e.get(k):
+                e[k] = v
+
+    if kind == "proj_rev":
+        for r in data.get("rev_projects", []):
+            if norm(r.get("category")) != "projects" or not ok(r.get("geo"), r.get("tag"), r.get("region")):
+                continue
+            pid = r.get("project_id") or f"name:{r.get('project_name') or r.get('tag')}"
+            note(pid, label=r.get("project_name"), geo=r.get("geo"), tag=r.get("tag"), region=r.get("region"))
+            for p in pm_:
+                aop[pid][p] += _n(r.get(vkey(B, p)))
+                fc[pid][p] += _n(r.get(vkey(F, p), r.get(vkey(B, p))))
+    elif kind == "proj_opex":
+        fld = "tp_cost_b_plan"
+        use_master = any(fld in r for r in master.values())
+        if use_master:
+            for pid, r in master.items():
+                if norm(r.get("category")) != "projects" or not ok(r.get("geo"), r.get("tag"), r.get("region")):
+                    continue
+                note(pid, label=r.get("project_name"), geo=r.get("geo"), tag=r.get("tag"), region=r.get("region"))
+                for p in pm_:
+                    aop[pid][p] += _n(r.get(fld)) / 12
+                    fc[pid][p] += _n(r.get(fld)) / 12
+        else:
+            for r in data.get("opex_lines", []):
+                if norm(r.get("category")) != "projects" or not ok(r.get("geo"), r.get("tag"), r.get("region")):
+                    continue
+                pid = r.get("project_id") or by_name.get(key(r.get("project_name"))) or f"name:{r.get('project_name') or r.get('tag')}"
+                note(pid, label=r.get("project_name") or r.get("tag"), geo=r.get("geo"), tag=r.get("tag"))
+                for p in pm_:
+                    aop[pid][p] += _n(r.get(vkey(B, p)))
+                    fc[pid][p] += _n(r.get(vkey(F, p), r.get(vkey(B, p))))
+    elif kind == "proj_res":
+        for r in data.get("payroll_lines", []):
+            if norm(r.get("category")) != "projects" or not ok(r.get("geo"), r.get("tag"), r.get("location")):
+                continue
+            pid = r.get("project_code") or by_name.get(key(r.get("tag"))) or f"name:{r.get('tag')}"
+            note(pid, label=(master.get(pid) or {}).get("project_name") or r.get("tag"), geo=r.get("geo"), tag=r.get("tag"))
+            for p in pm_:
+                aop[pid][p] += _n(r.get(vkey(B, p)))
+                fc[pid][p] += _n(r.get(vkey(F, p), r.get(vkey(B, p))))
+    dom, pred = {"proj_rev": ("rev_projects", lambda d: norm(d.get("stream")) == "projects"),
+                 "proj_opex": ("opex", lambda d: norm(d.get("category")) == "projects"),
+                 "proj_res": ("payroll", lambda d: norm(d.get("category")) == "projects")}[kind]
+    act_m = set(_act_months(cfg, "default"))
+    act: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for a in actuals:
+        d = a.get("dims") or {}
+        if a.get("domain") != dom or a["period"] not in act_m or not pred(d):
+            continue
+        if not ok(d.get("geo"), d.get("tag"), d.get("region") or region_of(d.get("region"))):
+            continue
+        name = d.get("project") or d.get("tag")
+        pid = d.get("project_id") or d.get("project_code") or by_name.get(key(name)) or f"name:{name}"
+        note(pid, label=name, geo=d.get("geo"), tag=d.get("tag"), region=d.get("region"))
+        act[pid][a["period"]] += a["amount"]
+    out = []
+    for pid in set(aop) | set(act):
+        m = master.get(pid, {})
+        af = {p: (act[pid].get(p, 0.0) if p in act_m else fc[pid].get(p, 0.0)) for p in pm_}
+        e = info.get(pid, {})
+        out.append({"id": pid, "label": m.get("project_name") or e.get("label") or pid, "project_id": None if pid.startswith("name:") else pid,
+                    "sub": " · ".join(x for x in (e.get("region") or e.get("geo"), e.get("tag")) if x),
+                    "values": {"b_plan": list(_vec_from(aop[pid], pm_)), "af_plan": list(_vec_from(af, pm_))}})
+    return out
+
+
+def drill(data, actuals, cfg, row: str, flt: Filters) -> Dict[str, Any]:
+    """The list behind a Full P&L line (double-click): projects, airports, locations or departments with AOP and
+    actual + forecast as 13-slot vectors (the screen sums them for the selected FY / YTD / MTD)."""
+    from .mis import OH_BLOCKS
+    from .pnl import _id
+    e0, e1 = engines(data, actuals, cfg)
+
+    def two(fn):
+        v = measures_of(e0, e1, fn)
+        return {"b_plan": list(v["b_plan"]), "af_plan": list(v["af_plan"])}
+
+    def distinct(ds, *fields, pred=lambda r: True, acts=None):
+        vals = {str(r.get(f)).strip() for r in data.get(ds, []) if pred(r) for f in fields if r.get(f)}
+        for a in actuals:
+            if acts and a.get("domain") == acts[0] and acts[1](a.get("dims") or {}):
+                t = (a.get("dims") or {}).get("tag")
+                if t:
+                    vals.add(str(t).strip())
+        return sorted({v for v in vals if norm(v) != "shared services" and flt.tag_ok(v)},
+                      key=lambda x: (AIRPORTS.index(x) if x in AIRPORTS else 9, x.lower()))
+
+    sub = lambda tag: Filters(flt.geo, tag, flt.exclude, region=flt.region)
+    groups = []
+    for glabel, kind in drill_parts(row):
+        items: List[Dict[str, Any]] = []
+        base = kind.split(":")[0]
+        if base == "cute":
+            for a in distinct("rev_cute", "airport", "tag", acts=("rev_cute", lambda d: True)):
+                items.append({"id": a, "label": a, "values": two(lambda e, a=a: e.rev_cute(sub(a)))})
+        elif base in ("noncute", "rev_share"):
+            stream = "Non-CUTE" if base == "noncute" else "Rev Share"
+            dom = "rev_noncute" if base == "noncute" else "rev_share"
+            for t in distinct("rev_noncute", "location", "tag", pred=lambda r: norm(r.get("stream")) == norm(stream),
+                              acts=(dom, lambda d: True)):
+                items.append({"id": t, "label": t, "values": two(lambda e, t=t: e.rev_noncute(sub(t), stream))})
+        elif base == "cr_rev":
+            for t in distinct("rev_projects", "tag", pred=lambda r: norm(r.get("category")) == "change request",
+                              acts=("rev_projects", lambda d: norm(d.get("stream")) == "change request")):
+                items.append({"id": t, "label": t, "values": two(lambda e, t=t: e.rev_projects(sub(t), "Change Request"))})
+        elif base in ("opex_ca", "cr_opex"):
+            cat = "CA" if base == "opex_ca" else "Change Request"
+            for t in distinct("opex_lines", "tag", pred=lambda r: norm(r.get("category")) == norm(cat),
+                              acts=("opex", lambda d: norm(d.get("category")) == norm(cat))):
+                fn = (lambda e, t=t: e.opex(sub(t), "CA", shared=False)) if base == "opex_ca" else (lambda e, t=t: e.opex(sub(t), cat))
+                items.append({"id": t, "label": t, "values": two(fn)})
+        elif base in ("res_ca", "res_cr"):
+            cat = "CA" if base == "res_ca" else "CR"
+            for t in distinct("payroll_lines", "tag", pred=lambda r: norm(r.get("category")) == norm(cat),
+                              acts=("payroll", lambda d: norm(d.get("category")) == norm(cat))):
+                fn = (lambda e, t=t: e.payroll(sub(t), "CA", shared=False)) if base == "res_ca" else (lambda e, t=t: e.payroll(sub(t), "CR"))
+                items.append({"id": t, "label": t, "values": two(fn)})
+        elif base == "opex_shared":
+            items.append({"id": "shared", "label": "Shared services", "values": two(lambda e: e.opex(flt, "CA", shared=True))})
+        elif base == "res_shared":
+            items.append({"id": "shared", "label": "Shared services", "values": two(lambda e: e.payroll(flt, "CA", shared=True))})
+        elif base in ("res_oh", "tp_oh"):
+            k = "res" if base == "res_oh" else "tp"
+            only = kind.split(":")[1] if ":" in kind else None
+            for b, parts in OH_BLOCKS:
+                if only and _id(b) != only:
+                    continue
+                for kk, key, label in parts:
+                    if kk != k:
+                        continue
+                    fn = (lambda e, key=key: e.payroll(flt, "Overheads", dept=key)) if k == "res" else (lambda e, key=key: e.overhead_tp(flt, key))
+                    items.append({"id": key, "label": key, "sub": b, "values": two(fn)})
+        elif base.startswith("proj_"):
+            items = _project_items(data, actuals, cfg, base, flt)
+        items = [i for i in items if any(i["values"]["b_plan"]) or any(i["values"]["af_plan"])]
+        items.sort(key=lambda i: -(abs(i["values"]["af_plan"][12]) + abs(i["values"]["b_plan"][12])))
+        if items:
+            groups.append({"label": glabel, "kind": base, "item_label": DRILL_LABEL.get(base, "Item"), "items": items})
+    return {**_meta(cfg), "row": row, "groups": groups}

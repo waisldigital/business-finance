@@ -41,6 +41,7 @@ from . import opex_schema
 from . import po as PO
 from .po_pipeline import PO_META, OpexEngine, notify_zmm
 from .review import register_review
+from .package_import import PACKAGE, prefer_package
 from .mapping import Mapping, MAPPING_FIELD, REGISTER_FIELDS, REGISTER_LINES_FIELD
 from .plan import build_draft, default_drivers
 from . import reports as rep
@@ -240,7 +241,8 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             data.setdefault(d["dataset"], []).append(d.get("fields") or {})
         # reconciliation-only domains (SAP payroll / capex postings) stay out of the engine's working set
         actuals = [a async for a in db.aop_actuals.find({"domain": {"$nin": ["payroll_sap", "capex_sap"]}},
-                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
+                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "source": 1})]
+        actuals = prefer_package(actuals)  # the reporting package wins for the months it covers
         cache.update(version=cfg.get("data_version"), data=data, actuals=actuals)
         return data, actuals, cfg
 
@@ -1621,10 +1623,14 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
 
     @r.post("/import/reporting-package")
     async def import_package(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-        """Reporting package → actual billable PAX (CUTE drivers) and the capex tracker."""
+        """Financial Reporting Package → the plan year's P&L actuals of its closed months (the reports' actual source
+        for those months), actual billable PAX (CUTE drivers) and the capex tracker. The actual cut-off moves to
+        the package's last closed month."""
         require_admin(user)
         cfg = await get_config()
         res = await run_import(file, import_reporting_package, cfg["plan_fy"])
+        periods = await replace_source(res, PACKAGE, user) if res.actuals else []
+        res.actuals = []  # stored above under the package source
         pax = res.datasets.pop("_pax_actual", {"rows": []})["rows"]
         for f in pax:
             key = pax_driver_key(f)
@@ -1637,9 +1643,14 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             await refresh_wide_meta("rev_cute_drivers")
         if res.datasets:
             await write_result(res, user)
+        if periods:
+            keys = ["default", "overhead", "payroll"] + list(cfg.get("cutoffs") or {})
+            await move_cutoff(sorted(set(keys)), res.meta.get("cutoff"))
         await bump_version()
-        await log_import("reporting_package", file, user, res.meta)
-        return {"meta": res.meta, "pax_rows": len(pax), "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}}
+        meta = {k: v for k, v in res.meta.items() if k != "check"}
+        await log_import("reporting_package", file, user, meta, {"actuals": len(periods) and sum(res.meta.get("by_block", {}).values())})
+        return {"meta": res.meta, "periods": periods, "pax_rows": len(pax),
+                "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}}
 
     @r.post("/import/project-health")
     async def import_projects(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
@@ -1781,7 +1792,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         formats = mis.formats_for(cfg, None if p["admin"] else allowed, p["admin"])
         if p["tags"]:  # the regional P&L spans every entity
             formats = [f for f in formats if f["key"] != "regional_pnl"]
-        return {"formats": formats,
+        return {"formats": formats, "months": mis.months_meta(mis_cfg(cfg)),
                 "segment_rules": mis.segment_rules(cfg), "blocks": [b for b, _ in mis.OH_BLOCKS],
                 "solutions_noncute": mis.DEFAULT_SOLUTIONS_NONCUTE if cfg.get("mis_solutions_noncute") is None
                 else cfg["mis_solutions_noncute"]}
@@ -1800,9 +1811,22 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         payroll_ok = payroll_visible(p)
         base = pnl_payload(data, actuals, cfg, geo, tag, exclude, payroll_ok, mask=False)
         flt = Filters(geo, tag, [x for x in (exclude or "").split(",") if x])
-        out = mis.full_pnl(base, cfg, payroll_ok, mis.solutions_noncute(data, actuals, cfg, flt))
+        out = mis.full_pnl(base, cfg, payroll_ok, mis.solutions_noncute(data, actuals, cfg, flt),
+                           mis.actual_segment_split(actuals, cfg))
         out["meta"] = {**base["meta"], "filters": {"geo": geo, "tag": tag, "exclude": exclude}}
         return out
+
+    @r.get("/mis/drill")
+    async def mis_drill(row: str, geo: str = "All", tag: str = "All", exclude: Optional[str] = None,
+                        user: dict = Depends(get_current_user)):
+        """The list behind a Full P&L line (double-click): projects, airports, locations or departments."""
+        p, tag = await pnl_guard(user, tag)
+        if (row.startswith("emp") or row.startswith("ei_")) and not payroll_visible(p):
+            raise HTTPException(403, "Employee cost lines are confidential for your role")
+        data, actuals, cfg = await load_all()
+        await format_guard("full_pnl", cfg, p)
+        cfg = mis_cfg(cfg)
+        return mr.drill(data, actuals, cfg, row, Filters(geo, tag, [x for x in (exclude or "").split(",") if x]))
 
     @r.get("/mis/revenue")
     async def mis_revenue(geo: str = "All", tag: str = "All", exclude: Optional[str] = None,
@@ -1884,8 +1908,8 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
     async def mis_resources(user: dict = Depends(get_current_user)):
         p, data, _, cfg, pv = await fmt_ctx(user, "resources")
         plan_m = fy_months(cfg["plan_fy"])
-        res_act = [a async for a in db.aop_actuals.find({"domain": "payroll", "period": {"$in": plan_m}},
-                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "qty": 1})]
+        res_act = prefer_package([a async for a in db.aop_actuals.find(
+            {"domain": "payroll", "period": {"$in": plan_m}}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "qty": 1, "source": 1})])
         data, res_act, sc = scoped(p, data, res_act, "payroll", ["payroll_lines"])
         # department-scoped roles with payroll access see their own departments' cost
         own = sc is not None and (p["sections"]["aop_payroll"]["can_view"])
@@ -1910,7 +1934,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         p, data, _, cfg, _ = await fmt_ctx(user, "overheads_lines")
         dept_guard(p, dept)
         q: Dict[str, Any] = {"domain": "overhead", "period": {"$in": fy_months(cfg["plan_fy"])}, "dims.pl_tag": dept}
-        bookings = [a async for a in db.aop_actuals.find(q, {"_id": 0}).limit(20000)]
+        bookings = prefer_package([a async for a in db.aop_actuals.find(q, {"_id": 0}).limit(20000)])
         if nature:  # natures match case-insensitively (SAP and AOP spell them differently)
             bookings = [a for a in bookings if norm((a.get("dims") or {}).get("nature")) == norm(nature)]
         return mr.overheads_lines(data, bookings, cfg, dept, nature)
@@ -2068,6 +2092,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
 
     @r.get("/reports/margin")
     async def report_margin(block: str = Query("af_plan", pattern="^(a_base|b_plan|af_plan|b_draft)$"),
+                            period: str = Query("fy", pattern="^(fy|ytd|mtd)$"), month: Optional[int] = Query(None, ge=0, le=11),
                             user: dict = Depends(get_current_user)):
         p = await reports_guard(user)
         data, actuals, cfg = await load_all()
@@ -2075,38 +2100,41 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         if p["tags"]:
             tags = [t for t in tags if norm(t) in {norm(x) for x in p["tags"]}]
         payroll_ok = payroll_visible(p)
-        return rep.margin_profile(data, actuals, cfg, block, tags, payroll_ok)
+        return rep.margin_profile(data, actuals, cfg, block, tags, payroll_ok, period, month)
 
     @r.get("/reports/opex")
     async def report_opex(group_by: str = Query("aop_code", pattern="^(aop_code|vendor|category|tag|recurring|package_l1)$"),
+                          period: str = Query("fy", pattern="^(fy|ytd|mtd)$"), month: Optional[int] = Query(None, ge=0, le=11),
                           user: dict = Depends(get_current_user)):
         await reports_guard(user)
         cfg = await get_config()
         tracker = [d["fields"] async for d in db.aop_rows.find({"dataset": "opex_tracker"}, {"_id": 0, "fields": 1})]
-        out = rep.opex_forecast(tracker, cfg["plan_fy"], group_by)
+        out = rep.opex_forecast(tracker, cfg["plan_fy"], group_by, period, month)
         out["plan_fy"] = cfg["plan_fy"]
         return out
 
     @r.get("/reports/overheads")
-    async def report_overheads(user: dict = Depends(get_current_user)):
+    async def report_overheads(period: str = Query("fy", pattern="^(fy|ytd|mtd)$"), month: Optional[int] = Query(None, ge=0, le=11),
+                               user: dict = Depends(get_current_user)):
         p = await perms_for(user)
         if not (p["admin"] or p["sections"]["aop_reports"]["can_view"] or p["sections"]["aop_overheads"]["can_view"]):
             raise HTTPException(403, "You don't have access to AOP reports")
         data, _, cfg = await load_all()
         actuals = [a async for a in db.aop_actuals.find({"domain": "overhead"}, {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1})]
         data, actuals, _ = scoped(p, data, actuals, "overhead", ["overhead_lines", "overhead_plan"])
-        out = rep.overheads_by_department(data, actuals, cfg)
+        out = rep.overheads_by_department(data, actuals, cfg, period, month)
         out.update(base_fy=cfg["base_fy"], plan_fy=cfg["plan_fy"], draft_fy=cfg.get("draft_fy"))
         return out
 
     @r.get("/reports/wbs")
-    async def report_wbs(user: dict = Depends(get_current_user)):
+    async def report_wbs(period: str = Query("fy", pattern="^(fy|ytd|mtd)$"), month: Optional[int] = Query(None, ge=0, le=11),
+                         user: dict = Depends(get_current_user)):
         await reports_guard(user)
         data, _, cfg = await load_all()
         actuals = [a async for a in db.aop_actuals.find({"domain": {"$in": ["opex", "overhead", "capex"]}},
-                                                         {"_id": 0, "domain": 1, "amount": 1, "dims.wbs": 1})]
+                                                         {"_id": 0, "domain": 1, "amount": 1, "period": 1, "dims.wbs": 1})]
         master = await db.wbs_elements.find({}, {"_id": 0}).to_list(50000)
-        out = rep.wbs_report(data, actuals, cfg, master)
+        out = rep.wbs_report(data, actuals, cfg, master, period, month)
         out.update(base_fy=cfg["base_fy"], plan_fy=cfg["plan_fy"], draft_fy=cfg.get("draft_fy"))
         return out
 

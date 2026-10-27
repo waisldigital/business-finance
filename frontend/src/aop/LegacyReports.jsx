@@ -4,9 +4,24 @@ import ColumnSettings, { usePersistedColumns } from "@/aop/ColumnSettings";
 import PoDrawer from "@/aop/PoDrawer";
 import { fmtAmount, fmtPct, download, unitDiv } from "@/aop/format";
 import { CaretRight, CaretDown, DownloadSimple, ArrowClockwise, WarningCircle, CheckCircle } from "@phosphor-icons/react";
+import { usePagePeriod, periodPrefix } from "@/aop/mis";
+import { PeriodPicker } from "@/aop/MisCommon";
 
 // Report bodies (margin profile, opex, overheads, WBS) — rendered as formats on the AOP reports page.
 export { Margin, Opex, Overheads, Wbs };
+
+// ---------- period (FY / YTD / MTD): the reports page's one period, else the format's own ----------
+const FY_LABELS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+function useLegacyPeriod(testid) {
+  const [own, setOwn] = useState({ period: "fy", month: null });
+  const per = usePagePeriod({ period: own.period, month: own.month, set: (c) => setOwn((o) => ({ ...o, ...c })) });
+  const months = per.months || { labels: FY_LABELS, default_month: 11, actual_count: 0 };
+  const month = per.month ?? months.default_month ?? 0;
+  const params = per.period === "fy" ? {} : { period: per.period, month };
+  const prefix = periodPrefix(per.period, months, month);
+  const picker = <PeriodPicker period={per.period} month={month} months={months} onChange={per.set} testid={testid} />;
+  return { params, picker, prefix, period: per.period };
+}
 
 // ---------- shared table ----------
 
@@ -62,7 +77,8 @@ const sum = (rows, key) => rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
 // ---------- margin profile ----------
 function Margin({ unit }) {
   const [block, setBlock] = useState("af_plan");
-  const [data, err, load] = useApi("/aop/reports/margin", { block });
+  const per = useLegacyPeriod("margin-period");
+  const [data, err, load] = useApi("/aop/reports/margin", { block, ...per.params });
   const cols = [
     { key: "tag", label: "Airport / tag", text: true },
     { key: "cute", label: "CUTE" }, { key: "non_cute", label: "Non-CUTE" }, { key: "change_request", label: "CR" },
@@ -81,6 +97,7 @@ function Margin({ unit }) {
             <button key={k} className={block === k ? "on" : ""} onClick={() => setBlock(k)}>{data && block === k ? data.label : l}</button>
           ))}
         </div>
+        {per.picker}
         <span className="text-[10.5px] text-[var(--muted)]">Direct costs only — enabling overheads are not allocated to airports. Shared services are allocated with the Assumptions split.</span>
         <div className="flex-1" /><button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} /></button>
       </div>
@@ -93,12 +110,13 @@ function Margin({ unit }) {
 // ---------- opex budget vs forecast ----------
 function Opex({ unit }) {
   const [groupBy, setGroupBy] = useState("aop_code");
-  const [data, err, load] = useApi("/aop/reports/opex", { group_by: groupBy });
+  const per = useLegacyPeriod("opexrep-period");
+  const [data, err, load] = useApi("/aop/reports/opex", { group_by: groupBy, ...per.params });
   const [po, setPo] = useState(null);
   const fy = data?.plan_fy || "";
   const cols = [
     { key: "group", label: groupBy.replace("_", " "), text: true },
-    { key: "lines", label: "Lines", int: true }, { key: "budget", label: `B ${fy}` }, { key: "forecast", label: `${fy} forecast`, strong: true },
+    { key: "lines", label: "Lines", int: true }, { key: "budget", label: `${per.prefix} B ${fy}`.trim() }, { key: "forecast", label: `${per.prefix} ${fy} forecast`.trim(), strong: true },
     { key: "variance", label: "Budget − forecast", neg: true }, { key: "new_po_mapped", label: "New PO mapped", int: true },
     { key: "not_migrated", label: "Not migrated", int: true }, { key: "recurring", label: "Recurring", int: true }, { key: "one_time", label: "One-time", int: true },
   ];
@@ -126,6 +144,7 @@ function Opex({ unit }) {
         <span className="text-[10.5px] text-[var(--muted)]">Group by</span>
         <div className="seg">{[["aop_code", "AOP code"], ["vendor", "Vendor"], ["category", "Category"], ["tag", "Airport"], ["recurring", "Nature"], ["package_l1", "Package"]].map(([k, l]) => (
           <button key={k} className={groupBy === k ? "on" : ""} onClick={() => setGroupBy(k)}>{l}</button>))}</div>
+        {per.picker}
         <span className="text-[10.5px] text-[var(--muted)]">Forecast = override → new PO → old PO → recurring gap at budget rate (recalculated on every edit)</span>
         <div className="flex-1" /><button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} /></button>
       </div>
@@ -139,12 +158,13 @@ function Opex({ unit }) {
 // ---------- overheads ----------
 const OH_DEFAULT = { show: { a_base: false, b_plan: false, b_draft: true, growth: true }, months: {} };
 function Overheads({ unit }) {
-  const [data, err, load] = useApi("/aop/reports/overheads");
+  const per = useLegacyPeriod("ohrep-period");
+  const [data, err, load] = useApi("/aop/reports/overheads", per.params);
   const [cfg, setCfg, reset] = usePersistedColumns("aop_rep_oh_cols_v1", OH_DEFAULT);
   const all = useMemo(() => [
-    { key: "a_base", label: `A ${data?.base_fy || ""}` }, { key: "b_plan", label: `B ${data?.plan_fy || ""} (WBS / AOP head)` },
-    { key: "b_draft", label: `B ${data?.draft_fy || ""} (CC + GL)`, strong: true }, { key: "growth", label: "Growth %", pct: true },
-  ], [data]);
+    { key: "a_base", label: `${per.prefix} A ${data?.base_fy || ""}`.trim() }, { key: "b_plan", label: `${per.prefix} B ${data?.plan_fy || ""} (WBS / AOP head)`.trim() },
+    { key: "b_draft", label: `${per.prefix} B ${data?.draft_fy || ""} (CC + GL)`.trim(), strong: true }, { key: "growth", label: "Growth %", pct: true },
+  ], [data, per.prefix]);
   const cols = [{ key: "department", label: "Department", text: true }, ...all.filter((c) => cfg.show[c.key])];
   const rows = data?.rows || [];
   const total = { a_base: sum(rows, "a_base"), b_plan: sum(rows, "b_plan"), b_draft: sum(rows, "b_draft") };
@@ -162,6 +182,7 @@ function Overheads({ unit }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
+        {per.picker}
         <span className="text-[10.5px] text-[var(--muted)]">Original budget kept on WBS / AOP head; next year planned on Cost centre + GL (expand a department).</span>
         <div className="flex-1" />
         <ColumnSettings blocks={all.map((c) => ({ key: c.key, label: c.label }))} value={cfg} onChange={setCfg} onReset={reset} testid="oh-columns" />
@@ -175,14 +196,15 @@ function Overheads({ unit }) {
 
 // ---------- WBS ----------
 function Wbs({ unit }) {
-  const [data, err, load] = useApi("/aop/reports/wbs");
+  const per = useLegacyPeriod("wbs-period");
+  const [data, err, load] = useApi("/aop/reports/wbs", per.params);
   const [onlyMissing, setOnlyMissing] = useState(false);
   const cols = [
     { key: "wbs", label: "WBS element", text: true },
     { key: "name", label: "Name", text: true },
     { key: "in_master", label: "In WBS master", text: true, render: (r) => (r.in_master ? <CheckCircle size={13} className="text-[var(--success)]" /> : <WarningCircle size={13} className="text-[var(--warning)]" />) },
     { key: "lines", label: "Opex lines", int: true },
-    { key: "opex_budget", label: `Opex B ${data?.plan_fy || ""}` }, { key: "opex_draft", label: `Opex B ${data?.draft_fy || ""}`, strong: true },
+    { key: "opex_budget", label: `${per.prefix} Opex B ${data?.plan_fy || ""}`.trim() }, { key: "opex_draft", label: `${per.prefix} Opex B ${data?.draft_fy || ""}`.trim(), strong: true },
     { key: "actual_opex", label: "Actual opex" }, { key: "actual_overhead", label: "Actual overheads" }, { key: "actual_capex", label: "Actual capex" },
     { key: "actual_total", label: "Actual total", strong: true },
   ];
@@ -190,6 +212,7 @@ function Wbs({ unit }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-[10.5px] text-[var(--muted)]">
+        {per.picker}
         {data && <span>{data.rows.length} WBS used in the AOP · WBS master has {data.master_count} · <span className="text-[var(--warning)]">{data.not_in_master} not in master</span></span>}
         <label className="flex items-center gap-1"><input type="checkbox" className="accent-[var(--gold)]" checked={onlyMissing} onChange={(e) => setOnlyMissing(e.target.checked)} />Only missing from master</label>
         <div className="flex-1" /><button className="icon-btn" onClick={load} title="Refresh"><ArrowClockwise size={13} /></button>

@@ -122,8 +122,41 @@ def solutions_noncute(data, actuals, cfg, flt: Filters) -> Dict[str, Vec]:
     return measures_of(e0, e1, lambda e: _ssum(e.rev_noncute(Filters(flt.geo, l, flt.exclude), "Non-CUTE") for l in locs))
 
 
+def actual_segment_split(actuals, cfg: Dict[str, Any]) -> Dict[str, Dict[str, Tuple[List[float], List[float]]]]:
+    """Indirect costs booked with their segment (the reporting package: enabling functions → CA+CR, pursuit →
+    Solutions; overheads per CA+CR / Solutions department) → per department block and kind (res / tp):
+    (Solutions amount, total amount) by plan month. Actual months use this split instead of the segment rule."""
+    pm = fy_months(cfg["plan_fy"])
+    idx = {p: i for i, p in enumerate(pm)}
+    cut = (cfg.get("cutoffs") or {}).get("default") or ""
+    block_of = {}
+    for b, parts in OH_BLOCKS:
+        for kind, key, _ in parts:
+            block_of[(kind, norm(key))] = b
+    out: Dict[str, Dict[str, Tuple[List[float], List[float]]]] = {}
+    for a in actuals:
+        d = a.get("dims") or {}
+        seg, i = d.get("segment"), idx.get(a.get("period"))
+        if not seg or i is None or a["period"] > cut:
+            continue
+        if a.get("domain") == "payroll" and norm(d.get("category")) == "overheads":
+            kind, block = "res", block_of.get(("res", norm(d.get("tag"))))
+        elif a.get("domain") == "overhead":
+            kind, block = "tp", block_of.get(("tp", norm(d.get("pl_tag"))))
+        else:
+            continue
+        if not block:
+            continue
+        sol, tot = out.setdefault(block, {}).setdefault(kind, ([0.0] * 12, [0.0] * 12))
+        tot[i] += a["amount"]
+        if norm(seg) == "solutions":
+            sol[i] += a["amount"]
+    return out
+
+
 def full_pnl(pnl: Dict[str, Any], cfg: Dict[str, Any], payroll_visible: bool,
-             noncute_sol: Optional[Dict[str, Vec]] = None) -> Dict[str, Any]:
+             noncute_sol: Optional[Dict[str, Vec]] = None,
+             seg_actual: Optional[Dict[str, Dict[str, Tuple[List[float], List[float]]]]] = None) -> Dict[str, Any]:
     V = _pnl_vectors(pnl)
     ncs = noncute_sol or {m: zero() for m in MEASURES}
     for m in MEASURES:  # move the Solutions part of Non-CUTE into its own pseudo line
@@ -199,6 +232,7 @@ def full_pnl(pnl: Dict[str, Any], cfg: Dict[str, Any], payroll_visible: bool,
     def block_fn(block, kind):
         ids = ["oh_" + _id(label) for k, _key, label in dict(OH_BLOCKS)[block] if k == kind]
         rule = rules[block]
+        split = (seg_actual or {}).get(block, {}).get(kind)
 
         def fn(m):
             amt = vsum(get(i, m) for i in ids)
@@ -209,6 +243,13 @@ def full_pnl(pnl: Dict[str, Any], cfg: Dict[str, Any], payroll_visible: bool,
                 sol = zero()
             else:
                 sol = amt * share(r["sol"], r["total"])
+            if m == "af_plan" and split:  # actual months: the segment the cost was booked to
+                s_amt, t_amt = split
+                sol = Vec(list(sol))
+                for i in range(12):
+                    if t_amt[i]:
+                        sol[i] = amt[i] * (s_amt[i] / t_amt[i])
+                sol[12] = sum(sol[:12])
             return {"cacr": amt - sol, "sol": sol, "total": amt}
         return fn
 
