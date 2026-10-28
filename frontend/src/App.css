@@ -81,7 +81,7 @@ html[data-theme="charcoal"] .mis, html[data-theme="midnight"] .mis {
 .mis-table tr.grand td { background: var(--mis-head) !important; color: #fff; font-weight: 700; }
 .mis-table td.neg { color: var(--danger); }
 .mis-table tr.grand td.neg { color: #fca5a5; }
-.mis-table tr.dbl td.lbl { cursor: zoom-in; }
+.mis-table tr.dbl td.lbl, .mis-table tr.dbl td.num { cursor: zoom-in; }
 .tree-btn { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--border);
   font-size: 10px; line-height: 1; color: var(--muted); background: var(--surface); flex-shrink: 0; }
 .tree-btn:hover { border-color: var(--gold); color: var(--gold); }

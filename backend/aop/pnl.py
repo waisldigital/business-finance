@@ -138,6 +138,8 @@ class PnLEngine:
         self.alloc = self._allocations()
         self.snapshot = {r.get("row_id"): r.get("value") for r in data.get("pl_snapshot", [])}
         self.overrides: Dict[str, float] = {}  # plan-total overrides (e.g. tax from the tax computation)
+        # drill-downs set this to a list: every leaf then records the lines that make up its series (see ``traced``)
+        self.trace: Optional[List[Dict[str, Any]]] = None
         # actuals carry no region: resolve it through the source row (project id / payroll project code)
         self.project_region = {}
         for ds in ("project_master", "rev_projects"):
@@ -178,18 +180,28 @@ class PnLEngine:
         rows = [r for r in self.data.get(dataset, []) if pred_row(r)]
         s = Series()
         cut = self.cutoff(domain or dataset)
+        tr = self.trace
         if domain:
             pa = pred_act or pred_row
             for a in self.act.get(domain, []):
                 if a["period"] <= cut and pa(a.get("dims") or {}):
                     s[a["period"]] = s.get(a["period"], 0.0) + a["amount"]
+                    if tr is not None:
+                        tr.append({"k": "a", "p": a["period"], "v": a["amount"], "src": a, "ds": dataset})
         for p in self.base_m:
             if p > cut:  # forecast; a line without a forecast for the month falls back to that year's budget
+                if tr is not None:
+                    fv = [(r, fcst_fn(r, p) if fcst_fn else _n(r[vkey(self.F, p)]) if vkey(self.F, p) in r else _n(r.get(vkey(self.BB, p))))
+                          for r in rows]
+                    tr.extend({"k": "f", "p": p, "v": v, "src": r, "ds": dataset} for r, v in fv if v)
                 s[p] = s.get(p, 0.0) + (sum(fcst_fn(r, p) for r in rows) if fcst_fn else
                                         sum(_n(r[vkey(self.F, p)]) if vkey(self.F, p) in r else _n(r.get(vkey(self.BB, p)))
                                             for r in rows))
         ver = plan_ver or self.B
         for p in self.plan_m:
+            if tr is not None:
+                tr.extend({"k": "p", "p": p, "v": v, "src": r, "ds": dataset}
+                          for r, v in ((r, plan_fn(r, p) if plan_fn else _n(r.get(vkey(ver, p)))) for r in rows) if v)
             s[p] = s.get(p, 0.0) + (sum(plan_fn(r, p) for r in rows) if plan_fn else sum(_n(r.get(vkey(ver, p))) for r in rows))
         if b_base_fn:
             s["b_base"] = sum(b_base_fn(r) for r in rows)
@@ -282,15 +294,37 @@ class PnLEngine:
                 annual = sum(_n(r.get(fld)) for r in pm)
                 for p in self.plan_m:
                     s[p] = annual / 12
+                self._trace_master(pm, fld, self.plan_m, "p", lambda p: True)
             if self.base_fy == self.approved_fy:  # current-year forecast falls back to the approved master budget
                 annual = sum(_n(r.get("tp_cost_b_plan")) for r in pm)
                 cut = self.cutoff("opex")
                 for p in self.base_m:
                     if p > cut:
                         s[p] = annual / 12
+                self._trace_master(pm, "tp_cost_b_plan", self.base_m, "f", lambda p: p > cut)
         if shared:
             s = s.scale(self.alloc_factor(f))
         return s
+
+    def _trace_master(self, rows, fld, months, kind, in_scope):
+        """The project master's TP cost / 12 replaces the PO-line plan of these months: swap them in the trace too."""
+        if self.trace is None:
+            return
+        gone = {p for p in months if in_scope(p)}
+        self.trace[:] = [t for t in self.trace if not (t["k"] in ("p", "f") and t["p"] in gone and t["ds"] == "opex_lines")]
+        for r in rows:
+            if _n(r.get(fld)):
+                self.trace.extend({"k": kind, "p": p, "v": _n(r.get(fld)) / 12, "src": r, "ds": "project_master"} for p in months if in_scope(p))
+
+    def traced(self, fn) -> "tuple":
+        """Run ``fn(engine)`` (a leaf such as ``e.opex(...)``) and return (series, the lines it was built from): each line
+        is {k: a=actual / f=forecast / p=plan, p: period, v: amount, src: the booking or plan row, ds: dataset}."""
+        self.trace = []
+        try:
+            s = fn(self)
+            return s, self.trace
+        finally:
+            self.trace = None
 
     def overhead_tp(self, f: Filters, dept: Optional[str]) -> Series:
         ok = lambda r: (dept is None or norm(r.get("pl_tag")) == norm(dept)) and f.geo_ok(r.get("geo"))
@@ -308,7 +342,10 @@ class PnLEngine:
         for p in self.plan_m:
             add = 0.0
             for r in plan_rows:
-                add += _n(r[vkey(self.B, p)]) if vkey(self.B, p) in r else _n(r.get("annual_" + self.B.lower())) / 12
+                v = _n(r[vkey(self.B, p)]) if vkey(self.B, p) in r else _n(r.get("annual_" + self.B.lower())) / 12
+                add += v
+                if v and self.trace is not None:
+                    self.trace.append({"k": "p", "p": p, "v": v, "src": r, "ds": "overhead_plan"})
             if add:
                 s[p] = s.get(p, 0.0) + add
         return s

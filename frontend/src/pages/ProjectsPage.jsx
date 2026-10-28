@@ -10,9 +10,10 @@ import StatTile from "@/components/common/StatTile";
 import {
   Plus, MagnifyingGlass, FunnelSimple, PencilSimple, UploadSimple,
   DownloadSimple, Briefcase, CurrencyInr, TrendUp, ChartPie,
-  CaretDown, Warning, ShieldCheck, Eye, X,
+  CaretDown, Warning, ShieldCheck, Eye, X, ArrowsClockwise,
 } from "@phosphor-icons/react";
 import ProjectFormModal from "@/components/ProjectFormModal";
+import { useCan } from "@/lib/permissions";
 
 const CR_KEYWORDS = /change\s*request|cr\b|change\s*order|co\b|amendment/i;
 function isChangeRequest(p) {
@@ -33,6 +34,9 @@ function stageColor(s) {
 export default function ProjectsPage() {
   const { unit } = useCurrency();
   const navigate = useNavigate();
+  const canEdit = useCan("projects", "edit");
+  const [aop, setAop] = useState({ projects: {} }); // AOP / actual figures of the AOP-linked projects
+  const [syncMsg, setSyncMsg] = useState("");
   const [projects, setProjects] = useState([]);
   const [stage, setStage] = useState("");
   const [search, setSearch] = useState("");
@@ -54,10 +58,23 @@ export default function ProjectsPage() {
     setProjects(data.filter((p) => !isChangeRequest(p)));
   };
 
+  const loadAop = () => api.get("/aop/projects/summary").then((r) => setAop(r.data)).catch(() => {});
   useEffect(() => {
     load();
+    loadAop();
     api.get("/customers").then((r) => setCustomers(r.data)).catch(() => {});
   }, [stage]); // eslint-disable-line
+
+  const syncAop = async () => {
+    setSyncMsg("Syncing…");
+    try {
+      const { data } = await api.post("/aop/projects/sync");
+      setSyncMsg(`${data.created} added · ${data.linked} linked · ${data.candidates} in the AOP / package`);
+      load(); loadAop();
+    } catch (e) {
+      setSyncMsg(e.response?.data?.detail || e.message);
+    }
+  };
 
   const filtered = useMemo(() => {
     let out = projects.filter((p) => {
@@ -133,6 +150,11 @@ export default function ProjectsPage() {
         breadcrumb="HOME · PROJECTS"
         actions={
           <div className="flex items-center gap-2">
+            {canEdit && (
+              <button className="btn-secondary text-xs flex items-center gap-1" onClick={syncAop} title="Bring the AOP workbook / reporting package projects into this list" data-testid="sync-aop-projects-btn">
+                <ArrowsClockwise size={12} weight="bold" /> Sync from AOP
+              </button>
+            )}
             <button className="btn-secondary text-xs flex items-center gap-1" onClick={downloadTemplate} data-testid="dl-project-template">
               <DownloadSimple size={12} weight="bold" /> Template
             </button>
@@ -146,6 +168,12 @@ export default function ProjectsPage() {
           </div>
         }
       />
+
+      {syncMsg && (
+        <div className="mx-8 mt-5 tile p-3 flex items-center justify-between text-sm" data-testid="sync-aop-result">
+          <span>{syncMsg}</span><button className="btn-ghost text-xs" onClick={() => setSyncMsg("")}>Dismiss</button>
+        </div>
+      )}
 
       {uploadResult && (
         <div className="mx-8 mt-5 tile p-4" data-testid="project-upload-result">
@@ -247,6 +275,9 @@ export default function ProjectsPage() {
                 <th className="cursor-pointer select-none" onClick={() => toggleSort("current_stage")}>Stage <SortIcon col="current_stage" /></th>
                 <th>Flags</th>
                 <th>Approval</th>
+                <th className="num" title={`${aop.plan_fy || "Plan year"} AOP revenue`}>AOP Rev (FY)</th>
+                <th className="num" title="Actual revenue to the latest closed month">Actual Rev (YTD)</th>
+                <th className="num" title="Actual gross margin to the latest closed month: revenue less TP opex and direct resource cost">Actual GM %</th>
                 <th className="num cursor-pointer select-none" onClick={() => toggleSort("po_value")}>PO Value <SortIcon col="po_value" /></th>
                 <th className="num cursor-pointer select-none" onClick={() => toggleSort("revenue_total")}>Revenue <SortIcon col="revenue_total" /></th>
                 <th className="num cursor-pointer select-none" onClick={() => toggleSort("cost_total")}>Cost <SortIcon col="cost_total" /></th>
@@ -259,7 +290,7 @@ export default function ProjectsPage() {
               {filtered.map((p) => (
                 <tr key={p.id} className="cursor-pointer" onClick={() => navigate(`/app/projects/${p.id}`)} data-testid={`project-row-${p.id}`}>
                   <td>
-                    <div className="font-medium text-[var(--text)]">{p.project_name}</div>
+                    <div className="font-medium text-[var(--text)]">{p.project_name}{p.aop_project_id && <span className="chip !text-[9.5px] ml-1.5 align-middle" title={`AOP / package project ${p.aop_project_id}`}>AOP</span>}</div>
                     <div className="text-[11px] text-[var(--muted)]">{p.business_category} · {p.location}</div>
                   </td>
                   <td className="font-mono text-xs">
@@ -281,6 +312,16 @@ export default function ProjectsPage() {
                     {p.ceo_visibility && <span className="badge flag-low-margin" title="CEO Visibility">CEO</span>}
                   </td>
                   <td><StatusBadge status={p.approval_status} /></td>
+                  {(() => {
+                    const a = aop.projects?.[p.id];
+                    return a?.linked ? (
+                      <>
+                        <td className="num" data-testid={`aop-rev-${p.id}`}>{formatMoney(a.rev_aop_fy, unit)}</td>
+                        <td className="num">{formatMoney(a.rev_act_ytd, unit)}</td>
+                        <td className={`num ${a.gm_pct_ytd !== null && a.gm_pct_ytd < 0.15 ? "text-[var(--danger)]" : ""}`}>{a.gm_pct_ytd === null || a.gm_pct_ytd === undefined ? "—" : `${(a.gm_pct_ytd * 100).toFixed(1)}%`}</td>
+                      </>
+                    ) : <><td className="num text-[var(--muted)]">—</td><td className="num text-[var(--muted)]">—</td><td className="num text-[var(--muted)]">—</td></>;
+                  })()}
                   <td className="num">{formatMoney(p.po_value, unit)}</td>
                   <td className="num">{formatMoney(p.revenue_total, unit)}</td>
                   <td className="num">{formatMoney(p.cost_total, unit)}</td>
@@ -299,7 +340,7 @@ export default function ProjectsPage() {
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={12} className="text-center py-12 text-[var(--muted)]">
+                <tr><td colSpan={15} className="text-center py-12 text-[var(--muted)]">
                   No projects found. Click <span className="text-[var(--gold)]">New Project</span> to create one.
                 </td></tr>
               )}

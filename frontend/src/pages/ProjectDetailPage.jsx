@@ -13,8 +13,11 @@ import AirplaneButton from "@/components/AirplaneButton";
 import { useAuth } from "@/lib/auth";
 import Modal from "@/components/common/Modal";
 import StatTile, { InfoRow } from "@/components/common/StatTile";
+import ProjectFinancials from "@/pages/ProjectFinancials";
+import ProjectDocumentSlots from "@/components/ProjectDocumentSlots";
+import { useCan } from "@/lib/permissions";
 
-const TABS = ["Overview", "PO Tracker", "Revenue", "Cost", "Milestones", "Documents", "Queries", "Audit"];
+const TABS = ["Overview", "Financials", "PO Tracker", "Revenue", "Cost", "Milestones", "Documents", "Queries", "Audit"];
 
 export default function ProjectDetailPage() {
   const { id } = useParams();
@@ -31,6 +34,7 @@ export default function ProjectDetailPage() {
   const [busy, setBusy] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const canEdit = useCan("projects", "edit");
 
   const load = async () => {
     const { data } = await api.get(`/projects/${id}`);
@@ -146,7 +150,8 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="px-8 py-6">
-        {tab === "Overview" && <Overview project={project} onShowPOs={() => setTab("PO Tracker")} />}
+        {tab === "Overview" && <Overview project={project} onShowPOs={() => setTab("PO Tracker")} onShowFinancials={() => setTab("Financials")} />}
+        {tab === "Financials" && <ProjectFinancials project={project} canSync={canEdit} onSynced={load} />}
         {tab === "PO Tracker" && <POTrackerTab projectId={id} wbs={project.wbs_element} unit={unit} />}
         {tab === "Revenue" && <RevenueTab projectId={id} rows={revenue} reload={load} mode={mode} inrPerUsd={inrPerUsd} project={project} />}
         {tab === "Cost" && <CostTab projectId={id} rows={cost} reload={load} mode={mode} inrPerUsd={inrPerUsd} project={project} />}
@@ -169,7 +174,7 @@ export default function ProjectDetailPage() {
 }
 
 
-function Overview({ project, onShowPOs }) {
+function Overview({ project, onShowPOs, onShowFinancials }) {
   const [pipeline, setPipeline] = React.useState(null);
   React.useEffect(() => {
     if (!project.pipeline_id) return;
@@ -180,6 +185,10 @@ function Overview({ project, onShowPOs }) {
     ["Customer", project.customer_name],
     ["Customer PO Number", project.customer_po_number],
     ["PO Date", formatDate(project.po_date)],
+    ["Agreement Number", project.agreement_number],
+    ["Agreement Date", formatDate(project.agreement_date)],
+    ["Agreement Valid Till", formatDate(project.agreement_valid_till)],
+    ["Agreement Value", project.agreement_value ? formatMoney(project.agreement_value, "cr") : ""],
     ["Start Date", formatDate(project.start_date)],
     ["End Date", formatDate(project.end_date)],
     ["Billing Type", project.billing_type],
@@ -236,6 +245,19 @@ function Overview({ project, onShowPOs }) {
               <span key={k} className="badge flag-low-margin">{k}</span>
             ))}
           </div>
+        </div>
+      )}
+
+      {project.aop_project_id && (
+        <div className="tile p-4 flex items-center justify-between" data-testid="overview-aop-link">
+          <div className="flex items-center gap-3">
+            <LinkSimple size={18} weight="duotone" className="text-[var(--gold)]" />
+            <div>
+              <div className="text-[10px] tracking-overline text-[var(--muted)]">Linked to the AOP / reporting package</div>
+              <div className="text-sm font-semibold"><span className="font-mono">{project.aop_project_id}</span>{project.aop_tag ? ` · ${project.aop_tag}` : ""}{project.aop_status ? ` · ${project.aop_status}` : ""}</div>
+            </div>
+          </div>
+          <button className="btn-secondary text-xs" onClick={onShowFinancials} data-testid="overview-view-financials-btn">AOP vs actual</button>
         </div>
       )}
 
@@ -548,7 +570,10 @@ function DocumentsTab({ projectId, reload }) {
   const [drag, setDrag] = React.useState(false);
   const [lastResult, setLastResult] = React.useState(null);
   const [error, setError] = React.useState("");
+  const [docType, setDocType] = React.useState("other");
+  const [types, setTypes] = React.useState([]);
   const inputRef = React.useRef();
+  React.useEffect(() => { api.get("/projects/document-types").then((r) => setTypes(r.data)).catch(() => {}); }, []);
 
   const load = async () => {
     const { data } = await api.get(`/projects/${projectId}/documents`);
@@ -571,6 +596,7 @@ function DocumentsTab({ projectId, reload }) {
       const fd = new FormData(); fd.append("file", pendingFile);
       const params = new URLSearchParams({
         name: docName.trim(),
+        doc_type: docType,
         parse: parse ? "true" : "false",
         apply_extracted: applyExtracted ? "true" : "false",
       });
@@ -601,10 +627,19 @@ function DocumentsTab({ projectId, reload }) {
     <div>
       <h3 className="font-display text-lg font-bold mb-4">Documents</h3>
 
+      <ProjectDocumentSlots projectId={projectId} docs={docs} onChanged={() => { load(); reload(); }} onDownload={download} onRemove={remove} />
+
       <div className="tile p-5 mb-5">
         <div className="text-[10px] tracking-overline text-[var(--muted)] mb-3">Upload Customer PO / Vendor PO / Contract / Any document</div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div>
+            <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">Document Type</label>
+            <select className="input" value={docType} onChange={(e) => setDocType(e.target.value)} data-testid="doc-type-select">
+              {types.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              {!types.length && <option value="other">Other</option>}
+            </select>
+          </div>
           <div>
             <label className="block text-[10px] tracking-overline text-[var(--muted)] mb-1.5">
               Document Name <span className="text-[var(--gold)]">*</span>
@@ -691,11 +726,12 @@ function DocumentsTab({ projectId, reload }) {
       </div>
 
       <table className="tbl tile">
-        <thead><tr><th>Name</th><th>File</th><th>Size</th><th>Uploaded</th><th>Parsed</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th>Parsed</th><th></th></tr></thead>
         <tbody>
           {docs.map((d) => (
             <tr key={d.id} data-testid={`doc-row-${d.id}`}>
               <td className="font-medium">{d.name || d.file_name}</td>
+              <td className="text-xs">{types.find((t) => t.key === d.doc_type)?.label || "Other"}</td>
               <td className="text-xs text-[var(--muted)]">{d.file_name}</td>
               <td className="num text-xs">{(d.size / 1024).toFixed(1)} KB</td>
               <td className="text-xs">{formatDateTime(d.uploaded_at)}<div className="text-[var(--muted)]">{d.uploaded_by}</div></td>
@@ -708,7 +744,7 @@ function DocumentsTab({ projectId, reload }) {
               </td>
             </tr>
           ))}
-          {docs.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-[var(--muted)]">No documents attached yet</td></tr>}
+          {docs.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-[var(--muted)]">No documents attached yet</td></tr>}
         </tbody>
       </table>
     </div>

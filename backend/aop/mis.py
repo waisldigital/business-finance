@@ -384,7 +384,7 @@ def _pax(data, cfg, flt: Filters) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------------------------- regional
-def regional_pnl(data, actuals, cfg, payroll_visible: bool) -> Dict[str, Any]:
+def regional_pnl(data, actuals, cfg, payroll_visible: bool, keep_parts: bool = False) -> Dict[str, Any]:
     """Solutions P&L by region. Directly attributable costs are charged to their region (projects by region,
     payroll by location, overheads by India / International); common costs are apportioned by revenue."""
     e0, e1 = engines(data, actuals, cfg)
@@ -500,9 +500,12 @@ def regional_pnl(data, actuals, cfg, payroll_visible: bool) -> Dict[str, Any]:
 
     _mask(rows, payroll_visible)
     labels = {"india": "India", "intl": "International", "total": "Total", **{_id(r): r for r in REGIONS}}
-    return {"columns": [{"key": c, "label": labels[c], "group": "india" if c == "india" else "total" if c == "total" else "intl",
-                         "sub": c in subs} for c in cols],
-            "measures": measure_labels(cfg), "months": months_meta(cfg), "rows": rows, "segment_rules": rules}
+    out = {"columns": [{"key": c, "label": labels[c], "group": "india" if c == "india" else "total" if c == "total" else "intl",
+                        "sub": c in subs} for c in cols],
+           "measures": measure_labels(cfg), "months": months_meta(cfg), "rows": rows, "segment_rules": rules}
+    if keep_parts:  # per department block: (resource part, TP overhead part) → {column: {measure: Vec}} — used by the drill-down
+        out["_blocks"] = blocks
+    return out
 
 
 def settle_rev(rev, subs, cols):

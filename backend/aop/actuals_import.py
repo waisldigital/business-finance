@@ -303,6 +303,8 @@ def import_reporting_package(path, plan_fy: str) -> Result:
     acts, pkg_meta = package_actuals(book, plan_fy)
     for i, a in enumerate(acts):
         extra = {"qty": a["qty"]} if a.get("qty") else {}
+        if a.get("ref"):
+            extra["cell"] = a["ref"]  # the package cell the amount was read from (drill-downs show it)
         res.actual(a["domain"], f"pkg-{a['block']}", a["period"], a["amount"], a["dims"], block=a["block"],
                    uid=f"pkg|{a['domain']}|{a['period']}|{i}", **extra)
     res.meta.update(pkg_meta)

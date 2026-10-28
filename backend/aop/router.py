@@ -49,6 +49,8 @@ from .pnl import Filters, PnLEngine
 from .aop_workbook import generate_workbook as gen_aop_wb, parse_workbook as parse_aop_wb
 from . import mis
 from . import mis_reports as mr
+from . import mis_drill as drill_mod
+from . import portal_projects as portal
 from . import departments as dept_scope
 
 ACTUAL_COLUMNS = [
@@ -241,7 +243,7 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             data.setdefault(d["dataset"], []).append(d.get("fields") or {})
         # reconciliation-only domains (SAP payroll / capex postings) stay out of the engine's working set
         actuals = [a async for a in db.aop_actuals.find({"domain": {"$nin": ["payroll_sap", "capex_sap"]}},
-                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "source": 1})]
+                                                        {"_id": 0, "domain": 1, "period": 1, "amount": 1, "dims": 1, "source": 1, "cell": 1})]
         actuals = prefer_package(actuals)  # the reporting package wins for the months it covers
         cache.update(version=cfg.get("data_version"), data=data, actuals=actuals)
         return data, actuals, cfg
@@ -1431,6 +1433,14 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                 out.write(chunk)
         return path
 
+    async def sync_portal_projects(user: dict):
+        """Keep the Projects section in step with the AOP / package projects after an import (never fails the import)."""
+        try:
+            data, actuals, _ = await load_all()
+            return await portal.sync_projects(db, data, actuals, user.get("email"))
+        except Exception:  # noqa: BLE001 — the import itself has already succeeded
+            return None
+
     @r.post("/import/aop-workbook")
     async def import_aop(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
         require_admin(user)
@@ -1454,8 +1464,9 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
                                          "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}, "actuals": len(res.actuals)})
         await write_audit(db, entity_type="aop_import", entity_id="aop", action="import", user=user,
                           field_changes={"file": file.filename, "actuals": len(res.actuals)})
+        projects = await sync_portal_projects(user)
         return {"meta": m, "warnings": res.warnings, "counts": {k: len(v["rows"]) for k, v in res.datasets.items()},
-                "actuals": len(res.actuals)}
+                "actuals": len(res.actuals), "projects": projects}
 
     @r.post("/import/opex-workbook")
     async def import_opex(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
@@ -1649,8 +1660,9 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         await bump_version()
         meta = {k: v for k, v in res.meta.items() if k != "check"}
         await log_import("reporting_package", file, user, meta, {"actuals": len(periods) and sum(res.meta.get("by_block", {}).values())})
+        projects = await sync_portal_projects(user)
         return {"meta": res.meta, "periods": periods, "pax_rows": len(pax),
-                "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}}
+                "counts": {k: len(v["rows"]) for k, v in res.datasets.items()}, "projects": projects}
 
     @r.post("/import/project-health")
     async def import_projects(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
@@ -1666,7 +1678,8 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
             n += r0.matched_count
         await bump_version()
         await log_import("project_health", file, user, {"projects": len(info), "matched": n})
-        return {"projects": len(info), "matched": n}
+        synced = await sync_portal_projects(user)
+        return {"projects": len(info), "matched": n, "synced": synced}
 
     @r.get("/imports")
     async def imports(user: dict = Depends(get_current_user)):
@@ -1853,6 +1866,70 @@ def build_router(db, get_current_user, write_audit, gen_id, storage=None) -> API
         out = mis.regional_pnl(data, actuals, cfg, payroll_ok)
         out["meta"] = {"base_fy": cfg["base_fy"], "plan_fy": cfg["plan_fy"], "draft_fy": cfg["draft_fy"], "cutoffs": cfg["cutoffs"]}
         return out
+
+    # ------------------------------------------------------------------ Projects section: AOP / package projects
+    @r.post("/projects/sync")
+    async def projects_sync(user: dict = Depends(get_current_user)):
+        """Bring the AOP / package projects into the Projects section (creates the missing ones, links the rest).
+        Admins, and roles with edit rights on Projects."""
+        resolved = await resolve_permissions(db, user)
+        if not (resolved["is_admin"] or resolved["permissions"]["projects"]["can_edit"]):
+            raise HTTPException(403, "Not allowed")
+        data, actuals, _ = await load_all()
+        return await portal.sync_projects(db, data, actuals, user.get("email"))
+
+    @r.get("/projects/summary")
+    async def projects_summary(user: dict = Depends(get_current_user)):
+        """AOP / actual figures of every AOP-linked project, keyed by the portal project id (the Projects list)."""
+        resolved = await resolve_permissions(db, user)
+        if not (resolved["is_admin"] or resolved["permissions"]["projects"]["can_view"]):
+            raise HTTPException(403, "Not allowed")
+        projects = [x async for x in db.projects.find({"aop_project_id": {"$exists": True, "$ne": None}},
+                                                      {"_id": 0, "id": 1, "aop_project_id": 1, "project_name": 1})]
+        p = await perms_for(user)
+        data, actuals, cfg = await load_all()
+        return {"plan_fy": cfg["plan_fy"], "cutoff": (cfg.get("cutoffs") or {}).get("default"),
+                "projects": portal.projects_summary(data, actuals, mis_cfg(cfg), projects, payroll_visible(p))}
+
+    @r.get("/projects/{pid}/financials")
+    async def project_financials(pid: str, user: dict = Depends(get_current_user)):
+        """A project's AOP, actual and actual + forecast by month (revenue, TP opex, resource cost, gross margin)."""
+        resolved = await resolve_permissions(db, user)
+        if not (resolved["is_admin"] or resolved["permissions"]["projects"]["can_view"]):
+            raise HTTPException(403, "Not allowed")
+        proj = await db.projects.find_one({"id": pid}, {"_id": 0})
+        if not proj:
+            raise HTTPException(404, "Project not found")
+        p = await perms_for(user)
+        data, actuals, cfg = await load_all()
+        return portal.project_financials(data, actuals, mis_cfg(cfg), proj, payroll_visible(p))
+
+    @r.get("/mis/regional/drill")
+    async def mis_regional_drill(row: str, col: str, measure: str = "af_plan", period: str = "ytd", month: Optional[int] = None,
+                                 user: dict = Depends(get_current_user)):
+        """Double-click on a Regional P&L cell: the package rows / SAP expense lines (FBL3H) behind it."""
+        p = await perms_for(user)
+        if p["tags"]:
+            raise HTTPException(403, "The regional P&L covers all entities — your role is limited to specific airports")
+        p, _ = await pnl_guard(user, "All")
+        data, actuals, cfg = await load_all()
+        await format_guard("regional_pnl", cfg, p)
+        cfg = mis_cfg(cfg)
+        m = month if month is not None else mis.months_meta(cfg)["default_month"]
+        m = max(0, min(11, int(m)))
+        idx = list(range(12)) if period == "fy" else [m] if period == "mtd" else list(range(m + 1))
+        periods = [fy_months(cfg[k])[i] for k in ("base_fy", "plan_fy", "draft_fy") for i in idx]
+        light = {"_id": 0}
+        sap = [a async for a in db.aop_actuals.find({"source": "mis", "domain": {"$in": ["opex", "overhead"]},
+                                                     "period": {"$in": periods}}, light).limit(60000)]
+        resource = [a async for a in db.aop_actuals.find({"source": "resource", "domain": "payroll", "period": {"$in": periods}}, light)]
+        try:
+            return drill_mod.regional_cell(data, actuals, sap, resource, cfg, row=row, col=col, measure=measure, idx=idx,
+                                           payroll_visible=payroll_visible(p))
+        except drill_mod.Denied as e:
+            raise HTTPException(403, str(e))
+        except KeyError as e:
+            raise HTTPException(404, f"Unknown line, column or measure: {e}")
 
     # ------------------------------------------------------------------ MIS drill-down formats
     async def fmt_ctx(user: dict, key: str, section: str = "aop_pnl", allow_tags: bool = False):

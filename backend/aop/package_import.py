@@ -31,6 +31,8 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
+from openpyxl.utils import get_column_letter
+
 from .datasets import norm
 from .importer import Book, num
 from .periods import fy_of_period, to_period
@@ -123,13 +125,19 @@ def _vals(r, cols) -> Dict[str, float]:
     return {p: num(r[c]) * CR for c, p in cols if c < len(r) and isinstance(r[c], (int, float)) and not isinstance(r[c], bool)}
 
 
+def _refs(sheet: str, row_index: int, cols) -> Dict[str, str]:
+    """period → the package cell the amount was read from (e.g. "Project Summary!K14"; row_index is 0-based)."""
+    return {p: f"{sheet}!{get_column_letter(c + 1)}{row_index + 1}" for c, p in cols}
+
+
 class _Out:
     def __init__(self, months: Optional[set]):
         self.months = months
         self.items: List[Dict[str, Any]] = []
         self.by_block: Dict[str, float] = defaultdict(float)
 
-    def add(self, block: str, domain: str, dims: Dict[str, Any], values: Dict[str, float], qty: Optional[Dict[str, float]] = None):
+    def add(self, block: str, domain: str, dims: Dict[str, Any], values: Dict[str, float], qty: Optional[Dict[str, float]] = None,
+            refs: Optional[Dict[str, str]] = None):
         for p, v in values.items():
             if self.months is not None and p not in self.months:
                 continue
@@ -137,7 +145,7 @@ class _Out:
             if not v and not q:
                 continue
             self.items.append({"domain": domain, "period": p, "amount": v, "dims": {k: x for k, x in dims.items() if x not in (None, "")},
-                               "qty": q, "block": block})
+                               "qty": q, "block": block, "ref": (refs or {}).get(p)})
             self.by_block[block] += v
 
 
@@ -171,26 +179,26 @@ def _revenue_analysis(book: Book, plan_fy: str, out: _Out):
     for k, (hi, cols) in enumerate(secs):
         end = secs[k + 1][0] - 2 if k + 1 < len(secs) else len(rows)
         title = " ".join(_s(c) for r in rows[max(0, hi - 3):hi] for c in r if isinstance(c, str)).lower()
-        body = [r for r in rows[hi + 1:end] if len(r) > 2 and _s(r[1]) and _s(r[2])]
+        body = [(i, r) for i, r in enumerate(rows[hi + 1:end], start=hi + 1) if len(r) > 2 and _s(r[1]) and _s(r[2])]
         if "cute revenue" in title and "non" not in title:
             locs: Dict[str, Dict[str, Any]] = defaultdict(dict)
-            for r in body:
+            for i, r in body:
                 loc, typ = _s(r[1]), _s(r[2])
                 if norm(loc) in ("total", "grand total"):
                     continue
-                locs[loc][typ] = r
+                locs[loc][typ] = (i, r)
             for loc, by in locs.items():
-                split = {t: r for t, r in by.items() if norm(t) in ("domestic", "international")}
-                for typ, r in (split.items() if len(split) == 2 else [("Combined", by.get("Combined") or next(iter(by.values())))]):
+                split = {t: x for t, x in by.items() if norm(t) in ("domestic", "international")}
+                for typ, (i, r) in (split.items() if len(split) == 2 else [("Combined", by.get("Combined") or next(iter(by.values())))]):
                     out.add("CUTE revenue", "rev_cute", {"stream": "CUTE", "geo": "India", "tag": loc, "pax_type": typ,
-                                                         "source": "Revenue Analysis"}, _vals(r, cols))
+                                                         "source": "Revenue Analysis"}, _vals(r, cols), refs=_refs(sheet, i, cols))
         elif "revenue share" in title:
-            for r in body:
+            for i, r in body:
                 loc = _s(r[2])
                 if norm(loc) in ("total", "grand total") or not norm(_s(r[1])).startswith("rev"):
                     continue
                 out.add("Revenue share", "rev_share", {"stream": "Rev Share", "geo": "India", "tag": loc,
-                                                       "source": "Revenue Analysis"}, _vals(r, cols))
+                                                       "source": "Revenue Analysis"}, _vals(r, cols), refs=_refs(sheet, i, cols))
 
 
 def _noncute(book: Book, plan_fy: str, out: _Out):
@@ -202,7 +210,7 @@ def _noncute(book: Book, plan_fy: str, out: _Out):
     if not secs:
         return
     hi, cols = secs[0]
-    for r in rows[hi + 1:]:
+    for i, r in enumerate(rows[hi + 1:], start=hi + 1):
         if len(r) < 4:
             continue
         typ, loc = _s(r[2]), _s(r[3])
@@ -213,7 +221,7 @@ def _noncute(book: Book, plan_fy: str, out: _Out):
         if "non" not in norm(typ) or "cute" not in norm(typ):
             continue
         out.add("Non-CUTE revenue", "rev_noncute", {"stream": "Non-CUTE", "geo": "India", "tag": loc,
-                                                    "source": "Non Cute Full Break up"}, _vals(r, cols))
+                                                    "source": "Non Cute Full Break up"}, _vals(r, cols), refs=_refs(sheet, i, cols))
 
 
 def _cr(book: Book, plan_fy: str, out: _Out):
@@ -225,7 +233,7 @@ def _cr(book: Book, plan_fy: str, out: _Out):
     if not secs:
         return
     hi, cols = secs[0]
-    for r in rows[hi + 1:]:
+    for i, r in enumerate(rows[hi + 1:], start=hi + 1):
         if len(r) < 5:
             continue
         key, loc = _s(r[1]), _s(r[4])
@@ -238,7 +246,7 @@ def _cr(book: Book, plan_fy: str, out: _Out):
                 break
             continue
         out.add("Change request revenue", "rev_projects", {"stream": "Change Request", "geo": "India", "tag": loc,
-                                                           "source": "CR Breakup"}, _vals(r, cols))
+                                                           "source": "CR Breakup"}, _vals(r, cols), refs=_refs(sheet, i, cols))
 
 
 # ---------------------------------------------------------------------------------------------- projects
@@ -290,7 +298,7 @@ def _project_summary(book: Book, plan_fy: str, out: _Out):
     col = lambda name: next((i for k, i in head.items() if norm(k).startswith(norm(name))), None)
     c_pid, c_name, c_wbs = col("Project ID"), col("Project Name"), col("WBS")
     c_region, c_geo, c_gmr = col("Geography"), col("India"), col("GMR")
-    for r in rows[hi + 1:]:
+    for i, r in enumerate(rows[hi + 1:], start=hi + 1):
         name = _s(r[c_name]) if c_name is not None and c_name < len(r) else ""
         if not name or norm(name) in ("total", "grand total"):
             continue
@@ -303,10 +311,13 @@ def _project_summary(book: Book, plan_fy: str, out: _Out):
                 "region": (_s(r[c_region]) if c_region is not None and c_region < len(r) else "") or t.get("region"),
                 "wbs": (_s(r[c_wbs]) if c_wbs is not None and c_wbs < len(r) else "") or t.get("wbs"),
                 "gmr": gmr or None, "source": "Project Summary"}
-        out.add("Project revenue", "rev_projects", {**dims, "stream": "Projects"}, _vals(r, blocks["rev"]))
-        out.add("Opex — Projects", "opex", {**dims, "category": "Projects"}, _vals(r, blocks["opex"]))
+        out.add("Project revenue", "rev_projects", {**dims, "stream": "Projects"}, _vals(r, blocks["rev"]),
+                refs=_refs(sheet, i, blocks["rev"]))
+        out.add("Opex — Projects", "opex", {**dims, "category": "Projects"}, _vals(r, blocks["opex"]),
+                refs=_refs(sheet, i, blocks["opex"]))
         out.add("Employee cost — direct Projects", "payroll",
-                {**dims, "category": "Projects", "project_code": pid or None}, _vals(r, blocks["res"]))
+                {**dims, "category": "Projects", "project_code": pid or None}, _vals(r, blocks["res"]),
+                refs=_refs(sheet, i, blocks["res"]))
 
 
 # ---------------------------------------------------------------------------------------------- CA+CR costs
@@ -320,6 +331,7 @@ def _airport_costs(book: Book, plan_fy: str, out: _Out, fte: Dict[str, Dict[str,
     rows = book.rows(sheet, max_col=60, max_row=120)
     alloc: Dict[str, float] = {}
     blocks: Dict[str, Dict[str, Dict[str, float]]] = defaultdict(dict)
+    block_refs: Dict[str, Dict[str, Dict[str, str]]] = defaultdict(dict)
     block, cols = None, []
     for i, r in enumerate(rows):
         text = " ".join(_s(c) for c in r if isinstance(c, str)).lower()
@@ -348,19 +360,25 @@ def _airport_costs(book: Book, plan_fy: str, out: _Out, fte: Dict[str, Dict[str,
         loc = _s(r[2])
         if not loc or not isinstance(r[2], str) or norm(loc) in ("total", "grand total"):
             continue
-        blocks[block][loc.upper() if loc.upper() in AIRPORTS else "Shared services"] = _vals(r, cols)
+        slot = loc.upper() if loc.upper() in AIRPORTS else "Shared services"
+        blocks[block][slot] = _vals(r, cols)
+        block_refs[block][slot] = _refs(sheet, i, cols)
     for block, by in blocks.items():
         shared = by.get("Shared services", {})
         for tag, v in by.items():
+            refs = dict(block_refs[block].get(tag, {}))
             if tag != "Shared services":
                 v = {p: x - shared.get(p, 0.0) * alloc.get(tag, 0.0) for p, x in v.items()}
+                srefs = block_refs[block].get("Shared services", {})
+                refs = {p: f"{ref} − {srefs[p].split('!')[-1]} × {alloc.get(tag, 0.0):.3f}" if p in srefs and alloc.get(tag) else ref
+                        for p, ref in refs.items()}
             if block == "opex_ca":
-                out.add("Opex — CA", "opex", {"category": "CA", "geo": "India", "tag": tag, "source": "Opex & Dir Resource"}, v)
+                out.add("Opex — CA", "opex", {"category": "CA", "geo": "India", "tag": tag, "source": "Opex & Dir Resource"}, v, refs=refs)
             elif block == "opex_cr":
-                out.add("Opex — CR", "opex", {"category": "Change Request", "geo": "India", "tag": tag, "source": "Opex & Dir Resource"}, v)
+                out.add("Opex — CR", "opex", {"category": "Change Request", "geo": "India", "tag": tag, "source": "Opex & Dir Resource"}, v, refs=refs)
             elif block == "res":
                 out.add("Employee cost — direct CA+CR", "payroll",
-                        {"category": "CA", "geo": "India", "tag": tag, "source": "Opex & Dir Resource"}, v, qty=fte.get(tag))
+                        {"category": "CA", "geo": "India", "tag": tag, "source": "Opex & Dir Resource"}, v, qty=fte.get(tag), refs=refs)
 
 
 def _resource_raw(book: Book, plan_fy: str, out: _Out) -> Dict[str, Dict[str, float]]:
@@ -377,7 +395,7 @@ def _resource_raw(book: Book, plan_fy: str, out: _Out) -> Dict[str, Dict[str, fl
     cost_cols = runs[0] if runs else []
     fte_cols = runs[1] if len(runs) > 1 else []
     section, seg = None, None
-    for r in rows[hi + 1:]:
+    for ri, r in enumerate(rows[hi + 1:], start=hi + 1):
         if len(r) < 4:
             continue
         label = norm(_s(r[3]))
@@ -408,7 +426,8 @@ def _resource_raw(book: Book, plan_fy: str, out: _Out) -> Dict[str, Dict[str, fl
             out.add("Employee cost — indirect", "payroll",
                     {"category": "Overheads", "tag": dept, "segment": seg, "function": leaf,
                      "geo": "International" if key in INTERNATIONAL_RES else "India", "source": "Resource Cost Raw"},
-                    {p: num(r[c]) * CR for c, p in cost_cols if c < len(r) and isinstance(r[c], (int, float))}, qty=fte)
+                    {p: num(r[c]) * CR for c, p in cost_cols if c < len(r) and isinstance(r[c], (int, float))}, qty=fte,
+                    refs=_refs(sheet, ri, cost_cols))
     return fte_ca
 
 
@@ -430,7 +449,8 @@ def _overheads(book: Book, plan_fy: str, out: _Out):
             continue
         out.add("Overheads (SG&A)", "overhead",
                 {"pl_tag": OH_TP.get(norm(dept), dept), "segment": "Solutions" if norm(seg) == "solutions" else "CA+CR",
-                 "nature": dept, "department": dept, "geo": "India", "source": "OH Summary_Dept"}, _vals(r, cols))
+                 "nature": dept, "department": dept, "geo": "India", "source": "OH Summary_Dept"}, _vals(r, cols),
+                refs=_refs(sheet, i, cols))
 
 
 # ---------------------------------------------------------------------------------------------- below EBITDA
@@ -446,7 +466,8 @@ def _pl_sheet(book: Book, plan_fy: str, out: _Out) -> Dict[str, Dict[str, float]
         return check
     cols = _date_cols(rows[hi], plan_fy)
     lines: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    for r in rows[hi + 1:]:
+    line_refs: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+    for ri, r in enumerate(rows[hi + 1:], start=hi + 1):
         lab = norm(_s(r[1]) if len(r) > 1 else "")
         if not lab:
             continue
@@ -458,9 +479,13 @@ def _pl_sheet(book: Book, plan_fy: str, out: _Out) -> Dict[str, Dict[str, float]
             if lab.startswith(needle):
                 for p, v in vals.items():
                     lines[line][p] += v
+                for p, ref in _refs(sheet, ri, cols).items():
+                    if p in vals:
+                        line_refs[line][p].append(ref)
                 break
     for line, vals in lines.items():
-        out.add("Below EBITDA", "pl_other", {"line": line, "source": "P&L"}, dict(vals))
+        out.add("Below EBITDA", "pl_other", {"line": line, "source": "P&L"}, dict(vals),
+                refs={p: " + ".join([x.split("!")[-1] if k else x for k, x in enumerate(rs)]) for p, rs in line_refs[line].items()})
     return check
 
 

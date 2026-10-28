@@ -1,20 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
-import { DownloadSimple, ArrowClockwise, Info, LockSimple, GearSix, ArrowCounterClockwise } from "@phosphor-icons/react";
+import { DownloadSimple, ArrowClockwise, Info, LockSimple, GearSix, ArrowCounterClockwise, MagnifyingGlass } from "@phosphor-icons/react";
 import { fmtAmount, fmtPct, unitDiv, unitLabel } from "./format";
 import { agg, useTree, csvDownload, usePref, periodPrefix, usePagePeriod } from "./mis";
-import { TreeLabel, ExpandButtons, PeriodPicker, Popover } from "./MisCommon";
+import { TreeLabel, ExpandButtons, PeriodPicker, Popover, MisModal } from "./MisCommon";
+import RegionalDrill from "./RegionalDrill";
 import { SharedDefault } from "./GridSettings";
 import { useAuth } from "@/lib/auth";
 
 const DEFAULTS = { measure: "af_plan", period: "fy", month: null, subs: true };
 
-/** Regional P&L — Solutions (MIS slide 5b): India, International and its regions, Total. */
-export default function RegionalPnL({ unit, onDrill }) {
+/**
+ * Regional P&L — Solutions (MIS slide 5b): India, International and its regions, Total.
+ * Double-click any figure: revenue opens the package rows behind it, an expense opens the SAP expense dump (FBL3H) lines.
+ */
+export default function RegionalPnL({ unit }) {
   const [pref, setPref, resetPref, sharedPref] = usePref("aop_mis_regional_v1", DEFAULTS);
   const { user } = useAuth() || {};
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
+  const [drill, setDrill] = useState(null); // { row, col } of the cell double-clicked
   const load = () => {
     setErr("");
     api.get("/aop/mis/regional").then((r) => setData(r.data)).catch((e) => setErr(e.response?.data?.detail || e.message));
@@ -85,14 +90,15 @@ export default function RegionalPnL({ unit, onDrill }) {
               <tbody>
                 {rows.filter(tree.visible).map((r) => {
                   const d = tree.depth(r.id);
+                  const open = (col) => !r.masked && setDrill({ row: r.id, col });
                   return (
-                    <tr key={r.id} className={`${r.key ? "key" : r.kind === "subtotal" ? "sub" : ""} ${d ? "child" : ""} ${r.kind === "pct" ? "pct" : ""} ${onDrill && ["rev", "gm", "direct"].includes(r.id) ? "dbl" : ""}`}
-                        onDoubleClick={onDrill && ["rev", "gm", "direct"].includes(r.id) ? () => onDrill("project_health", {}, "Project health") : undefined}
+                    <tr key={r.id} className={`${r.key ? "key" : r.kind === "subtotal" ? "sub" : ""} ${d ? "child" : ""} ${r.kind === "pct" ? "pct" : ""} ${r.masked ? "" : "dbl"}`}
                         data-testid={`reg-row-${r.id}`}>
-                      <td className="lbl"><TreeLabel row={r} tree={tree} depth={d} /></td>
+                      <td className="lbl" onDoubleClick={() => open("total")} title={r.masked ? undefined : "Double-click for the detail behind this line"}><TreeLabel row={r} tree={tree} depth={d} /></td>
                       {cols.map((c) => {
                         const v = val(r, c.key);
-                        return <td key={c.key} className={`num ${c.key === "total" ? "v-tot gl" : c.key === "intl" || c.key === "india" ? "gl" : ""} ${typeof v === "number" && v < 0 && r.kind !== "pct" ? "neg" : ""}`}>{show(r, v)}</td>;
+                        return <td key={c.key} onDoubleClick={() => open(c.key)} data-testid={`reg-cell-${r.id}-${c.key}`}
+                                   className={`num ${c.key === "total" ? "v-tot gl" : c.key === "intl" || c.key === "india" ? "gl" : ""} ${typeof v === "number" && v < 0 && r.kind !== "pct" ? "neg" : ""}`}>{show(r, v)}</td>;
                       })}
                     </tr>
                   );
@@ -102,9 +108,17 @@ export default function RegionalPnL({ unit, onDrill }) {
           </div>
           <div className="text-[10.5px] text-[var(--muted)] flex items-center gap-3 flex-wrap">
             <span className="flex items-center gap-1"><Info size={11} /> Directly attributable expenses are charged to the respective region; common expenses are apportioned across regions in proportion to revenue.</span>
+            <span className="flex items-center gap-1"><MagnifyingGlass size={11} /> Double-click a figure: revenue opens the package rows behind it, an expense opens the SAP expense dump (FBL3H) lines.</span>
             {rows.some((r) => r.masked) && <span className="flex items-center gap-1"><LockSimple size={11} /> Payroll lines are confidential for your role.</span>}
           </div>
         </>
+      )}
+      {drill && (
+        <MisModal title={`${byId[drill.row]?.label} · ${cols.find((c) => c.key === drill.col)?.label || ""} — what is behind it`}
+                  onClose={() => setDrill(null)} testid="regional-drill-modal">
+          <RegionalDrill row={drill.row} col={drill.col} measure={measure?.key} period={per.period} month={month}
+                         onOpenRow={(id) => setDrill((d) => ({ ...d, row: id }))} />
+        </MisModal>
       )}
     </div>
   );

@@ -259,6 +259,17 @@ class ProjectIn(BaseModel):
     strategic_deal: bool = False
     finance_spoc_email: Optional[str] = None
     pipeline_id: Optional[str] = None  # link back to originating pipeline opportunity
+    # customer agreement — filled in as and when the agreement is available
+    agreement_number: Optional[str] = None
+    agreement_date: Optional[str] = None
+    agreement_valid_till: Optional[str] = None
+    agreement_value: float = 0.0
+    # link to the AOP / reporting-package project this page reads its AOP and actual figures from (set by the sync)
+    aop_project_id: Optional[str] = None
+    aop_tag: Optional[str] = None
+    aop_status: Optional[str] = None
+    aop_synced_at: Optional[str] = None
+    source: Optional[str] = None  # "aop" for projects created from the AOP / package
 
 
 class ProjectOut(ProjectIn):

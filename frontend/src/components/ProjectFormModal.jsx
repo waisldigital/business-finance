@@ -5,6 +5,7 @@ import Modal from "@/components/common/Modal";
 
 const empty = {
   project_name: "", wbs_element: "", customer_po_number: "", po_date: "",
+  agreement_number: "", agreement_date: "", agreement_valid_till: "", agreement_value: 0,
   start_date: "", end_date: "", billing_type: "Monthly",
   customer_id: "", description: "", currency: "INR",
   po_value: 0, revenue_total: 0, cost_total: 0,
@@ -171,6 +172,7 @@ export default function ProjectFormModal({ project, customers: initialCustomers,
       const payload = {
         ...form,
         po_value: Number(form.po_value || 0),
+        agreement_value: Number(form.agreement_value || 0),
         revenue_total: Number(form.revenue_total || 0),
         cost_total: Number(form.cost_total || 0),
         milestones: (form.milestones || []).map((m) => ({
@@ -323,6 +325,10 @@ export default function ProjectFormModal({ project, customers: initialCustomers,
           </Field>
 
           <Field label="PO Date *" required><input type="date" className="input" value={form.po_date || ""} onChange={(e) => set("po_date", e.target.value)} /></Field>
+          <Field label="Agreement Number"><input className="input" value={form.agreement_number || ""} onChange={(e) => set("agreement_number", e.target.value)} data-testid="form-agreement-number" /></Field>
+          <Field label="Agreement Date"><input type="date" className="input" value={form.agreement_date || ""} onChange={(e) => set("agreement_date", e.target.value)} /></Field>
+          <Field label="Agreement Valid Till"><input type="date" className="input" value={form.agreement_valid_till || ""} onChange={(e) => set("agreement_valid_till", e.target.value)} /></Field>
+          <Field label="Agreement Value (₹)"><input type="number" className="input font-mono" value={form.agreement_value || 0} onChange={(e) => set("agreement_value", e.target.value)} /></Field>
           <Field label="Start Date *" required><input type="date" className="input" value={form.start_date || ""} onChange={(e) => set("start_date", e.target.value)} /></Field>
           <Field label="End Date *" required><input type="date" className="input" value={form.end_date || ""} onChange={(e) => set("end_date", e.target.value)} /></Field>
           <Field label="Billing Type *" required>

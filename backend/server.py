@@ -1311,6 +1311,22 @@ async def delete_supplier(sid: str, user: dict = Depends(require_role("admin")))
 # ============================================================
 # PROJECTS
 # ============================================================
+AOP_LINK_FIELDS = ("aop_project_id", "aop_tag", "aop_status", "aop_synced_at", "source")
+
+# the documents a project collects over its life — each has a slot on the Documents tab, filled as and when available
+PROJECT_DOC_TYPES = [
+    ("agreement", "Customer agreement / contract"), ("customer_po", "Customer PO"), ("loi", "LOI / work order / award letter"),
+    ("deal_pnl", "Deal P&L / approval note"), ("vendor_po", "Vendor PO(s)"), ("scope", "Scope of work / SLA"),
+    ("billing", "Billing schedule / milestone plan"), ("bg", "Bank guarantee / performance security"),
+    ("handover", "Completion / handover certificate"), ("other", "Other"),
+]
+
+
+@api.get("/projects/document-types")
+async def project_document_types(_: dict = Depends(require_section("projects"))):
+    return [{"key": k, "label": v} for k, v in PROJECT_DOC_TYPES]
+
+
 @api.get("/projects", response_model=List[ProjectOut])
 async def list_projects(
     stage: Optional[str] = None,
@@ -1449,6 +1465,8 @@ async def update_project(pid: str, payload: ProjectIn, user: dict = Depends(requ
     if not existing:
         raise HTTPException(404, "Not found")
     updates = payload.model_dump()
+    for k in AOP_LINK_FIELDS:  # set by the AOP sync, never by the form
+        updates[k] = existing.get(k)
     margin = compute_margin(updates.get("po_value", 0), updates.get("revenue_total", 0), updates.get("cost_total", 0))
     updates["margin_total"] = margin["margin_total"]
     updates["margin_pct"] = margin["margin_pct"]
@@ -2354,6 +2372,7 @@ async def upload_document(
     pid: str,
     file: UploadFile = File(...),
     name: str = Query(..., min_length=1, description="Document display name (required)"),
+    doc_type: str = Query("other", description="Which slot of the project's document checklist this fills"),
     parse: bool = Query(False),
     apply_extracted: bool = Query(False),
     user: dict = Depends(require_section("projects", "edit")),
@@ -2364,6 +2383,8 @@ async def upload_document(
 
     if not (name or "").strip():
         raise HTTPException(400, "Document name is required")
+    if doc_type not in {k for k, _ in PROJECT_DOC_TYPES}:
+        raise HTTPException(400, "Unknown document type")
 
     contents = await file.read()
     doc_id = gen_id()
@@ -2383,6 +2404,7 @@ async def upload_document(
         "id": doc_id,
         "project_id": pid,
         "name": name.strip(),
+        "doc_type": doc_type,
         "file_name": safe_name,
         "size": len(contents),
         "content_type": file.content_type or "application/octet-stream",

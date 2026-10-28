@@ -111,8 +111,61 @@ One upload per source; each replaces only the months it contains and moves the a
 | --- | --- |
 | MIS working file (SAP_Revenue, SAP_Expense, Mapping) | Revenue, revenue share, opex, overheads, finance cost / other income — line by line (raw-data drill-downs) |
 | Resource cost file (Final Resource Cost) | Payroll cost by airport / project / department, FTE and headcount |
-| Reporting package (Revenue Analysis, CAPEX Tracker) | Actual billable PAX (CUTE drivers) and the capex tracker |
+| Reporting package (the MIS workbook) | The plan year's P&L actuals for its closed months (every block), actual billable PAX (CUTE drivers) and the capex tracker — see below |
 | Project health tracker | TCV, customer, sales owner and status on the project master |
+
+### Reporting package: tabs read and what must not change
+
+The package is the reconciled MIS: for the months it flags **Act** it is the actual source of every report (the SAP dump and
+resource file stay as the line-level drill-downs). It replaces only its own rows for the months in the file, so re-uploading a
+month-end file is safe, and it moves the actual cut-off to the last closed month. After an upload the new / linked Solutions
+projects appear in **Projects** (see below), and **Admin → Imports** shows the reconciliation against the package's own P&L tab —
+any month / line off by more than ₹0.05 Cr is listed there as "Differs from the package's P&L sheet".
+
+| Tab (matched by name, case and spacing ignored) | What is read | Layout it relies on |
+| --- | --- | --- |
+| **Revenue Analysis** | §A CUTE revenue (airport × PAX type) · §E revenue share (location) · §B billable PAX (actual PAX → CUTE drivers) · which months are Act | Section titles contain "CUTE REVENUE", "Revenue Share" and "BILLABLE PAX COUNT"; location in column B, PAX type in column C; first 80 rows (§B within the first 60) |
+| **Non Cute Full Break up** | Non-CUTE revenue by location | Rows typed "Non - CUTE" (column C), location in column D; ends at the "Total" row |
+| **CR Breakup** | Change-request revenue by location | Key in column B starting "Change request", location in column E; ends at "Total" |
+| **Project Summary** | Per project: Revenue, Opex and Direct Resource by month | Header row (within the first 12 rows) holds "Project Name"; the group labels two rows above start with "Revenue", "Opex" and "…Resource…"; columns headed Project ID, Project Name, WBS, Geography/Region, India/International, GMR |
+| **Rev_Project_Raw data** *(optional)* | Project → reporting tag, P&L head (India / International), P&L region, WBS | Headers Project ID, For P&L Filter(Reporting Tag), P&L Head, P&L Region, WBS Code |
+| **Opex & Dir Resource Airportwsie** | Opex by airport (CA "Without CR", "CR Only"), direct resource cost, shared-service allocation % | Block labels "Without CR", "CR Only", "Resource cost … Direct", "Allocation"; airport in column C; a "Shared services" row |
+| **Resource Cost Raw** | Indirect resource cost + FTE (enabling → CA+CR, pursuit → Solutions), direct FTE by airport | Header row with the 12 plan-year months twice — **cost (₹ Cr) block first, FTE block second**; labels in column D: Total Direct, Operations, Total Indirect, Enabling…, Pursuit…, Total Capitalised |
+| **OH Summary_Dept** | Overheads by department × segment | Segment (CA+CR / Solutions) in column D, department in column E |
+| **P&L** | Depreciation, finance cost (+ prior period), other income, tax / deferred tax; and the check totals | Labels in column B ("Revenue from Operations", "O/M cost", "Employee cost", "Revenue Share", "Overheads", "EBITDA", "Depreciation", "Interest & Finance cost", "Other Income", "Tax"); first 40 rows / 20 columns |
+| **CAPEX Tracker** | Capex tracker: location, project, phase, budgets, open PO / PR, monthly actuals | Header row (first 6 rows) with Location and Project / Initiative; Phase, Initial Budget, CAPEX till FY'26, AOP FY'27, Open PO, Open PR |
+
+Do not change, in the file you upload:
+
+* **Tab names** — a renamed or missing tab is skipped silently (its block then keeps the SAP dump / AOP phasing); the reconciliation
+  against the P&L tab is where it shows up (if the P&L tab itself is renamed, there is no check).
+* **The Act / Fct flag row** directly above each month header (one or two rows above), and the **month headers** (real dates or
+  `YYYY-MM`). Only months flagged **Act** are loaded; flip a month to Act only once it is closed — it moves the actual cut-off.
+  Keep the plan year's twelve months as adjacent columns and add no extra date headers between them.
+* **The key labels and column positions** in the table above (section titles, "Total" rows that end a block, "Shared services",
+  the airport names DIAL / GHIAL / GGIAL / GVIAL, department and segment names) and the **units — ₹ Crore** throughout.
+* **Values, not formulas without a saved result**: the file is read for its stored values, so open it in Excel, let it recalculate
+  and save before uploading. Text in a number cell is ignored.
+* **The financial year**: the file must carry the app's plan year (Admin → Plan settings); months of another year are ignored.
+
+Adding rows (a new project, airport or department) is fine as long as they sit inside the existing blocks above the "Total" row.
+
+### Projects section
+
+The Solutions projects in the AOP workbook (CR & project master, project revenue) and the package (Project Summary) are brought
+into **Projects** automatically after the AOP workbook, package or project-health uploads (and by **Projects → Sync from AOP**).
+The sync creates a project the first time, links an existing one (same AOP project id, WBS or name) and fills only fields that are
+still empty — it never overwrites what a user typed. Each linked project has a **Financials** tab (AOP vs actual by month: revenue,
+TP opex, direct resource cost, gross margin — same numbers as Project health and the Regional P&L), the agreement and customer PO
+fields, and a **document checklist** (agreement, customer PO, LOI, deal P&L, vendor POs, SOW / SLA, billing schedule, bank
+guarantee, handover certificate) to fill as the documents become available.
+
+### Regional P&L drill-down
+
+Double-click any figure of the Regional P&L: revenue opens the package rows behind it (with the package cell each month was read
+from — re-upload the package once to record the cells), an expense opens the SAP expense dump (FBL3H lines of the MIS working file)
+that the report's rules assign to that region and period, and shared overheads show the department total and the allocation
+rule that turns it into the cell.
 
 Depreciation and tax stay on the AOP phasing (tax = rate × PBT) until an actual is loaded for the month (Data manager → Actuals).
 Bulk upload / download of a dataset is open to admins and to roles given "Upload (bulk)" on that section (Roles).
